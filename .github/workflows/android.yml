@@ -1,0 +1,54 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build the small web files
+        run: npm run build:web
+
+      - name: Create the Android project
+        run: npx cap add android
+
+      - name: Apply icons
+        run: bash scripts/apply-icons.sh
+
+      - name: Add notification permissions and icon
+        run: bash scripts/android-setup.sh
+
+      - name: Add the home-screen widget
+        run: bash scripts/android-widget.sh
+
+      - name: Copy the web app into Android
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: barnameyar-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
