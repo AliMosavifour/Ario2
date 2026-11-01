@@ -23,6 +23,18 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Fix file layout (move web files into www)
+        run: |
+          mkdir -p www/img www/js www/css www/fonts www/lib
+          for d in css fonts js lib; do
+            if [ -d "$d" ]; then cp -r "$d"/. "www/$d"/; fi
+          done
+          for f in *.webp; do
+            if [ -f "$f" ]; then cp -f "$f" www/img/; fi
+          done
+          if [ -f index.html ]; then cp -f index.html www/index.html; fi
+          ls www
+
       - name: Build the small web files
         run: npm run build:web
 
