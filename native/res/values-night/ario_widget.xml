@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ario_bg">#171A2A</color>
+    <color name="ario_fg">#F1F3FA</color>
+    <color name="ario_accent">#4C9BFF</color>
+    <color name="ario_bad">#FF6259</color>
+</resources>

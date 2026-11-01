@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ario_widget_desc">کارهای امروز و پیشرفت روزانه</string>
+    <color name="ario_bg">#F4F6FF</color>
+    <color name="ario_fg">#0F1320</color>
+    <color name="ario_accent">#0A7AFF</color>
+    <color name="ario_bad">#E5322A</color>
+</resources>
