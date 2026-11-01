@@ -1,0 +1,14 @@
+{
+  "appId": "app.barnameyar",
+  "appName": "Ario",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#E8EDF8"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_barnameyar",
+      "iconColor": "#3D63F0"
+    }
+  }
+}

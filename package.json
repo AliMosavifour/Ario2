@@ -1,0 +1,26 @@
+{
+  "name": "barnameyar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ario - برنامه‌ریز روزانه فارسی",
+  "scripts": {
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android",
+    "build:web": "bash scripts/build-web.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/local-notifications": "^6.1.0",
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/share": "^6.0.0",
+    "@capacitor-community/speech-recognition": "^6.0.1",
+    "tesseract.js": "^5.1.1",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "esbuild": "^0.28.2"
+  }
+}
