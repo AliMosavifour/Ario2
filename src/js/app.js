@@ -799,6 +799,7 @@ window.addEventListener('popstate',function(){
   if(typeof kcpvClose==='function'&&kcpvClose())return;
   if(typeof tourEnd==='function'&&tourEnd())return;
   if(ui.tab==='account'&&ui.accPage){ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;if(accDepth>0)accDepth--;render('enter');window.scrollTo(0,0);return}
+  if(ui.tab==='kcm'&&ui.mcl){mcBackA();return}
   if(ui.tab==='kcm'&&ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='kcm'){ui.tab='coach';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='rk'||ui.tab==='tb'||ui.tab==='coach'){ui.tab='kk';render('enter');window.scrollTo(0,0);return}
@@ -911,6 +912,7 @@ function viewFail(e){
 }
 function render(mode){
   var h;
+  if(ui.tab!=='kcm'&&ui.mcl){mcStop();ui.mcl=''}
   try{h=ui.tab==='char'?viewChar():ui.tab==='today'?viewToday():ui.tab==='week'?viewWeek():ui.tab==='kk'?viewKK():ui.tab==='rk'?viewRK():ui.tab==='coach'?viewCoach():ui.tab==='kcm'?viewKcm():ui.tab==='tb'?viewTB():ui.tab==='stats'?viewStats():ui.tab==='account'?viewAccount():viewLists()}
   catch(e){h=viewFail(e)}
   var v=$('#view');
@@ -935,6 +937,8 @@ function render(mode){
   qaPreview();
   if(ui.tab==='tb')tbFill();
   if(ui.tab==='kcm'&&ui.kcsec){kcxInit();unClear(ui.kcsec)}
+  else if(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*')mcInit();
+  else if(ui.tab==='coach'||ui.tab==='kcm'&&ui.mcl==='*')mcRefresh();
   unPaint();
   if(pkFirst&&ui.tab==='today'&&document.querySelector('.hbpw')){pkFirst=false;clearTimeout(pkWaveT);pkWaveT=setTimeout(pkWaveA,1200)}
 }
@@ -8282,7 +8286,8 @@ function kcMotHTML(a){
 /* the smart coach is a normal page (like rank estimate), not a pop-up window */
 function viewCoach(){
   var b=kcBuild();
-  return head('از گزارش‌ها و ساعت‌هایت','مربی هوشمند',{back:1,backAct:'kcBack',backTxt:'کنکوریا'})+'<button type="button" class="wrcard glass kc-big" data-act="kcAdv"><span class="ib" style="background:linear-gradient(145deg,#34d399,#0f9d74)">'+icon('chat')+'</span><div><b>من و مشاور</b><small>گفتگو با مشاور · برنامه مطالعاتی · گزارش‌کار شبانه · انگیزشی · فعالیت</small></div></button>'+
+  return head('از گزارش‌ها و ساعت‌هایت','مربی هوشمند',{back:1,backAct:'kcBack',backTxt:'کنکوریا'})+'<button type="button" class="wrcard glass kc-big" data-act="kcAdv"><span class="ib" style="background:linear-gradient(145deg,#34d399,#0f9d74)">'+icon('chat')+'</span><div><b>'+__('من و آریو','Me & Ario')+'</b><small>'+__('گفتگو با آریو · برنامه مطالعاتی · گزارش‌کار شبانه · انگیزشی · فعالیت','Chat with Ario · study plan · night report · motivation · activity')+'</small></div></button>'+
+    '<div id="mcCardW">'+mcCardHTML()+'</div>'+
     '<div class="kc-body">'+b.st+'</div>'+b.all;
 }
 var KC_TOP=[['plan','📚','برنامه مطالعاتی','ب','#ef5b7a'],['rep','📝','گزارش‌کار شبانه','گ','#3b9bd9'],['mot','⚡','انگیزشی','ا','#f2a93b'],['act','🎯','فعالیت','ف','#8b5cf6']];
@@ -9634,9 +9639,10 @@ setInterval(function(){if(!document.hidden)kcdTick()},1000);
 function kcPinned(sec){return (kcD().pn||[]).indexOf(sec)>=0}
 function kcTopSorted(){var pn=kcD().pn||[];return KC_TOP.slice().sort(function(x,y){var a=pn.indexOf(x[0]),b=pn.indexOf(y[0]);if(a<0&&b<0)return 0;if(a<0)return 1;if(b<0)return -1;return a-b})}
 function viewKcm(){
+  if(ui.mcl)return mcView();
   var b2=kcBuild(),b=b2,sec=ui.kcsec||'',a=kcPg.a;
   if(!sec){
-    return head('مربی هوشمند','من و مشاور',{back:1,backAct:'kcmBack',backTxt:'مربی هوشمند'})+kcdHTML()+'<div class="kc-topics glass">'+kcTopSorted().map(function(t){
+    return head('مربی هوشمند',__('من و آریو','Me & Ario'),{back:1,backAct:'kcmBack',backTxt:'مربی هوشمند'})+kcdHTML()+'<div class="kc-topics glass">'+kcTopSorted().map(function(t){
       return '<button type="button" class="kc-topic" data-act="kcsec" data-v="'+t[0]+'"><span class="kc-tt"><b><i class="kc-ph" style="background:'+t[4]+'">'+t[3]+'</i>'+t[2]+(kcPinned(t[0])?'<i class="kc-pnm">📌</i>':'')+'</b><small>'+kcxTime((kcLast(t[0])||{ts:Date.now()}).ts)+'</small></span><span class="kc-tpv">'+esc(kcPrev(t[0],a))+'</span></button>';
     }).join('')+'</div>';
   }
@@ -9656,10 +9662,489 @@ function viewKcm(){
 }
 function kcBackA(){subBack()}
 function kcmBackA(){if(history.state&&history.state.sub){history.back();return}if(ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}ui.tab='coach';render('enter');window.scrollTo(0,0)}
-actions.kcAdv=function(){subPush();ui.tab='kcm';ui.kcsec='';render('enter');window.scrollTo(0,0)};
+actions.kcAdv=function(){subPush();ui.tab='kcm';ui.kcsec='';ui.mcl='';render('enter');window.scrollTo(0,0)};
 actions.kcFocus=function(){var t=document.getElementById('kcxT');if(t)t.focus()};
-actions.kcsec=function(d){subPush();ui.kcsec=d.v;ui.kcq=null;render('enter');window.scrollTo(0,0)};
+actions.kcsec=function(d){subPush();ui.mcl='';ui.kcsec=d.v;ui.kcq=null;render('enter');window.scrollTo(0,0)};
 actions.kcmBack=kcmBackA;
+
+/* ---------- v277: «من و مشاور» - a real chat between a counselor and the student linked to him / her ----------
+   The first card on the smart-coach page is now «من و آریو» (the local assistant). When a counselor and a student are connected
+   (see "counselor <-> student link"), a second card «من و مشاور» appears under it: text, photos, videos, voice / round-video messages,
+   files and daily reports go through Supabase (table public.link_messages + private storage bucket "chat", see supabase/setup.sql).
+   ui.mcl: '' = closed · '*' = list of chats (more than one link) · <link id> = an open chat.
+   The open chat asks the server for new messages every few seconds; the list / card asks every ~half minute. */
+var MC={msgs:{},last:{},un:{},unT:0,poll:0,pulling:0,busy:0,lt:0,bl:{},sum:{},draft:{},tray:0,seenAt:0,tick:0};
+var MC_MAX=50*1048576;
+function mcLinks(){return cnxOn()&&CNX.uid?(CNX.links||[]).filter(function(l){return l.student_id&&(l.counselor_id===CNX.uid||l.student_id===CNX.uid)}):[]}
+function mcLink(id){return mcLinks().filter(function(l){return l.id===id})[0]||null}
+function mcCns(l){return l.counselor_id===CNX.uid}
+function mcPeer(l){return mcCns(l)?(l.student_name||__('دانش‌آموز','Student')):(l.counselor_name||__('مشاور','Advisor'))}
+function mcIni(l){return mcCns(l)?(String(mcPeer(l)).trim().charAt(0)||'د'):'م'}
+function mcTitle(){var ls=mcLinks();return ls.some(function(l){return !mcCns(l)})?__('من و مشاور','Me & my advisor'):__('من و دانش‌آموزان','Me & my students')}
+function mcNewId(){
+  try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}
+  var a=new Uint8Array(16),h;crypto.getRandomValues(a);a[6]=a[6]&15|64;a[8]=a[8]&63|128;
+  h=[].map.call(a,function(x){return (x+256).toString(16).slice(1)}).join('');
+  return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+}
+function mcMs(s){var t=Date.parse(s);return isNaN(t)?0:t}
+function mcSort(a){a.sort(function(x,y){return mcMs(x.created_at)-mcMs(y.created_at)||(x.id<y.id?-1:1)})}
+function mcUnTotal(){var n=0,k;for(k in MC.un)n+=MC.un[k]||0;return n}
+
+/* ----- storage (private bucket "chat") ----- */
+async function mcTok(){var s=sbSess();if(s&&s.exp<Date.now()/1000+60&&s.rt)s=await sbRefresh(s);return s&&s.at||''}
+function mcPathEnc(p){return String(p).split('/').map(encodeURIComponent).join('/')}
+/* nc = do not keep the file in memory afterwards (big videos / files) */
+function mcBlob(path,nc){
+  if(!path)return Promise.reject(new Error('nopath'));
+  if(MC.bl[path])return MC.bl[path];
+  var p=(async function(){
+    var t=await mcTok(),r=await fetch(SB.url+'/storage/v1/object/authenticated/chat/'+mcPathEnc(path),{headers:{apikey:SB.key,Authorization:'Bearer '+t}});
+    if(!r.ok)throw new Error('dl '+r.status);
+    var b=await r.blob();return {b:b,u:URL.createObjectURL(b)};
+  })();
+  if(!nc){MC.bl[path]=p;p.catch(function(){delete MC.bl[path]})}
+  return p;
+}
+async function mcPut(path,blob){
+  var t=await mcTok(),ty=String(blob.type||'application/octet-stream').split(';')[0]||'application/octet-stream';
+  var r=await fetch(SB.url+'/storage/v1/object/chat/'+mcPathEnc(path),{method:'POST',headers:{apikey:SB.key,Authorization:'Bearer '+t,'Content-Type':ty,'x-upsert':'false'},body:blob});
+  if(!r.ok){
+    var tx='';try{tx=await r.text()}catch(x){}
+    if(r.status===409||/duplicate|already exists/i.test(tx))return;      /* a retry after the file was already stored */
+    var e=new Error('up '+r.status+' '+tx.slice(0,80));e.st=r.status;throw e;
+  }
+}
+function mcExt(blob,name){
+  var m=/\.([a-z0-9]{1,6})$/i.exec(name||'');if(m)return m[1].toLowerCase();
+  var t=String(blob&&blob.type||'').split(';')[0],M={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov','audio/webm':'webm','audio/mp4':'m4a','audio/ogg':'ogg','application/pdf':'pdf'};
+  return M[t]||'bin';
+}
+function mcSize(n){n=+n||0;return n>=1048576?fa((Math.round(n/104857.6)/10))+' MB':fa(Math.max(1,Math.round(n/1024)))+' KB'}
+async function mcSave(blob,name){
+  var FS=capGet('Filesystem'),SH=capGet('Share');
+  if(FS&&SH){
+    try{
+      var b64=await new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(String(fr.result).split(',')[1])};fr.onerror=rej;fr.readAsDataURL(blob)});
+      var r=await FS.writeFile({path:name,data:b64,directory:'CACHE'});
+      await SH.share({title:name,url:r.uri,dialogTitle:__('ذخیره یا ارسال فایل','Save or share the file')});return;
+    }catch(e){if(/cancel/i.test(String(e&&e.message||e)))return}
+  }
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},4000);
+}
+
+/* ----- texts ----- */
+function mcPrev(m){
+  if(!m)return '';
+  var t=m.kind==='p'?'📷 '+__('عکس','Photo'):m.kind==='v'?'🎥 '+__('ویدیو','Video'):m.kind==='a'?'🎤 '+__('پیام صوتی','Voice message'):m.kind==='r'?'🎥 '+__('پیام ویدیویی','Video message'):m.kind==='f'?'📎 '+(m.mname||__('فایل','File')):m.kind==='g'?'📝 '+__('گزارش‌کار روزانه','Daily report'):String(m.body||'').replace(/\s+/g,' ').slice(0,80);
+  return (m.sender_id===CNX.uid?__('تو: ','You: '):'')+t;
+}
+function mcErrMsg(e){
+  var st=e&&e.st;
+  if(st===404||st===400&&/bucket/i.test(String(e&&e.message||'')))return __('جدول یا فضای فایل گفتگو هنوز در Supabase ساخته نشده (بخش v277 فایل supabase/setup.sql را اجرا کن).','The chat table or storage is not in Supabase yet (run the v277 block of supabase/setup.sql).');
+  if(e&&e.off)return __('اینترنت در دسترس نیست','No internet connection');
+  return __('ارسال نشد؛ دوباره امتحان کن','Not sent; try again');
+}
+
+/* ----- card on the smart-coach page and the list ----- */
+function mcCardHTML(){
+  var ls=mcLinks();if(!ls.length)return '';
+  var n=mcUnTotal(),st=ls.some(function(l){return !mcCns(l)});
+  return '<button type="button" class="wrcard glass kc-big mc-card" data-act="mcCard"><span class="ib" style="background:linear-gradient(145deg,#38bdf8,#2563eb)">'+icon('user')+'</span><div><b>'+mcTitle()+'</b><small>'+(st?__('گفتگو با مشاورت · پیام، عکس، ویدیو، پیام صوتی، فایل و گزارش‌کار','Chat with your advisor · messages, photos, videos, voice, files and reports'):__('گفتگو با دانش‌آموزانت · پیام، عکس، ویدیو، پیام صوتی، فایل و گزارش‌کار','Chat with your students · messages, photos, videos, voice, files and reports'))+'</small></div>'+(n?'<span class="un-b" role="status">'+fa(n>99?99:n)+'</span>':'')+'</button>';
+}
+function mcCardPaint(){
+  var w=document.getElementById('mcCardW');if(w)w.innerHTML=mcCardHTML();
+  var l=document.getElementById('mcListW');if(l&&ui.mcl==='*')l.innerHTML=mcRowsHTML();
+}
+function mcRowsHTML(){
+  return mcLinks().map(function(l){
+    var s=MC.sum[l.id],u=MC.un[l.id]||0;
+    return '<button type="button" class="kc-topic mc-row" data-act="mcOpen" data-id="'+esc(l.id)+'"><span class="kc-tt"><b><i class="kc-ph" style="background:linear-gradient(145deg,#38bdf8,#2563eb)">'+esc(mcIni(l))+'</i>'+esc(mcPeer(l))+(u?'<span class="un-b" role="status">'+fa(u>99?99:u)+'</span>':'')+'</b><small>'+(s?kcxTime(s.created_at):'')+'</small></span><span class="kc-tpv">'+esc(s?mcPrev(s):(mcCns(l)?__('دانش‌آموز','Student'):__('مشاور','Advisor')))+'</span></button>';
+  }).join('');
+}
+function mcListView(){
+  return head(__('گفتگو','Chat'),mcTitle(),{back:1,backAct:'mcBack',backTxt:__('مربی هوشمند','Smart coach')})+'<div class="kc-topics glass" id="mcListW">'+mcRowsHTML()+'</div>';
+}
+/* asks the server who is linked and what is new; repaints the card (and the list) */
+async function mcRefresh(force){
+  if(!cnxOn()||MC.busy)return;
+  if(!force&&Date.now()-MC.lt<8000)return;
+  MC.busy=1;
+  try{
+    if(!CNX.lt||Date.now()-CNX.lt>45000){if(!(await cnxLoad()))return}
+    MC.lt=Date.now();
+    var ls=mcLinks();
+    if(!ls.length){MC.un={};MC.sum={};mcCardPaint();return}
+    var a=await cnxReq('/rest/v1/link_messages?select=id,link_id,sender_id,kind,body,mname,created_at&order=created_at.desc&limit=80'),
+        b=await cnxReq('/rest/v1/link_messages?select=link_id&seen_at=is.null&sender_id=neq.'+encodeURIComponent(CNX.uid)+'&limit=500');
+    if(a.ok&&Array.isArray(a.j)){var sm={};a.j.forEach(function(m){if(!sm[m.link_id])sm[m.link_id]=m});MC.sum=sm}
+    if(b.ok&&Array.isArray(b.j)){
+      var un={},old=mcUnTotal();
+      b.j.forEach(function(x){un[x.link_id]=(un[x.link_id]||0)+1});
+      /* the chat that is open on the screen is read at once */
+      if(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*'&&!document.hidden)delete un[ui.mcl];
+      MC.un=un;
+      var now=mcUnTotal();
+      if(MC.tick&&now>old&&!(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*'&&!document.hidden)){
+        var one=ls.filter(function(l){return un[l.id]})[0];
+        toast('💬 '+(one?mcPeer(one):__('گفتگو','Chat'))+': '+(one&&MC.sum[one.id]?mcPrev(MC.sum[one.id]).slice(0,60):__('پیام تازه','New message')),__('باز کردن','Open'),function(){if(one)mcOpenChat(one.id,ls.length>1)},'info');
+      }
+      MC.tick=1;
+    }
+    mcCardPaint();
+  }catch(e){}finally{MC.busy=0}
+}
+setInterval(function(){
+  if(document.hidden||!cnxOn())return;
+  var look=ui.tab==='coach'||(ui.tab==='kcm'&&!ui.kcsec&&(ui.mcl==='*'||!ui.mcl));
+  if(look||cnxIsStudent()||cnxIsCounselor()){if(Date.now()-MC.lt>(look?20000:60000))mcRefresh(true)}
+},10000);
+setTimeout(function(){if(cnxOn()&&(cnxIsStudent()||cnxIsCounselor()))mcRefresh(true)},7000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&cnxOn())setTimeout(function(){mcRefresh(true);if(ui.mcl&&ui.mcl!=='*')mcPull()},900)});
+
+/* ----- opening / closing ----- */
+function mcOpenChat(id,fromList){
+  subPush();ui.tab='kcm';ui.kcsec='';ui.mcl=id;ui.mcFrom=fromList?'*':'';render('enter');window.scrollTo(0,0);
+}
+actions.mcCard=function(){
+  var ls=mcLinks();if(!ls.length){mcRefresh(true);return}
+  if(ls.length===1){mcOpenChat(ls[0].id,false);return}
+  subPush();ui.tab='kcm';ui.kcsec='';ui.mcl='*';ui.mcFrom='';render('enter');window.scrollTo(0,0);
+};
+actions.mcOpen=function(d){mcOpenChat(d.id,true)};
+function mcStop(){clearInterval(MC.poll);MC.poll=0}
+function mcBackA(){
+  mcStop();
+  if(ui.mcl&&ui.mcl!=='*'&&ui.mcFrom==='*'){ui.mcl='*';ui.mcFrom=''}
+  else{ui.mcl='';ui.mcFrom='';ui.tab='coach'}
+  render('enter');window.scrollTo(0,0);
+}
+actions.mcBack=function(){if(history.state&&history.state.sub){history.back();return}mcBackA()};
+actions.mcDash=function(){var l=mcLink(ui.mcl);if(l)cdOpen(l.id)};
+
+/* ----- the open chat ----- */
+function mcView(){
+  var l=ui.mcl==='*'?null:mcLink(ui.mcl);
+  if(ui.mcl==='*')return mcListView();
+  if(!l){ui.mcl='';return '<div class="empty" style="padding:28px 18px;text-align:center"><b>'+__('گفتگو پیدا نشد','Chat not found')+'</b><p style="opacity:.7;font-size:13px">'+__('شاید ارتباط قطع شده یا هنوز بارگیری نشده است.','The link may have ended or is still loading.')+'</p><button type="button" class="tt-btn pri" data-act="mcBack">'+__('برگشت','Back')+'</button></div>'}
+  var cn=mcCns(l),clip='<svg viewBox="0 0 24 24" class="ic clip" aria-hidden="true"><path d="M20.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a1.8 1.8 0 0 1-2.5-2.5l8-8"/></svg>',
+      rep='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19M10 12.5h6M10 16h6"/></svg>';
+  return '<div class="kcx mcx" data-lk="'+esc(l.id)+'"><div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="mcBack" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button>'+
+    '<div class="kcx-pill glass"><div class="kcx-av" style="background:linear-gradient(145deg,#38bdf8,#2563eb)">'+esc(mcIni(l))+'</div><div class="kcx-ti"><b>'+esc(mcPeer(l))+'</b><small>'+(cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor'))+'</small></div></div>'+
+    (cn?'<button type="button" class="kcx-rb glass" data-act="mcDash" aria-label="'+__('داشبورد','Dashboard')+'">'+icon('stats')+'</button>':'')+'</div>'+
+    '<div class="kcx-l" id="mcL"><div class="kcx-th" id="mcTh">'+mcThreadHTML(l)+'</div></div>'+
+    '<div class="kcx-em glass" id="mcEm" aria-hidden="true"></div>'+
+    '<form class="kcx-in" id="mcF" autocomplete="off"><div class="kcx-box glass"><textarea id="mcT" rows="1" maxlength="3000" enterkeyhint="send" placeholder="'+__('پیام','Message')+'" aria-label="'+__('پیام','Message')+'"></textarea>'+
+    (cn?'':'<button type="button" class="kcx-ib" id="mcE" aria-label="'+__('ارسال گزارش‌کار','Send a daily report')+'" aria-expanded="false">'+rep+'</button>')+
+    '<button type="button" class="kcx-ib kcx-at" id="mcA" aria-label="'+__('ارسال عکس، ویدیو یا فایل','Send a photo, video or file')+'">'+clip+'</button></div>'+
+    '<button type="submit" class="kcx-s" aria-label="'+__('ارسال','Send')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 19V5"/><path d="M5.5 11.5 12 5l6.5 6.5"/></svg></button>'+vnBtnHTML('kcx-s kcx-vn')+'</form></div>';
+}
+function mcThreadHTML(l){
+  var a=MC.msgs[l.id];
+  if(!a){return '<div class="mc-ld" aria-label="'+__('در حال بارگیری','Loading')+'"><i></i><i></i><i></i></div>'}
+  if(!a.length)return '<div class="kcx-e0">'+emptyArtHTML('chat',__('هنوز پیامی نیست','No messages yet'),mcCns(l)?__('اولین پیام را برای دانش‌آموزت بنویس.','Write the first message to your student.'):__('اولین پیام را برای مشاورت بنویس.','Write the first message to your advisor.'),null,'sm')+'</div>';
+  var h='',ld='';
+  a.forEach(function(m){var dk=new Date(mcMs(m.created_at)).toDateString();if(dk!==ld){h+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(mcMs(m.created_at))+'</span></div>';ld=dk}h+=mcRow(m)});
+  return h;
+}
+function mcTk(m){return m.failed?'<i class="mc-tk bad">!</i>':m.pending?'<i class="mc-tk">…</i>':'<i class="mc-tk'+(m.seen_at?' on':'')+'">'+(m.seen_at?'✓✓':'✓')+'</i>'}
+function mcRow(m){
+  var mine=m.sender_id===CNX.uid,c=mine?'u':'a',tm=kcxTime(mcMs(m.created_at)),tt=tm+(mine?' '+mcTk(m):''),h,me=m.meta||{};
+  if(m.kind==='t')h='<div class="kcx-m '+c+'"><p dir="auto">'+esc(m.body||'').replace(/\n/g,'<br>')+'</p><time>'+tt+'</time></div>';
+  else if(m.kind==='p'||m.kind==='v'){
+    var v=m.kind==='v';
+    h='<div class="kcx-m '+c+' sp-m" data-spid="'+esc(m.id)+'" data-spk="'+m.kind+'" data-spd="'+(+me.d||0)+'"><button type="button" class="sp-pv" data-spo="'+esc(m.id)+'" aria-label="'+(v?__('پخش ویدیو','Play video'):__('دیدن عکس','View photo'))+'"><img alt="" data-spimg="'+esc(m.id)+'" draggable="false">'+(v?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button><time>'+tt+'</time></div>';
+  }
+  else if(m.kind==='a'||m.kind==='r'){
+    var vv={id:m.id,k:m.kind==='r'?'v':'a',d:+me.d||0,w:me.w,tx:me.tx||''};
+    h='<div class="kcx-m '+c+' '+vnCls(vv)+'" data-vid="'+esc(m.id)+'" data-d="'+(+vv.d||0)+'">'+vnInner(vv,tt)+'</div>';
+  }
+  else if(m.kind==='f')h='<div class="kcx-m '+c+' mc-file"><button type="button" class="mc-fb" data-mcf="'+esc(m.id)+'"><span class="mc-fi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg></span><span class="mc-ft"><b dir="auto">'+esc(m.mname||__('فایل','File'))+'</b><small>'+mcSize(m.msize)+' · '+__('ذخیره یا باز کردن','Save or open')+'</small></span></button><time>'+tt+'</time></div>';
+  else if(m.kind==='g'){
+    var nums=[];
+    if(me.sp!=null)nums.push(__('مطالعه ','Study ')+fa(Math.round(me.sp/6)/10)+__(' ساعت',' h'));
+    if(me.te)nums.push(fa(me.te)+__(' تست',' tests'));
+    if(me.tc)nums.push(fa(me.cr||0)+'/'+fa(me.tc)+__(' درست',' correct'));
+    var dl='';try{dl=F.long.format(parse(me.day))}catch(e){dl=me.day||''}
+    h='<div class="kcx-m '+c+' mc-rep"><b>📝 '+__('گزارش‌کار روزانه','Daily report')+' · '+esc(dl)+'</b>'+(nums.length?'<small>'+nums.join(' · ')+'</small>':'')+'<div class="mc-rt" dir="auto">'+esc(m.body||'').replace(/\n/g,'<br>')+'</div><button type="button" class="mc-rm" data-mcg="1">'+__('نمایش همه','Show all')+'</button><time>'+tt+'</time></div>';
+  }
+  else h='<div class="kcx-m '+c+'"><p>…</p></div>';
+  return '<div class="kcx-row'+(m.failed?' mc-failed':'')+'" data-mid="'+esc(m.id)+'" data-mine="'+(mine?1:0)+'">'+h+'</div>';
+}
+/* thumbnails, pictures of round videos and voice files arrive after the bubble is on the screen */
+function mcHydrate(list){
+  var uid=CNX.uid;
+  list.forEach(function(m){
+    var id=m.id;
+    if(m.kind==='p'||m.kind==='v'){
+      var set=function(u){var im=document.querySelector('img[data-spimg="'+id+'"]');if(im&&u&&im.getAttribute('src')!==u)im.src=u};
+      if(SP.mem['spt_'+id]){set(SP.mem['spt_'+id]);return}
+      var pth=m.thumb||(m.kind==='p'?m.media:'');if(!pth)return;
+      mcBlob(pth).then(function(x){SP.mem['spt_'+id]=x.u;set(x.u)}).catch(function(){var b=document.querySelector('[data-spid="'+id+'"]');if(b)b.classList.add('gone')});
+    }else if(m.kind==='a'){
+      if(VN.mem['vn_'+id]||!m.media)return;
+      mcBlob(m.media).then(function(x){VN.mem['vn_'+id]=x.u}).catch(function(){});
+    }else if(m.kind==='r'){
+      if(VN.mem['vnp_'+id]||!m.thumb)return;
+      mcBlob(m.thumb).then(function(x){VN.mem['vnp_'+id]=x.u;var v=document.querySelector('[data-vid="'+id+'"] video');if(v)v.poster=x.u}).catch(function(){});
+    }
+  });
+}
+function mcMsg(id){var a=MC.msgs[ui.mcl]||[],i;for(i=0;i<a.length;i++)if(a[i].id===id)return a[i];return null}
+
+/* paints what changed (new bubbles at the end, removed ones, ticks) without rebuilding the thread, so the scroll position stays */
+function mcSync(stick){
+  var th=document.getElementById('mcTh'),l=mcLink(ui.mcl),L=document.getElementById('mcL');if(!th||!l)return;
+  var a=MC.msgs[l.id];if(!a)return;
+  var near=!L||L.scrollHeight-L.scrollTop-L.clientHeight<120;
+  if(!th.querySelector('.kcx-row')&&!a.length){th.innerHTML=mcThreadHTML(l);return}
+  var ld=th.querySelector('.mc-ld,.kcx-e0');if(ld)th.innerHTML='';
+  var have={},added=[];
+  [].forEach.call(th.querySelectorAll('.kcx-row[data-mid]'),function(r){have[r.dataset.mid]=r});
+  var ids={};a.forEach(function(m){ids[m.id]=1});
+  Object.keys(have).forEach(function(k){if(!ids[k])have[k].remove()});
+  var days=th.querySelectorAll('.kcx-day'),ldk=days.length?days[days.length-1].dataset.d:'';
+  a.forEach(function(m){
+    var r=have[m.id];
+    if(r){
+      var t=r.querySelector('.mc-tk');
+      if(t&&m.sender_id===CNX.uid){var tmp=document.createElement('div');tmp.innerHTML=mcTk(m);var n=tmp.firstChild;if(n&&(t.className!==n.className||t.textContent!==n.textContent)){t.className=n.className;t.textContent=n.textContent}}
+      r.classList.toggle('mc-failed',!!m.failed);
+      return;
+    }
+    var dk=new Date(mcMs(m.created_at)).toDateString(),h='';
+    if(dk!==ldk){h+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(mcMs(m.created_at))+'</span></div>';ldk=dk}
+    var tp=document.createElement('div');tp.innerHTML=h+mcRow(m);
+    while(tp.firstChild)th.appendChild(tp.firstChild);
+    added.push(m);
+  });
+  if(added.length){
+    mcHydrate(added);
+    if(L&&(stick||near||added.some(function(m){return m.sender_id===CNX.uid&&m.pending}))){try{L.scrollTo({top:L.scrollHeight,behavior:'smooth'})}catch(e){L.scrollTop=L.scrollHeight}}
+  }
+}
+function mcMerge(id,rows){
+  var a=MC.msgs[id]||(MC.msgs[id]=[]),by={},ch=0;
+  a.forEach(function(m){by[m.id]=m});
+  rows.forEach(function(r){
+    var o=by[r.id];
+    if(o){var wasP=o.pending||o.failed;Object.keys(r).forEach(function(k){o[k]=r[k]});delete o.pending;delete o.failed;delete o._up;if(wasP)ch=1;return}
+    a.push(r);by[r.id]=r;ch=1;
+  });
+  mcSort(a);
+  return ch;
+}
+async function mcPull(){
+  var id=ui.mcl;if(!id||id==='*'||MC.pulling||!document.getElementById('mcTh')||document.hidden)return;
+  var l=mcLink(id);if(!l)return;
+  MC.pulling=1;
+  try{
+    var last=MC.last[id],cols='id,link_id,sender_id,kind,body,media,thumb,mname,msize,meta,created_at,seen_at';
+    var q1='/rest/v1/link_messages?link_id=eq.'+encodeURIComponent(id)+'&select='+cols+'&order=created_at.'+(last?'asc':'desc')+'&limit='+(last?200:120)+(last?'&created_at=gt.'+encodeURIComponent(last):''),
+        q2='/rest/v1/link_messages?link_id=eq.'+encodeURIComponent(id)+'&select=id,seen_at,created_at&order=created_at.desc&limit=40';
+    var res=await Promise.all([cnxReq(q1),last?cnxReq(q2):Promise.resolve(null)]),r=res[0],st=res[1];
+    if(ui.mcl!==id)return;
+    if(!r.ok||!Array.isArray(r.j)){
+      if(!MC.msgs[id]){MC.msgs[id]=[];var th0=document.getElementById('mcTh');if(th0)th0.innerHTML=mcThreadHTML(l)}
+      if(!MC.errT||Date.now()-MC.errT>20000){MC.errT=Date.now();toast(r.st===404?mcErrMsg({st:404}):cnxNetErr(r),null,null,'warn')}
+      return;
+    }
+    var rows=r.j.slice();if(!last)rows.reverse();
+    var first=!MC.msgs[id];
+    var ch=mcMerge(id,rows);
+    if(rows.length){var mx=rows.reduce(function(m,x){return mcMs(x.created_at)>mcMs(m)?x.created_at:m},rows[0].created_at);if(!last||mcMs(mx)>mcMs(last))MC.last[id]=mx}
+    var a=MC.msgs[id];
+    if(st&&st.ok&&Array.isArray(st.j)&&st.j.length){
+      var sm={};st.j.forEach(function(x){sm[x.id]=x});
+      var top=mcMs(st.j[0].created_at),low=st.j.length>=40?mcMs(st.j[st.j.length-1].created_at):0;
+      MC.msgs[id]=a=a.filter(function(m){
+        if(m.pending||m.failed)return true;
+        var s=sm[m.id];if(s){if(s.seen_at!==m.seen_at)m.seen_at=s.seen_at;return true}
+        var t=mcMs(m.created_at);
+        return !(t<top&&t>=low);                       /* inside the window the server answered for, but gone = deleted */
+      });
+    }else if(st&&st.ok&&Array.isArray(st.j)&&!st.j.length&&a.length){
+      MC.msgs[id]=a=a.filter(function(m){return m.pending||m.failed});
+    }
+    if(first){var th=document.getElementById('mcTh');if(th){th.innerHTML=mcThreadHTML(l);mcHydrate(a);var L=document.getElementById('mcL');if(L)L.scrollTop=L.scrollHeight;var s0=a.length&&a[a.length-1];MC.sum[id]=s0||MC.sum[id]}}
+    else mcSync(false);
+    if(a.length)MC.sum[id]=a[a.length-1];
+    /* everything the other person sent is read now */
+    if(!document.hidden&&a.some(function(m){return m.sender_id!==CNX.uid&&!m.seen_at})){
+      cnxReq('/rest/v1/rpc/mark_chat_seen','POST',{p_link:id}).then(function(x){if(x.ok){a.forEach(function(m){if(m.sender_id!==CNX.uid&&!m.seen_at)m.seen_at=new Date().toISOString()})}});
+    }
+    if(MC.un[id]){delete MC.un[id];mcCardPaint()}
+  }catch(e){}finally{MC.pulling=0}
+}
+
+/* ----- sending ----- */
+async function mcPost(l,m,up){
+  m.link_id=l.id;m.sender_id=CNX.uid;m.created_at=m.created_at||new Date().toISOString();m.pending=1;m._up=up||[];
+  var a=MC.msgs[l.id]||(MC.msgs[l.id]=[]);
+  if(!a.some(function(x){return x.id===m.id}))a.push(m);
+  mcSort(a);if(ui.mcl===l.id)mcSync(true);
+  await mcSend(l,m);
+}
+async function mcSend(l,m){
+  m.pending=1;delete m.failed;
+  try{
+    var up=m._up||[],i;
+    for(i=0;i<up.length;i++){if(!up[i].done){await mcPut(up[i].path,up[i].blob);up[i].done=1}m[up[i].field]=up[i].path}
+    var row={id:m.id,link_id:l.id,sender_id:CNX.uid,kind:m.kind,body:m.body||'',media:m.media||null,thumb:m.thumb||null,mname:m.mname||null,msize:m.msize||null,meta:m.meta||{}};
+    var r=await cnxReq('/rest/v1/link_messages','POST',row,{Prefer:'return=representation'});
+    if(!r.ok&&!(r.st===409)){var e=new Error('ins '+r.st);e.st=r.st;e.off=r.off;throw e}
+    var s=r.ok&&Array.isArray(r.j)?r.j[0]:null;
+    if(s)m.created_at=s.created_at;
+    delete m.pending;delete m._up;
+    var a=MC.msgs[l.id];if(a)mcSort(a);
+    MC.sum[l.id]=m;
+    hap('send');
+  }catch(e){
+    m.failed=1;delete m.pending;
+    toast(mcErrMsg(e),null,null,'warn');
+  }
+  if(ui.mcl===l.id)mcSync(false);
+}
+function mcSendText(l,t){
+  t=String(t||'').trim();if(!t)return false;
+  mcPost(l,{id:mcNewId(),kind:'t',body:t.slice(0,3000)});return true;
+}
+async function mcSendFile(l,file,asFile){
+  try{
+    if(file.size>MC_MAX){toast(__('این فایل خیلی بزرگ است؛ کمتر از ۵۰ مگابایت بفرست.','This file is too big; send one under 50 MB.'),null,null,'warn');return}
+    var id=mcNewId(),base=l.id+'/'+CNX.uid+'/'+id,vid=!asFile&&spIsVid(file),img=!asFile&&/^image\//i.test(file.type||'')||!asFile&&/\.(jpe?g|png|webp|gif|heic)$/i.test(file.name||'');
+    toast(__('در حال آماده‌سازی…','Preparing…'),null,null,'info',1);
+    if(vid||img){
+      var P=await spPrepare(file),up=[{path:base+'.'+(P.k==='p'?'jpg':mcExt(file,file.name)),blob:P.blob,field:'media'}];
+      if(P.thumb)up.push({path:base+'_t.jpg',blob:P.thumb,field:'thumb'});
+      SP.mem['sp_'+id]=URL.createObjectURL(P.blob);if(P.thumb)SP.mem['spt_'+id]=URL.createObjectURL(P.thumb);
+      mcPost(l,{id:id,kind:P.k,body:'',mname:file.name||'',msize:P.blob.size,meta:{d:P.d||0}},up);
+    }else{
+      mcPost(l,{id:id,kind:'f',body:'',mname:(file.name||'file').slice(0,120),msize:file.size,meta:{}},[{path:base+'.'+mcExt(file,file.name),blob:file,field:'media'}]);
+    }
+  }catch(e){toast(spErr(e),null,null,'warn')}
+}
+function mcSendVn(l,blob,meta){
+  if(blob.size>MC_MAX){toast(__('این پیام خیلی بزرگ است.','This message is too big.'),null,null,'warn');return}
+  var id=mcNewId(),base=l.id+'/'+CNX.uid+'/'+id,vid=meta.k==='v',up=[{path:base+'.'+mcExt(blob,''),blob:blob,field:'media'}];
+  VN.mem['vn_'+id]=URL.createObjectURL(blob);
+  if(meta.poster){up.push({path:base+'_t.jpg',blob:meta.poster,field:'thumb'});VN.mem['vnp_'+id]=URL.createObjectURL(meta.poster)}
+  mcPost(l,{id:id,kind:vid?'r':'a',body:'',msize:blob.size,meta:{d:meta.d,w:meta.w,tx:meta.tx||''}},up);
+}
+function mcSendReport(l,k){
+  var r=rpD()[k];if(!r)return;
+  var id=mcNewId();
+  mcPost(l,{id:id,kind:'g',body:String(r.t||'').slice(0,9000),meta:{day:k,sp:r.sp,cl:r.cl,te:r.te,tc:r.tc,cr:r.cr,n:r.n}});
+  /* the same report also feeds the counselor's dashboard (quietly) */
+  cnxReq('/rest/v1/rpc/send_report','POST',{p_link:l.id,p_day:k,p_sp:r.sp,p_cl:r.cl,p_te:r.te,p_tc:r.tc,p_cr:r.cr,p_parts:r.n,p_body:String(r.t||'').slice(0,9000)}).catch(function(){});
+}
+function mcDelete(l,m){
+  askConfirm({title:__('حذف پیام','Delete message'),msg:__('این پیام برای هر دو نفر پاک می‌شود.','This message is deleted for both of you.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:async function(){
+    var a=MC.msgs[l.id]||[],i=a.indexOf(m);
+    if(m.failed||m.pending&&!m.media){if(i>=0)a.splice(i,1);mcSync(false);return}
+    var r=await cnxReq('/rest/v1/link_messages?id=eq.'+encodeURIComponent(m.id),'DELETE',null,{Prefer:'return=minimal'});
+    if(!r.ok){toast(cnxNetErr(r),null,null,'warn');return}
+    var ps=[m.media,m.thumb].filter(Boolean);
+    if(ps.length)sbReq('/storage/v1/object/chat','DELETE',{prefixes:ps}).catch(function(){});
+    i=a.indexOf(m);if(i>=0)a.splice(i,1);
+    mcSync(false);
+    var last=a[a.length-1];if(last)MC.sum[l.id]=last;else delete MC.sum[l.id];
+  }}]});
+}
+/* picture / video / file chooser */
+function mcChoose(cb){
+  var lab=__('ارسال عکس، ویدیو یا فایل','Send a photo, video or file');
+  var sw=spSheet('<div class="sheet-top"><span></span><h2>'+lab+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div>'+
+    '<div class="sp-opts">'+
+    '<label class="sp-o">'+SP_ICON+'<span>'+__('گرفتن عکس','Take a photo')+'</span><input type="file" accept="image/*" capture="environment" data-f></label>'+
+    '<label class="sp-o">'+SP_VID+'<span>'+__('ضبط فیلم','Record a video')+'</span><input type="file" accept="video/*" capture="environment" data-f></label>'+
+    '<label class="sp-o">'+icon('img')+'<span>'+__('انتخاب از گالری','Choose from gallery')+'</span><input type="file" accept="image/*,video/*" data-f></label>'+
+    '<label class="sp-o"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg><span>'+__('فایل (PDF، نوشته و ...)','File (PDF, text...)')+'</span><input type="file" data-f data-t="f"></label>'+
+    '</div>',lab);
+  sw.w.addEventListener('change',function(e){
+    var i=e.target;if(!i||!i.matches||!i.matches('[data-f]'))return;
+    var f=i.files&&i.files[0];if(!f)return;
+    setTimeout(sw.close,60);
+    try{cb(f,i.dataset.t==='f')}catch(er){}
+  });
+  sw.w.addEventListener('click',function(e){if(e.target.closest('[data-e="close"]'))sw.close()});
+}
+
+/* ----- wiring of the open chat ----- */
+function mcInit(){
+  var root=document.querySelector('.mcx');if(!root)return;
+  var l=mcLink(root.dataset.lk);if(!l)return;
+  var id=l.id,L=document.getElementById('mcL'),th=document.getElementById('mcTh'),F=document.getElementById('mcF'),T=document.getElementById('mcT'),E=document.getElementById('mcE'),EM=document.getElementById('mcEm'),A=document.getElementById('mcA');
+  function fit(){T.style.height='auto';T.style.height=Math.min(120,T.scrollHeight)+'px';F.classList.toggle('tx',!!T.value.trim());MC.draft[id]=T.value}
+  if(MC.draft[id]){T.value=MC.draft[id];fit()}
+  function send(){if(mcSendText(l,T.value)){T.value='';fit();MC.draft[id]=''}}
+  F.addEventListener('submit',function(e){e.preventDefault();send();T.focus({preventScroll:true})});
+  T.addEventListener('input',fit);
+  T.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+  A.addEventListener('click',function(){mcChoose(function(f,asFile){mcSendFile(l,f,asFile)})});
+  /* daily report (student side) */
+  function tray(open){
+    if(!E)return;
+    E.classList.toggle('on',open);E.setAttribute('aria-expanded',open?'true':'false');EM.setAttribute('aria-hidden',open?'false':'true');
+    if(open){EM.innerHTML=kcxTray();void EM.offsetWidth;requestAnimationFrame(function(){EM.classList.add('open')});setTimeout(function(){try{L.scrollTo({top:L.scrollHeight,behavior:'smooth'})}catch(e){}},380)}
+    else EM.classList.remove('open');
+  }
+  if(E){
+    E.addEventListener('click',function(){tray(!EM.classList.contains('open'))});
+    EM.addEventListener('click',function(e){var b=e.target.closest('[data-rk]');if(!b)return;mcSendReport(l,b.dataset.rk);tray(false)});
+  }
+  vnBind(F.querySelector('.kcx-vn'),function(){return F},function(blob,meta){mcSendVn(l,blob,meta)},false);
+  vnStopCur();
+  /* taps inside the thread */
+  L.addEventListener('click',function(e){
+    var b;
+    if((b=e.target.closest('[data-vnp]'))){
+      var bub=b.closest('[data-vid]');if(!bub)return;e.stopPropagation();
+      var vid=bub.dataset.vid,m=mcMsg(vid);
+      if(VN.mem['vn_'+vid]||!m||!m.media){vnToggle(bub);return}
+      bub.classList.add('mc-dl');
+      mcBlob(m.media,true).then(function(x){VN.mem['vn_'+vid]=x.u;bub.classList.remove('mc-dl');vnToggle(bub)}).catch(function(){bub.classList.remove('mc-dl');toast(__('فایل این پیام باز نشد','Could not open this message’s file'),null,null,'warn')});
+      return;
+    }
+    if((b=e.target.closest('[data-spo]'))){
+      var sid=b.dataset.spo,sm=mcMsg(sid);if(!sm)return;
+      e.stopPropagation();
+      var show=function(){spView([{id:sid,k:sm.kind,d:+(sm.meta&&sm.meta.d)||0,tid:'',ts:mcMs(sm.created_at)}],0)};
+      if(SP.mem['sp_'+sid]){show();return}
+      if(!sm.media)return;
+      toast(__('در حال بارگیری…','Loading…'),null,null,'info',1);
+      mcBlob(sm.media,sm.kind==='v').then(function(x){SP.mem['sp_'+sid]=x.u;show()}).catch(function(){toast(__('بارگیری نشد','Could not load'),null,null,'warn')});
+      return;
+    }
+    if((b=e.target.closest('[data-mcf]'))){
+      var fm=mcMsg(b.dataset.mcf);if(!fm||!fm.media)return;
+      toast(__('در حال بارگیری…','Loading…'),null,null,'info',1);
+      mcBlob(fm.media,true).then(function(x){return mcSave(x.b,fm.mname||('file.'+mcExt(x.b,'')))}).catch(function(){toast(__('بارگیری نشد','Could not load'),null,null,'warn')});
+      return;
+    }
+    if((b=e.target.closest('[data-mcg]'))){var c=b.closest('.mc-rep'),o=!c.classList.contains('open');c.classList.toggle('open',o);b.textContent=o?__('بستن','Close'):__('نمایش همه','Show all');return}
+    if((b=e.target.closest('.mc-failed'))){
+      var fm2=mcMsg(b.dataset.mid);if(!fm2)return;
+      askConfirm({title:__('ارسال نشد','Not sent'),msg:__('دوباره بفرستم؟','Send it again?'),btns:[{t:__('ارسال دوباره','Send again'),fn:function(){mcSend(l,fm2)}},{t:__('حذف','Delete'),cls:'bad',fn:function(){mcDelete(l,fm2)}}]});
+    }
+  });
+  /* keeping a finger on one of your own messages: delete */
+  var lp=0,lx=0,ly=0;
+  L.addEventListener('pointerdown',function(e){
+    clearTimeout(lp);var r=e.target.closest('.kcx-row[data-mine="1"]');if(!r||e.target.closest('button,a,video,input'))return;
+    lx=e.clientX;ly=e.clientY;
+    lp=setTimeout(function(){lp=0;var m=mcMsg(r.dataset.mid);if(m){try{navigator.vibrate&&navigator.vibrate(12)}catch(x){}mcDelete(l,m)}},560);
+  });
+  L.addEventListener('pointermove',function(e){if(lp&&(Math.abs(e.clientX-lx)>10||Math.abs(e.clientY-ly)>10)){clearTimeout(lp);lp=0}});
+  ['pointerup','pointercancel','scroll'].forEach(function(n){L.addEventListener(n,function(){clearTimeout(lp);lp=0},true)});
+  L.addEventListener('contextmenu',function(e){if(e.target.closest('.kcx-row[data-mine="1"]'))e.preventDefault()});
+  /* show what we have at once, then ask the server */
+  if(MC.msgs[id]){mcHydrate(MC.msgs[id]);L.scrollTop=L.scrollHeight}
+  mcStop();
+  mcPull();
+  MC.poll=setInterval(function(){if(!document.getElementById('mcTh')){mcStop();return}mcPull()},4000);
+}
 /* ---- small preview of an advisor group (Telegram style): press and hold the round picture of a group in "من و مشاور".
    It only LOOKS at the chat: nothing is marked as read (the red number stays) until the person really opens the group.
    Tapping anywhere (or the back button) makes it fade away. ---- */
@@ -16287,7 +16772,7 @@ function aoCoachText(raw,hdrOut){
   hdrOut.h=hdr;return msg;
 }
 /* ----- navigation / theme ----- */
-var AO_GO=[[/(من و مشاور|مشاور)/,'kcm',['مشاور','Advisor']],[/(مربی)/,'coach',['مربی هوشمند','Smart coach']],[/کنکوریا|konkor/,'kk',['کنکوریا','Konkoria']],[/آمار|stats/,'stats',['آمار','Stats']],[/(حساب|پروفایل|تنظیمات|account|profile|settings)/,'account',['حساب','Account']],[/(هفته|هفتگی|برنامه|week)/,'week',['برنامه هفته','Week']],[/(امروز|خانه|صفحه اصلی|today|home)/,'today',['امروز','Today']]];
+var AO_GO=[[/(من و آریو|من و مشاور|مشاور)/,'kcm',['من و آریو','Me & Ario']],[/(مربی)/,'coach',['مربی هوشمند','Smart coach']],[/کنکوریا|konkor/,'kk',['کنکوریا','Konkoria']],[/آمار|stats/,'stats',['آمار','Stats']],[/(حساب|پروفایل|تنظیمات|account|profile|settings)/,'account',['حساب','Account']],[/(هفته|هفتگی|برنامه|week)/,'week',['برنامه هفته','Week']],[/(امروز|خانه|صفحه اصلی|today|home)/,'today',['امروز','Today']]];
 function aoNavigate(t,sec){
   try{
     if(t==='kcm'){actions.kcAdv();if(sec)actions.kcsec({v:sec});return}

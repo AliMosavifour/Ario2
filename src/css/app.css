@@ -3374,3 +3374,36 @@ html[dir="ltr"] .kcd-r,[dir="ltr"] .kcd-r{direction:ltr}
 .w90{width:90%}.w80{width:80%}.w70{width:70%}.w60{width:60%}.w40{width:40%}
 @media (prefers-reduced-motion:reduce){.skl,.empty-art .ea{animation:none}}
 .kcx-th .kcx-e0:not(:only-child){display:none}
+
+/* ---------- v277: «من و مشاور» chat between a counselor and a student ---------- */
+.mc-card .ib .ic{fill:none;stroke:currentColor}
+.mc-card{padding-inline-end:48px}
+.mc-row .kc-ph{font-size:17px}
+.mc-row .un-b{position:static;flex:none;margin-inline-start:6px}
+.mcx .kcx-top .kcx-pill{flex:1;min-width:0}
+.mcx .kcx-ti b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcx .kcx-m{overflow-wrap:anywhere}
+.mc-tk{font-style:normal;margin-inline-start:2px;font-size:11px;letter-spacing:-2.5px;opacity:.8}
+.mc-tk.on{color:#0ea5e9;opacity:1;font-weight:700}
+.mc-tk.bad{color:#fff;background:#ff375f;border-radius:50%;display:inline-grid;place-items:center;width:14px;height:14px;letter-spacing:0;font-weight:800;opacity:1}
+.kcx-m.a .mc-tk{display:none}
+.mc-failed .kcx-m{opacity:.75;outline:2px solid #ff375f;outline-offset:1px}
+.mc-ld{display:flex;justify-content:center;gap:6px;padding:40px 0}
+.mc-ld i{width:9px;height:9px;border-radius:50%;background:var(--fg3,#999);animation:mcLd 1s ease-in-out infinite}
+.mc-ld i:nth-child(2){animation-delay:.15s}.mc-ld i:nth-child(3){animation-delay:.3s}
+@keyframes mcLd{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-4px)}}
+.mc-file{width:min(78%,300px)}
+.mc-fb{display:flex;align-items:center;gap:10px;width:100%;padding:4px 2px;border:0;background:none;color:inherit;font:inherit;text-align:start}
+.mc-fi{flex:none;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.22)}
+.kcx-m.a .mc-fi{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.mc-fi .ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.mc-ft{min-width:0;display:flex;flex-direction:column}
+.mc-ft b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mc-ft small{font-size:11.5px;opacity:.75}
+.mc-rep{width:min(86%,340px)}
+.mc-rep>b{display:block;font-size:14px;margin-bottom:2px}
+.mc-rep>small{display:block;font-size:12px;opacity:.8;margin-bottom:6px}
+.mc-rt{font-size:13.5px;line-height:1.9;max-height:5.7em;overflow:hidden;position:relative;-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+.mc-rep.open .mc-rt{max-height:none;-webkit-mask-image:none;mask-image:none}
+.mc-rm{border:0;background:none;color:inherit;font:inherit;font-size:12.5px;font-weight:700;text-decoration:underline;padding:2px 0}
+.vn-v.mc-dl .vn-vb{opacity:.55}
