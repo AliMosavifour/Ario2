@@ -1,5 +1,19 @@
 /* English translations, keyed by the Persian source text. Generated once; edit freely. */
 var __EN={
+"رنگ پس‌زمینه":"Background colour",
+"رنگ تأکید":"Accent colour",
+"رنگ آیکن کوچک و نوار کناری؛ «خودکار» یعنی هر بخش رنگ خودش را دارد.":"Colour of the small icon and the side bar; “Auto” means each section keeps its own colour.",
+"اندازه متن":"Text size",
+"کوچک":"Small",
+"معمولی":"Normal",
+"بزرگ":"Large",
+"آیکن بزرگ":"Large icon",
+"آیکن برنامه":"App icon",
+"بدون آیکن":"No icon",
+"نوار رنگی کنار اعلان":"Coloured side bar",
+"خط باریک با رنگ هر بخش":"A thin line in each section’s colour",
+"دکمه‌های اعلان":"Notification buttons",
+"«۱۰ دقیقه بعد» و «انجام شد» زیر یادآور":"“Snooze 10 min” and “Done” under reminders",
 "ی":"Su",
 "د":"Mo",
 "س":"Tu",
@@ -727,3 +741,9 @@ var __EN={
 "ذخیره و ادامه":"Save and continue",
 "ادامه بدون ذخیره":"Continue without saving"
 };
+
+__EN["حریم خصوصی و امنیت"]="Privacy & Security";
+__EN["دستیار و مشاور"]="Assistant & Advisor";
+__EN["کتابخانه و دست‌خط"]="Library & Handwriting";
+__EN["داده‌ها و ذخیره‌سازی"]="Data & Storage";
+__EN["راهنما و اطلاعات"]="Help & About";

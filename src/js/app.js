@@ -24,6 +24,17 @@ function weekStart(k){var d=parse(k);return addDays(k,-((d.getDay()-WS+7)%7))}
 function wkLead(d){return (d.getDay()-WS+7)%7}
 function isWkend(dw){return EN?(dw===0||dw===6):dw===5}
 function wkHead(){var a=[],i;for(i=0;i<7;i++)a.push(WK[(WS+i)%7]);return a}
+/* v275: one place for the phone's gentle vibration. kinds: tick (done / toggle), sel (select), send, del, err, done (all tasks done).
+   Two calls within 200 ms count as one, so a confirm button and the action behind it do not buzz twice. Off with localStorage 'ario.hap'='0'. */
+var hapLast=0;
+function hapOn(){try{return localStorage.getItem('ario.hap')!=='0'}catch(e){return true}}
+function hap(k){
+  try{
+    if(!navigator.vibrate||localStorage.getItem('ario.hap')==='0')return;
+    var n=Date.now();if(n-hapLast<200)return;hapLast=n;
+    navigator.vibrate({tick:12,sel:7,send:[10,30,16],del:[18,40,12],err:[40,50,40],done:[30,40,30,40,60]}[k]||10);
+  }catch(e){}
+}
 var uidn=0;function uid(){uidn++;return Math.random().toString(36).slice(2,8)+Date.now().toString(36)+uidn}
 
 /* ---------- data ---------- */
@@ -61,7 +72,7 @@ function sample(){
 }
 
 var LS='barnameyar.v1';
-var APP={ver:'1.0',date:'2026-10-13',author:(__("سید علی موسوی والا"))};
+var APP={ver:'1.1',date:'2026-11-05',author:(__("سید علی موسوی والا"))};
 function readCache(){try{var j=JSON.parse(localStorage.getItem(LS));return j&&Array.isArray(j.tasks)?j:null}catch(e){return null}}
 var wcT=0;
 function writeCache(){clearTimeout(wcT);wcT=0;try{localStorage.setItem(LS,JSON.stringify({tasks:state.tasks,profile:state.profile,cats:CATS,hist:state.hist,notifs:state.notifs,nseen:state.nseen}))}catch(e){}}
@@ -273,13 +284,21 @@ function kkClean(k){
   return o;
 }
 /* saved daily reports: state.profile.rp = {'YYYY-MM-DD': {sp,cl,te,tc,cr,n,t,ts}}  (minutes, tests, tests-with-answer-key, correct, parts, form text) */
-/* notification look settings: th = sys | light | dark | banner, bn = banner id ('' = same as the profile), rest = what to show */
+/* notification settings: th = sys | light | dark | banner | custom, bn = banner id ('' = same as the profile), bg = custom background colour, ac = accent colour ('' = each section's own), tx = text size s|m|l, bar = coloured side bar, li = large icon photo|app|none, ab = snooze/done buttons, time/cat/pri/list/name/focus = what to show;
+   pin = pinned bar (pn next task, pp running part + countdown, pg progress, pl on lock screen); sa/sm/sp = messages of Ario / advisor / part end; sic = icon per section; mm/mr = advisor motivation / report reminder time, mw = weekly request for next week's exams/assignments, ml = late-night "where is your report?" message (01:00-02:00) */
 function nsClean(x){
-  var o={th:'sys',bn:'',time:true,cat:true,pri:true,list:true,name:true,focus:true};
+  var o={th:'sys',bn:'',bg:'#1B2033',ac:'',tx:'m',bar:true,li:'photo',ab:true,time:true,cat:true,pri:true,list:true,name:true,focus:true,pin:true,pn:true,pp:true,pg:true,pl:true,sa:true,sm:true,sp:true,sic:true,mm:'08:00',mr:'21:30',ml:'01:30',mw:true};
   if(x&&typeof x==='object'){
-    if(['sys','light','dark','banner'].indexOf(x.th)>-1)o.th=x.th;
+    if(['sys','light','dark','banner','custom'].indexOf(x.th)>-1)o.th=x.th;
+    if(/^#[0-9a-fA-F]{6}$/.test(x.bg||''))o.bg=x.bg.toUpperCase();
+    if(x.ac===''||/^#[0-9a-fA-F]{6}$/.test(x.ac||''))o.ac=String(x.ac).toUpperCase();
+    if(['s','m','l'].indexOf(x.tx)>-1)o.tx=x.tx;
+    if(['photo','app','none'].indexOf(x.li)>-1)o.li=x.li;
+    if(x.bar===false)o.bar=false;
+    if(x.ab===false)o.ab=false;
     if(typeof x.bn==='string'&&/^[a-z]{0,12}$/.test(x.bn))o.bn=x.bn;
-    ['time','cat','pri','list','name','focus'].forEach(function(k){if(x[k]===false)o[k]=false});
+    ['time','cat','pri','list','name','focus','pin','pn','pp','pg','pl','sa','sm','sp','sic','mw'].forEach(function(k){if(x[k]===false)o[k]=false});
+    ['mm','mr','ml'].forEach(function(k){if(x[k]===''||/^([01]\d|2[0-3]):[0-5]\d$/.test(x[k]||''))o[k]=x[k]});
   }
   return o;
 }
@@ -318,8 +337,8 @@ function cleanHabits(a){
   return a.filter(function(h){return h&&typeof h==='object'&&h.id!=null}).map(function(h){if(!h.d||typeof h.d!=='object'||Array.isArray(h.d))h.d={};return h});
 }
 function plainObj(x){return x&&typeof x==='object'&&!Array.isArray(x)?x:{}}
-function P(p){var o=Object.assign({},DEFP,p);o.habits=cleanHabits(o.habits);o.medals=plainObj(o.medals);o.bnGot=plainObj(o.bnGot);o.rp=rpClean(o.rp);if(!o.sndv){o.sndv=1;o.sound=true}o.ttp=ttpClean(o.ttp);if(typeof o.ttCur!=='string')o.ttCur=null;o.kk=kkClean(o.kk);o.ns=nsClean(o.ns);o.rpd=rpdClean(o.rpd);o.rk=rkClean(o.rk);o.tbk=tbClean(o.tbk);o.kc=kcClean(o.kc);o.pins=pnClean(o.pins);o.gr=grClean(o.gr);o.sr=srClean(o.sr);o.md=mdClean(o.md);o.mo=/^\d{4}-\d{2}-\d{2}$/.test(o.mo||'')?o.mo:'';return o}
-var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],gr:null,sr:{},md:{},mo:''};
+function P(p){var o=Object.assign({},DEFP,p);o.habits=cleanHabits(o.habits);o.medals=plainObj(o.medals);o.bnGot=plainObj(o.bnGot);o.rp=rpClean(o.rp);if(!o.sndv){o.sndv=1;o.sound=true}o.ttp=ttpClean(o.ttp);if(typeof o.ttCur!=='string')o.ttCur=null;o.kk=kkClean(o.kk);o.ns=nsClean(o.ns);o.rpd=rpdClean(o.rpd);o.rk=rkClean(o.rk);o.tbk=tbClean(o.tbk);o.kc=kcClean(o.kc);o.pins=pnClean(o.pins);o.un=unClean(o.un);o.gr=grClean(o.gr);o.sr=srClean(o.sr);o.md=mdClean(o.md);o.mo=/^\d{4}-\d{2}-\d{2}$/.test(o.mo||'')?o.mo:'';return o}
+var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,tour:false,advTone:'formal',goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],un:null,gr:null,sr:{},md:{},mo:''};
 var state={tasks:cached?cleanTasks(cached.tasks):sample(),profile:P(cached&&cached.profile),hist:(cached&&cached.hist&&typeof cached.hist==='object')?cleanHist(cached.hist):null,notifs:cleanNotifs(cached&&cached.notifs),nseen:Number(cached&&cached.nseen)||0};
 var ui={sel:null,pnOpen:{},pnAll:false,tab:'today',filter:'all',cat:null,day:todayKey(),loading:false,fcats:[],fpri:[],ftags:[],q:''};
 var acctName='',userId=null,storeReadyRes,storeReady=new Promise(function(r){storeReadyRes=r});
@@ -424,7 +443,31 @@ var SB={url:'https://uwmuqemzyvwykuetkucl.supabase.co',key:'sb_publishable_YWxdf
 function sbOn(){return !!(SB.url&&SB.key)}
 var SB_K='ario.sb',sbRefP=null;
 function sbSess(){try{return JSON.parse(localStorage.getItem(SB_K)||'null')}catch(e){return null}}
-function sbKeep(s){try{if(s)localStorage.setItem(SB_K,JSON.stringify(s));else localStorage.removeItem(SB_K)}catch(e){}}
+function sbKeep(s){try{if(s)localStorage.setItem(SB_K,JSON.stringify(s));else localStorage.removeItem(SB_K)}catch(e){}try{cwSync(s)}catch(e){}}
+/* ---- advisor phone notice while the app is closed (v273): the Android side keeps a copy of the sign-in and asks Supabase every ~15 minutes
+   (native/java/ArioCounselorWorker.java). Only an account that is an advisor gets this. If the Android side had to renew the sign-in, the new
+   tokens are adopted here before the web app renews it itself, so a refresh token is never used twice. ---- */
+function cwSync(s){
+  if(typeof AN==='undefined'||!AN||!AN.cwSet)return;
+  s=s===undefined?sbSess():s;
+  var on=!!(s&&sbOn()&&cnxIsCounselor()),rn=0;
+  try{rn=Number(localStorage.getItem('ario.lk.rn'))||0}catch(e){}
+  AN.cwSet(on?{on:true,url:SB.url,key:SB.key,uid:s.uid,at:s.at,rt:s.rt,exp:s.exp,rn:rn}:{on:false}).catch(function(){});
+}
+async function cwAdopt(){
+  if(typeof AN==='undefined'||!AN||!AN.cwTake)return;
+  try{
+    var r=await AN.cwTake(),cur=sbSess();
+    if(!r)return;
+    if(r.s&&cur&&r.s.uid===cur.uid&&Number(r.s.exp)>Number(cur.exp)){
+      try{localStorage.setItem(SB_K,JSON.stringify(Object.assign({},cur,{at:r.s.at,rt:r.s.rt,exp:Number(r.s.exp)})))}catch(e){}
+    }
+    var rn=Number(r.rn)||0,mine=0;
+    try{mine=Number(localStorage.getItem('ario.lk.rn'))||0}catch(e){}
+    if(rn>mine){try{localStorage.setItem('ario.lk.rn',String(rn))}catch(e){}}
+  }catch(e){}
+}
+function cwFg(){try{if(typeof AN!=='undefined'&&AN&&AN.cwFg&&!document.hidden)AN.cwFg().catch(function(){})}catch(e){}}
 function sbToSess(j){
   if(!j||!j.access_token||!j.user)return null;
   return {at:j.access_token,rt:j.refresh_token,exp:j.expires_at||Math.floor(Date.now()/1000+(j.expires_in||3600)),uid:j.user.id,em:j.user.email||''};
@@ -443,6 +486,7 @@ async function sbRefresh(s){
   if(sbRefP)return sbRefP;
   sbRefP=(async function(){
     try{
+      await cwAdopt();var c2=sbSess();if(c2&&c2.exp>Date.now()/1000+60)return c2;s=c2||s;
       var r=await fetch(SB.url+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:SB.key,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:s.rt})});
       if(r.status===400||r.status===401||r.status===403){sbKeep(null);return null}   /* the sign-in really ended */
       if(!r.ok)return s;
@@ -752,7 +796,9 @@ window.addEventListener('popstate',function(){
   if(imv.on){imvDo();return}
   if(FCV.on){fcvDo();return}
   if(pdfv.on){pvDoClose();return}
-  if(ui.tab==='account'&&ui.accPage){ui.accPage=null;render('enter');window.scrollTo(0,0);return}
+  if(typeof kcpvClose==='function'&&kcpvClose())return;
+  if(typeof tourEnd==='function'&&tourEnd())return;
+  if(ui.tab==='account'&&ui.accPage){ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;if(accDepth>0)accDepth--;render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='kcm'&&ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='kcm'){ui.tab='coach';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='rk'||ui.tab==='tb'||ui.tab==='coach'){ui.tab='kk';render('enter');window.scrollTo(0,0);return}
@@ -888,7 +934,8 @@ function render(mode){
   if(qs0){var qn=document.getElementById('qaIn');if(qn){qn.value=qs0.v;if(qs0.f)qn.focus({preventScroll:true})}}
   qaPreview();
   if(ui.tab==='tb')tbFill();
-  if(ui.tab==='kcm'&&ui.kcsec)kcxInit();
+  if(ui.tab==='kcm'&&ui.kcsec){kcxInit();unClear(ui.kcsec)}
+  unPaint();
   if(pkFirst&&ui.tab==='today'&&document.querySelector('.hbpw')){pkFirst=false;clearTimeout(pkWaveT);pkWaveT=setTimeout(pkWaveA,1200)}
 }
 var coverDk=false,coverSeen=null,covMQ=window.matchMedia?matchMedia('(prefers-color-scheme: dark)'):null;
@@ -914,6 +961,7 @@ function restore(){
   removedStash=null;mutate();
 }
 function removeTasks(ids,msg){
+  hap('del');
   removedStash=state.tasks.filter(function(t){return ids.indexOf(t.id)>-1});
   if(!removedStash.length)return;
   state.tasks=state.tasks.filter(function(t){return ids.indexOf(t.id)<0});
@@ -946,7 +994,7 @@ var actions={
     if(k==='sound'&&state.profile.sound)beep();
     if(k==='notif'&&state.profile.notif)reqNotif();
   },
-  accPage:function(d){ui.accPage=d.id;try{history.pushState({accp:1},'',location.href)}catch(e){}render('enter');window.scrollTo(0,0)},
+  accPage:function(d){ui.accPage=d.id;accDepth++;try{history.pushState({accp:1},'',location.href)}catch(e){}render('enter');window.scrollTo(0,0)},
   accBack:function(){accBack()},
   editProfile:function(){openProfile()},
   cycleLang:function(){openLangPick()},
@@ -963,6 +1011,8 @@ $('#view').addEventListener('click',function(e){
   if(ui.sel){var sr=e.target.closest('.row');if(sr){selToggle(sr.dataset.id);return}}
   var sb=e.target.closest('.sub');
   if(sb){toggleSub(sb.closest('.row').dataset.id,sb.dataset.sid);return}
+  var spb=e.target.closest('[data-sp]');
+  if(spb){spOpenTask(spb.dataset.sp);return}
   var chk=e.target.closest('.chk');
   if(chk){toggleCheck(chk.closest('.row').dataset.id);return}
   var ed=e.target.closest('.rowedit');
@@ -977,7 +1027,7 @@ $('#view').addEventListener('keydown',function(e){
 });
 var accRlT=0;  /* the account refresh waits until the page-switch animation has finished, so it never stalls the switch */
 document.querySelectorAll('.tab').forEach(function(b){
-  b.addEventListener('click',function(){ui.sel=null;if(ui.accPage){ui.accPage=null;if(history.state&&history.state.accp){accPopSkip=true;try{history.back()}catch(e){accPopSkip=false}}}if(ui.tab==='char'&&/^#\/character\//.test(location.hash||'')){try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}ui.tab=b.dataset.tab;ui.cat=null;ui.filter='all';render('enter');window.scrollTo(0,0);if(ui.tab==='account'){clearTimeout(accRlT);accRlT=setTimeout(function(){accRlT=0;if(ui.tab==='account')reloadAccount(true)},550)}});
+  b.addEventListener('click',function(){ui.sel=null;if(ui.accPage){ui.accPage=null;if(history.state&&history.state.accp){accPopSkip=true;try{history.go(-Math.max(1,accDepth))}catch(e){accPopSkip=false}}accDepth=0}if(ui.tab==='char'&&/^#\/character\//.test(location.hash||'')){try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}ui.tab=b.dataset.tab;ui.cat=null;ui.filter='all';render('enter');window.scrollTo(0,0);if(ui.tab==='account'){clearTimeout(accRlT);accRlT=setTimeout(function(){accRlT=0;if(ui.tab==='account')reloadAccount(true)},550)}});
 });
 $('#fab').addEventListener('click',function(){if(ui.tab==='kk')openKK(null);else openSheet(null)});
 
@@ -1074,6 +1124,7 @@ function beep(force){
 }
 /* completion sound: a pen-stroke swish while the line is drawn, then a chime that depends on priority */
 function playDone(t,allDone){
+  hap(allDone?'done':'tick');
   if(!state.profile.sound)return;
   try{
     var c=actx();if(!c)return;
@@ -1084,7 +1135,6 @@ function playDone(t,allDone){
     else if(p===1){tone(c,784,.3,.22,'sine',.12);tone(c,1175,.42,.3,'sine',.12)}
     else tone(c,880,.3,.16,'sine',.11,1320);
   }catch(e){}
-  try{if(navigator.vibrate)navigator.vibrate(allDone?[30,40,30,40,60]:15)}catch(e){}
 }
 
 /* ---------- filter sheet (multi-select) ---------- */
@@ -1254,9 +1304,12 @@ function accOpen(id,ic,title){
 function accClose(){return '</div></div></section>'}
 
 function accLink(id,ic,title){
-  return '<section class="acc glass"><button type="button" class="mrow acc-h" data-act="accPage" data-id="'+id+'">'+'<span class="mi">'+icon(ic)+'</span><span class="ml">'+title+'</span>'+icon('chev','chv')+'</button></section>';
+  return '<section class="acc glass"><button type="button" class="mrow acc-h" data-act="accPage" data-id="'+id+'">'+'<span class="mi cic" style="--ci:'+(ACC_C[id]||'#3d6df2')+'">'+icon(ic)+'</span><span class="ml">'+title+'</span>'+icon('chev','chv')+'</button></section>';
 }
-var ACC_T={edit:['user','ویرایش مشخصات'],look:['palette','مشخصات ظاهری'],center:['target','مرکز من'],prefs:['tools','تنظیمات']};
+var ACC_T={edit:['user','ویرایش مشخصات'],look:['palette','مشخصات ظاهری'],center:['target','مرکز من'],prefs:['tools','تنظیمات'],pSec:['key','حریم خصوصی و امنیت'],pAsst:['chat','دستیار و مشاور'],pLib:['pen','کتابخانه و دست‌خط'],pData:['cloud','داده‌ها و ذخیره‌سازی'],pAbout:['info','راهنما و اطلاعات']};
+var ACC_SUB={pSec:1,pAsst:1,pLib:1,pData:1,pAbout:1},accDepth=0;
+var ACC_C={edit:'#3d9bf0',look:'#a259e0',center:'#e9a23b',prefs:'#34a853',pSec:'#4cb34c',pAsst:'#e9a23b',pLib:'#a259e0',pData:'#3d6df2',pAbout:'#e0525a'};
+function catRow(id,sub){var t=ACC_T[id];return '<button type="button" class="mrow crow" data-act="accPage" data-id="'+id+'"><span class="mi cic" style="--ci:'+ACC_C[id]+'">'+icon(t[0])+'</span><span class="ml"><b>'+__(t[1])+'</b><small>'+sub+'</small></span>'+icon('chev','chv')+'</button>'}
 function viewAccPage(id){
   var p=state.profile,L=ui.loading,doneN=state.tasks.filter(function(t){return t.done}).length;
   var row=function(ic,label,val,act){return '<button type="button" class="mrow" data-act="'+act+'"><span class="mi">'+icon(ic)+'</span><span class="ml">'+label+'</span>'+(val?'<span class="mv">'+val+'</span>':'')+icon('chev','chv')+'</button>'};
@@ -1271,27 +1324,42 @@ function viewAccPage(id){
   else if(id==='center')rows=
       row('bell',(__("خلاصه‌ی صبح")),L?'':(p.msum?fa(p.msum):(__("خاموش"))),'cycleMsum')+
       row('bell',(__("یادآور عصر")),L?'':(p.mev?fa(p.mev):(__("خاموش"))),'cycleMev')+
+      row('pin',__("نوار ثابت و پیام‌ها","Pinned bar & messages"),L?'':(nsCfg().pin?__("روشن","On"):__("خاموش")),'openPinSheet')+
       row('spark',(__("هدف روزانه کارها")),L?'':fa(p.goal||5)+(" "+__("کار")),'cycleGoal')+
       row('timer',(__("هدف تمرکز روزانه")),L?'':fa(p.fgoal||60)+(" "+__("دقیقه")),'cycleFGoal')+
       row('book',(__("راهنمای شروع")),'','showWelcome')+
       row('check',(__("کارهای انجام‌شده")),L?'':fa(doneN),'goDone');
-  else rows=
+  else if(id==='prefs')rows=
+      catRow('pSec',__("قفل برنامه، کد VIP","App lock, VIP code"))+
+      catRow('pAsst',__("لحن مشاور، «آریو»، پیام صوتی","Advisor tone, “Ario”, voice messages"))+
+      catRow('pLib',__("مرتب‌نویسی، تبدیل دست‌خط به متن","Tidy handwriting, handwriting to text"))+
+      catRow('pData',__("پشتیبان‌گیری، پاک کردن انجام‌شده‌ها","Backup, clear completed"))+
+      row('phone',__("لرزش ملایم","Gentle vibration"),hapOn()?(__("روشن")):(__("خاموش")),'toggleHap')+
+      catRow('pAbout',__("آموزش، نسخهٔ برنامه","Tour, app version"));
+  else if(id==='pSec')rows=
       row('lock',(__("قفل برنامه")),lkGet()?(__("روشن")):(__("خاموش")),'openLock')+
-      row('key',(__("کد VIP")),state.profile.vipCode?(__("فعال")):'','openVipCode')+
-      row('pen',__("مرتب‌نویسی دست‌خط (کتابخانه)","Tidy handwriting (library)"),inkTidyOn()?(__("روشن")):(__("خاموش")),'toggleTidy')+
-      row('search',__("دست‌خط به متن و جستجو (کتابخانه)","Handwriting to text & search (library)"),ocrOn()?(__("روشن")):(__("خاموش")),'toggleOcr')+
-      row('mic',__("فهمیدن پیام صوتی و ویدیویی (تبدیل گفتار به متن)","Understand voice & video messages (speech to text)"),vnSttOn()?(__("روشن")):(__("خاموش")),'toggleVnStt')+
+      row('key',(__("کد VIP")),state.profile.vipCode?(__("فعال")):'','openVipCode');
+  else if(id==='pAsst')rows=
+      row('chat',__("لحن مشاور","Advisor’s tone"),advToneName(),'openAdvTone')+
       row('mic',__("با گفتن «آریو» باز شود","Open when I say “Ario”"),aoWakeGet()?(__("روشن")):(__("خاموش")),'toggleWake')+
-      row('spark',__("کاهش حرکت (هایلایت آریو)","Reduce motion (Ario highlight)"),shMotionOff()?(__("روشن")):(__("خاموش")),'toggleMotion')+
+      row('mic',__("فهمیدن پیام صوتی و ویدیویی (تبدیل گفتار به متن)","Understand voice & video messages (speech to text)"),vnSttOn()?(__("روشن")):(__("خاموش")),'toggleVnStt')+
+      row('spark',__("کاهش حرکت (هایلایت آریو)","Reduce motion (Ario highlight)"),shMotionOff()?(__("روشن")):(__("خاموش")),'toggleMotion');
+  else if(id==='pLib')rows=
+      row('pen',__("مرتب‌نویسی دست‌خط (کتابخانه)","Tidy handwriting (library)"),inkTidyOn()?(__("روشن")):(__("خاموش")),'toggleTidy')+
+      row('search',__("دست‌خط به متن و جستجو (کتابخانه)","Handwriting to text & search (library)"),ocrOn()?(__("روشن")):(__("خاموش")),'toggleOcr');
+  else if(id==='pData')rows=
       row('cloud',(__("پشتیبان‌گیری و بازیابی")),'','openBackup')+
-      row('trash',(__("پاک کردن انجام‌شده‌ها")),'','clearDone')+
+      row('user',__("اتصال مشاور و دانش‌آموز","Advisor and student link"),'','openCnx')+
+      row('trash',(__("پاک کردن انجام‌شده‌ها")),'','clearDone');
+  else rows=
+      row('book',__("مشاهده مجدد آموزش","Replay the tour"),'','replayTour')+
       row('info',(__("اطلاعات برنامه")),L?'':(__("نسخه")+" ")+fa(APP.ver),'openAppInfo');
-  return head(esc(displayName()),__(ACC_T[id]?ACC_T[id][1]:'تنظیمات'),{back:1,backAct:'accBack',backTxt:(__("حساب کاربری"))})+
+  return head(esc(displayName()),__(ACC_T[id]?ACC_T[id][1]:'تنظیمات'),{back:1,backAct:'accBack',backTxt:(ACC_SUB[id]?__("تنظیمات"):__("حساب کاربری"))})+
     '<section class="acc glass accp">'+rows+'</section>';
 }
 function accBack(){
   if(history.state&&history.state.accp){history.back();return}
-  ui.accPage=null;render('enter');window.scrollTo(0,0);
+  ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;render('enter');window.scrollTo(0,0);
 }
 function viewAccount(){
   if(ui.accPage&&ACC_T[ui.accPage])return viewAccPage(ui.accPage);
@@ -1854,7 +1922,7 @@ function notify(kind,title,msg,act,fn,nolog,quiet){
   }
   if(!quiet)showBanner(n,act,fn,nolog);
 }
-function toast(msg,act,fn,kind,nolog){notify(kind||'info',nk(kind||'info')[2],msg,act,fn,nolog)}
+function toast(msg,act,fn,kind,nolog){if(kind==='warn')hap('err');notify(kind||'info',nk(kind||'info')[2],msg,act,fn,nolog)}
 function nbBadge(el,c){
   var b=el.querySelector('.nbc'),t=el.querySelector('.nbt b');
   if(c<2){if(b)b.remove();return}
@@ -2175,12 +2243,13 @@ function rowHTML(t,o){
   if(t.rp&&RPN[t.rp])meta.push('<span class="mt">'+icon('refresh')+RPN[t.rp]+'</span>');
   if(t.r!=null&&t.r>=0&&!t.done)meta.push('<span class="mt">'+icon('bell')+'</span>');
   if(st.length)meta.push('<span class="mt">'+icon('check')+fa(st.filter(function(s){return s.d}).length)+'/'+fa(st.length)+'</span>');
+  var spc=spChip(t);if(spc)meta.push(spc);
   var subs=st.length?'<div class="subs">'+st.map(function(s){return '<button type="button" class="sub'+(s.d?' on':'')+'" data-sid="'+esc(s.id)+'" aria-pressed="'+!!s.d+'"><i>'+icon('check')+'</i><span>'+esc(s.t)+'</span></button>'}).join('')+'</div>':'';
   var lab=(t.done?(__("انجام‌شده:")+" "):(__("انجام شد:")+" "))+esc(t.t);
   return '<li class="row'+(t.done?' done':'')+(t.col?' hascol':'')+(ui.sel?' selm'+(ui.sel.ids.indexOf(t.id)>-1?' picked':''):'')+'" data-id="'+t.id+'" style="--cc:'+cvar(t.col||c.c)+'">'+
     '<span class="swl" aria-hidden="true">'+icon('check')+(t.done?(__("ناتمام")):(__("انجام شد")))+("</span><span class=\"swr\" aria-hidden=\"true\">"+__("حذف"))+icon('trash')+'</span>'+
     '<div class="rc"><div class="rmain">'+(ui.sel?'<span class="selc" aria-hidden="true">'+icon('check')+'</span>':'')+
-    '<button type="button" class="chk" aria-pressed="'+t.done+'" aria-label="'+lab+'">'+icon('check')+'</button>'+
+    '<button type="button" class="chk'+(spc?' haspf':'')+'" aria-pressed="'+t.done+'" aria-label="'+lab+'">'+icon('check')+'</button>'+
     '<div class="body" role="button" tabindex="0" aria-label="'+lab+'"><div class="ttl">'+esc(t.t)+'</div><div class="meta">'+meta.join('')+'</div></div>'+
     (t.p>0?icon('flag','flag p'+t.p):'')+("<button type=\"button\" class=\"rowedit\" aria-label=\""+__("ویرایش:")+" ")+esc(t.t)+'">'+icon('edit')+'</button>'+(state.profile.sort==='manual'?("<button type=\"button\" class=\"grip\" aria-label=\""+__("جابه‌جایی:")+" ")+esc(t.t)+'">'+icon('grip')+'</button>':'')+'</div>'+subs+'</div></li>';
 }
@@ -2442,11 +2511,13 @@ function nsCfg(){return nsClean(state.profile.ns)}
 var AN=null;
 try{var CAP4=window.Capacitor;if(CAP4&&CAP4.isNativePlatform&&CAP4.isNativePlatform())AN=(CAP4.Plugins&&CAP4.Plugins.ArioNotify)||(CAP4.registerPlugin&&CAP4.registerPlugin('ArioNotify'))||null}catch(e){AN=null}
 function nsHasAv(){var p=state.profile;return okPhoto(p.photo)&&canUse(p.photo)}
-function nsCustom(){return !!AN&&(nsCfg().th!=='sys'||nsHasAv())}
+function nsPinWanted(){return !!AN&&!!state.profile.notif&&!!nsCfg().pin}
+function nsOptsOn(c){return c.th!=='sys'||!!c.ac||c.tx!=='m'||!c.bar||c.li!=='photo'||!c.ab}
+function nsCustom(){var c=nsCfg();return !!AN&&(nsOptsOn(c)||(c.li==='photo'&&nsHasAv())||nsPinWanted())}
 /* profile photo as a round PNG for the notification's large icon */
 function nsAvatarData(){
   return new Promise(function(res){
-    if(!nsHasAv()){res('');return}
+    if(!nsHasAv()||nsCfg().li!=='photo'){res('');return}
     var im=new Image();
     im.onload=function(){
       try{
@@ -2464,7 +2535,8 @@ function nsAvatarData(){
 /* neutral item for the native themed notifier */
 function nsToAN(n){
   var ex=n.extra||{};
-  return {id:n.id,at:n.schedule.at.getTime(),kind:ex.kind||'rem',ch:n.channelId==='reminders'?'rem':n.channelId==='focus'?'fo':'sum',title:n.title,body:n.body,big:n.largeBody||n.body,tid:ex.tid||'',act:n.actionTypeId==='REM'};
+  var chm={reminders:'rem',focus:'fo',assistant:'asst',advisor:'adv',partend:'part'};
+  return {id:n.id,at:n.schedule.at.getTime(),kind:ex.kind||'rem',ch:chm[n.channelId]||'sum',title:n.title,body:n.body,big:n.largeBody||n.body,tid:ex.tid||'',act:n.actionTypeId==='REM',ico:n.smallIcon||'',col:ex.src?(n.iconColor||''):'',sub:ex.src?(n.summaryText||''):'',go:ex.go||''};
 }
 function nsBannerFile(){
   var c=nsCfg(),b=bnFind(c.bn||''),id=(b&&bnOpen(b))?b[0]:bnId();
@@ -2493,7 +2565,7 @@ async function nsPushStyle(){
   var c=nsCfg(),b='',a='';
   if(c.th==='banner')try{b=await nsBannerData()}catch(e){}
   try{a=await nsAvatarData()}catch(e){}
-  try{await AN.setStyle({theme:c.th,banner:b,avatar:a})}catch(e){}
+  try{await AN.setStyle({theme:c.th,banner:b,avatar:a,opts:JSON.stringify({bg:c.bg,ac:c.ac,tx:c.tx,bar:c.bar,li:c.li,ab:c.ab})})}catch(e){}
 }
 /* snooze / done pressed on a themed notification while the app was closed */
 async function nsTakeActs(){
@@ -2539,6 +2611,7 @@ function nsSmart(){
       }
     }
   }
+  try{out=out.concat(kaNotifs())}catch(e){}
   var gr=p.gr;
   if(gr&&!gr.fired&&gr.dk>=td){
     var gw=at(gr.dk,gr.hm);
@@ -2556,7 +2629,10 @@ function nsSmart(){
         out.push(Object.assign({id:2100000100+i,title:(__("📊 بازنگری هفته")),body:wb,schedule:{at:new Date(wf),allowWhileIdle:true},channelId:'summary',smallIcon:'ic_stat_barnameyar',extra:{kind:'wr'}},nsLook('wr',wb)))}
     }
   }
-  return out;
+  try{out=out.concat(kaAdvNotifs())}catch(e){}
+  var NC=nsCfg();
+  out.forEach(function(o){if(!(o.extra&&o.extra.src))nsTag(o,'asst',o.extra&&o.extra.kind==='wr'?'wr':'')});
+  return out.filter(function(o){var q=o.extra.src;return q==='part'?NC.sp:q==='asst'?NC.sa:NC.sm});
 }
 function nsBuild(){
   var now=Date.now(),list=[];
@@ -2575,7 +2651,7 @@ async function nativeSync(force){
   try{
     var list=state.profile.notif?nsBuild():[];
     var extra=state.profile.notif?nsSmart():[];
-    var cfg=nsCfg(),custom=nsCustom(),sig=list.map(function(x){return x.t.id+':'+x.due+':'+x.t.t+':'+(x.t.te||'')+':'+(x.t.c||'')+':'+(x.t.p||0)}).join('|')+'#'+extra.map(function(x){return x.id+x.body+x.schedule.at.getTime()}).join('|')+'#'+JSON.stringify(cfg)+(custom?'1':'0')+(nsHasAv()?state.profile.photo:'');
+    var cfg=nsCfg(),custom=nsCustom(),pplan=nsPinWanted()?pinPlan():null,sig=list.map(function(x){return x.t.id+':'+x.due+':'+x.t.t+':'+(x.t.te||'')+':'+(x.t.c||'')+':'+(x.t.p||0)}).join('|')+'#'+extra.map(function(x){return x.id+x.body+x.schedule.at.getTime()}).join('|')+'#'+JSON.stringify(cfg)+(custom?'1':'0')+(nsHasAv()?state.profile.photo:'')+'#'+(pplan?JSON.stringify(pplan):'-');
     if(force||sig!==nsSig){
       if(NL){
         var p=await NL.getPending();
@@ -2589,13 +2665,17 @@ async function nativeSync(force){
         return Object.assign({id:nsId(x.t.id),title:'⏰ '+x.t.t,body:meta.join('  ·  ')||(__("یادآوری")),schedule:{at:new Date(x.due),allowWhileIdle:true},channelId:'reminders',smallIcon:'ic_stat_barnameyar',actionTypeId:'REM',extra:{tid:x.t.id}},nsLook('rem',big));
       });
       if(custom){
-        await AN.replaceAll({items:extra.concat(rl).map(nsToAN),keep:[FO_NID]});
+        await AN.replaceAll({items:extra.concat(rl).map(nsToAN).concat(pplan?pplan.items:[]),keep:[FO_NID]});
       }else{
         if(AN)await AN.replaceAll({items:[],keep:[FO_NID]});
         if(NL){
           if(extra.length)await NL.schedule({notifications:extra});
           if(rl.length)await NL.schedule({notifications:rl});
         }
+      }
+      if(AN){
+        if(pplan)await AN.pin({on:true,now:pplan.now});
+        else await AN.pin({on:false});
       }
       nsSig=sig;
     }
@@ -2606,16 +2686,21 @@ async function nativeSync(force){
 async function nativeInit(){
   widgetSync();
   nsPushStyle().then(function(){nsTakeActs()});
+  setTimeout(nsTakeGo,900);
   if(!NL){askMic();return}
   try{
     await NL.createChannel({id:'reminders',name:(__("یادآورها")),description:(__("یادآوری زمان کارها")),importance:4,visibility:1,vibration:true,lights:true});
     await NL.createChannel({id:'focus',name:(__("پایان تمرکز")),description:(__("اعلان پایان تایمر تمرکز")),importance:4,visibility:1,vibration:true,lights:true});
+    await NL.createChannel({id:'assistant',name:(__("پیام‌های دستیار Ario","Ario assistant messages")),description:(__("پیام‌هایی که دستیار Ario برایت می‌فرستد","Messages from your Ario assistant")),importance:3,visibility:1,vibration:true});
+    await NL.createChannel({id:'advisor',name:(__("پیام‌های مشاور","Advisor messages")),description:(__("پیام‌های مشاور و گروه‌های او","Messages from your advisor and its groups")),importance:4,visibility:1,vibration:true,lights:true});
+    await NL.createChannel({id:'partend',name:(__("پایان پارت","Part finished")),description:(__("وقتی زمان یک پارت جدول تمام می‌شود","When the time of a timetable part is over")),importance:4,visibility:1,vibration:true,lights:true});
     await NL.createChannel({id:'summary',name:(__("خلاصه روزانه")),description:(__("خلاصه صبح و یادآور عصر")),importance:3,visibility:1,vibration:true});
   }catch(e){}
   try{
     await NL.registerActionTypes({types:[{id:'REM',actions:[{id:'snooze',title:(__("۱۰ دقیقه بعد"))},{id:'done',title:(__("انجام شد"))}]}]});
     NL.addListener('localNotificationActionPerformed',function(ev){
       try{
+        if(ev.notification&&ev.notification.extra&&ev.notification.extra.go){nsGo(ev.notification.extra.go);return}
         if(ev.notification&&ev.notification.extra&&ev.notification.extra.kind==='wr'){ui.tab='stats';render();setTimeout(openWr,300);return}
         var tid=ev.notification&&ev.notification.extra&&ev.notification.extra.tid,t=tid&&find(tid);
         if(!t)return;
@@ -2802,7 +2887,7 @@ function askConfirm(o){
   function kd(e){if(e.key==='Escape')close()}
   (o.btns||[]).concat([{t:(__("انصراف"))}]).forEach(function(b){
     var el=document.createElement('button');el.type='button';el.textContent=b.t;if(b.cls)el.className=b.cls;
-    el.addEventListener('click',function(){close(b.fn)});box.appendChild(el);
+    el.addEventListener('click',function(){if(b.cls==='bad')hap('del');close(b.fn)});box.appendChild(el);
   });
   w.querySelector('.dim').addEventListener('click',function(){close()});
   document.addEventListener('keydown',kd);
@@ -2884,6 +2969,127 @@ function bkRestore(raw,silent){
 function bkRestoreExact(snap){
   try{var j=JSON.parse(snap);state.tasks=cleanTasks(j.tasks);if(Array.isArray(j.cats))setCats(j.cats);state.hist=cleanHist(j.hist);state.profile=P(j.profile);applyTheme();mutate()}catch(e){}
 }
+/* ---------- full backup WITH media (v270) ----------
+   Photos, videos, voice messages, handwritten notes and library files live in IndexedDB ("ario_files") and used to be missing from the .json backup.
+   One file (.ariobk) = the normal backup data + every IndexedDB record, written record by record so a big library never has to fit in memory.
+   Layout: "ARIOBK1\n", then records: [4 bytes big-endian N][N bytes JSON header {k,j,b:[{s,t}]} or {meta}][the blobs listed in b, back to back]. */
+var BKM_MAGIC='ARIOBK1\n',BKM_CH=3*1024*1024;
+function bkmGroup(k){k=String(k);
+  if(/^vnp?_/.test(k))return 'chat';
+  if(/^spt?_/.test(k))return 'proof';
+  if(/^(nt_|ni_|nv_|ptx_)/.test(k)||k==='ntx')return 'notes';
+  if(/^pc_/.test(k))return 'skip';           /* thumbnail cache: rebuilt by itself */
+  return 'lib'}
+function bkmSize(v){
+  if(v instanceof Blob)return v.size;
+  if(Array.isArray(v)){var a=0;v.forEach(function(x){a+=bkmSize(x)});return a}
+  if(v&&typeof v==='object'){var n=0;Object.keys(v).forEach(function(k){n+=bkmSize(v[k])});return n}
+  return 0}
+function bkmPack(v,bl){
+  if(v instanceof Blob){bl.push(v);return {$b:bl.length-1}}
+  if(Array.isArray(v))return v.map(function(x){return bkmPack(x,bl)});
+  if(v&&typeof v==='object'){var o={};Object.keys(v).forEach(function(k){o[k]=bkmPack(v[k],bl)});return o}
+  return v}
+function bkmUnpack(v,bl){
+  if(Array.isArray(v))return v.map(function(x){return bkmUnpack(x,bl)});
+  if(v&&typeof v==='object'){
+    if(typeof v.$b==='number'&&bl[v.$b])return bl[v.$b];
+    var o={};Object.keys(v).forEach(function(k){o[k]=bkmUnpack(v[k],bl)});return o}
+  return v}
+function bkmMB(n){var m=n/1048576;return fa(m>=10?Math.round(m):(Math.round(m*10)/10))+' '+__("مگابایت","MB")}
+function bkmB64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(String(r.result).split(',')[1]||'')};r.onerror=function(){rej(r.error)};r.readAsDataURL(blob)})}
+function bkmHead(h){var hb=new TextEncoder().encode(JSON.stringify(h)),l=new Uint8Array(4);new DataView(l.buffer).setUint32(0,hb.length);return new Blob([l,hb])}
+var BKM_GROUPS=[
+  ['chat',__("گفتگوها (پیام‌های صوتی و تصویری)","Chats (voice and video messages)")],
+  ['proof',__("مدارک مطالعه (عکس و فیلم)","Study proof (photos and videos)")],
+  ['notes',__("یادداشت‌های دست‌خط، صدا و متن‌ها","Handwritten notes, recordings and texts")],
+  ['lib',__("کتابخانه (کتاب‌ها، PDFها و عکس‌ها)","Library (books, PDFs and photos)")]
+];
+async function bkmScan(){
+  var ks=await fdbReq('readonly',function(st){return st.getAllKeys()}),g={},i,v;
+  for(i=0;i<(ks||[]).length;i++){
+    var gr=bkmGroup(ks[i]);if(gr==='skip')continue;
+    try{v=await fdbGet(ks[i])}catch(e){continue}
+    var o=g[gr]||(g[gr]={n:0,b:0});o.n++;o.b+=bkmSize(v);
+  }
+  return g}
+async function bkmExport(sel){
+  var FS=capGet('Filesystem'),SH=capGet('Share'),native=!!(FS&&SH),name='ario-full-'+todayKey()+'.ariobk',uri='',wrote=false,pend=[],pendN=0,parts=[];
+  if(native){try{await FS.deleteFile({path:name,directory:'CACHE'})}catch(e){}}
+  async function flush(){
+    if(!pend.length)return;var b=new Blob(pend),d=await bkmB64(b);pend=[];pendN=0;
+    if(!wrote){var r=await FS.writeFile({path:name,data:d,directory:'CACHE'});uri=r.uri;wrote=true}
+    else await FS.appendFile({path:name,data:d,directory:'CACHE'});
+  }
+  async function emit(blob){
+    if(!native){parts.push(blob);return}
+    for(var o=0;o<blob.size||o===0;o+=BKM_CH){
+      var pc=blob.slice(o,o+BKM_CH);pend.push(pc);pendN+=pc.size;
+      if(pendN>=BKM_CH)await flush();
+      if(blob.size===0)break;
+    }
+  }
+  var ks=(await fdbReq('readonly',function(st){return st.getAllKeys()}))||[];
+  ks=ks.filter(function(k){var g=bkmGroup(k);return g!=='skip'&&sel[g]});
+  await emit(new Blob([BKM_MAGIC]));
+  await emit(bkmHead({meta:bkData(),b:[]}));
+  var i,done=0,tot=0;
+  for(i=0;i<ks.length;i++){
+    var v;try{v=await fdbGet(ks[i])}catch(e){continue}
+    if(v==null)continue;
+    var bl=[],j=bkmPack(v,bl);
+    await emit(bkmHead({k:String(ks[i]),j:j,b:bl.map(function(b){return {s:b.size,t:b.type||''}})}));
+    for(var q=0;q<bl.length;q++){await emit(bl[q]);tot+=bl[q].size}
+    done++;
+    if(i%4===0){bkMsg(__("در حال ساخت فایل…","Building the file…")+' '+fa(Math.round((i+1)/ks.length*100))+(EN?'%':'٪'));await new Promise(function(r){setTimeout(r,0)})}
+  }
+  if(native){
+    await flush();
+    bkMsg(__("فایل آماده است؛ از منوی بعدی محل ذخیره یا برنامهٔ ارسال را انتخاب کن.","The file is ready. Pick where to save or send it."));
+    try{await SH.share({title:__("پشتیبان کامل Ario","Ario full backup"),url:uri,dialogTitle:__("ذخیره یا ارسال پشتیبان کامل","Save or send the full backup")})}catch(e){if(!/cancel/i.test(String(e&&e.message||e)))throw e}
+  }else{
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(parts));a.download=name;
+    document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},8000);
+  }
+  bkMsg(__("پشتیبان کامل ساخته شد.","The full backup is ready.")+' ('+fa(done)+' '+__("فایل","files")+' · '+bkmMB(tot)+')');
+}
+async function bkmImport(f){
+  async function rd(a,b){return new Uint8Array(await f.slice(a,b).arrayBuffer())}
+  if(f.size<12||String.fromCharCode.apply(null,await rd(0,8))!==BKM_MAGIC){bkMsg(__("این فایل پشتیبان کامل Ario نیست.","This is not an Ario full backup file."),1);return}
+  var off=8,added=0,skipped=0,meta=null,dec=new TextDecoder();
+  while(off+4<=f.size){
+    var hl=new DataView((await rd(off,off+4)).buffer).getUint32(0);off+=4;
+    if(off+hl>f.size)throw new Error('cut');
+    var h=JSON.parse(dec.decode(await rd(off,off+hl)));off+=hl;
+    var bl=(h.b||[]).map(function(x){var b=f.slice(off,off+x.s,x.t||'');off+=x.s;return b});
+    if(off>f.size)throw new Error('cut');
+    if(h.meta){meta=h.meta;continue}
+    if(typeof h.k!=='string'||!h.k||bkmGroup(h.k)==='skip')continue;
+    var have=null;try{have=await fdbGet(h.k)}catch(e){}
+    if(have!=null){skipped++;continue}
+    await fdbPut(h.k,bkmUnpack(h.j,bl));added++;
+    if(added%5===0){bkMsg(__("در حال بازیابی رسانه‌ها…","Restoring media…")+' '+fa(Math.min(99,Math.round(off/f.size*100)))+(EN?'%':'٪'));await new Promise(function(r){setTimeout(r,0)})}
+  }
+  try{ntx=null;ntxP=null;PTX.ld={};PTX.d={}}catch(e){}
+  bkMsg(fa(added)+' '+__("فایل رسانه بازیابی شد","media files restored")+(skipped?(' · '+fa(skipped)+' '+__("مورد از قبل بود","already here")):''));
+  if(meta)bkRestore(meta);
+}
+async function bkmAsk(){
+  var box=bk.el&&bk.el.querySelector('.bkmbox');if(!box)return;
+  box.innerHTML='<div class="hint2">'+__("در حال بررسی حجم رسانه‌ها…","Checking media size…")+'</div>';
+  var g;try{g=await bkmScan()}catch(e){box.innerHTML='';bkMsg(__("خواندن رسانه‌ها ممکن نشد.","Could not read the media."),1);return}
+  var h='',tot=0;
+  BKM_GROUPS.forEach(function(x){var o=g[x[0]];if(!o||!o.n)return;tot+=o.b;
+    h+='<label class="bkck"><input type="checkbox" data-g="'+x[0]+'" checked><span>'+esc(x[1])+'<small>'+fa(o.n)+' '+__("مورد","items")+' · '+bkmMB(o.b)+'</small></span></label>'});
+  if(!h){box.innerHTML='';bkMsg(__("رسانه‌ای روی این گوشی نیست؛ فایل فقط شامل کارها و تنظیمات می‌شود.","There is no media on this phone; the file will hold only your tasks and settings."));h=''}
+  box.innerHTML=h+'<button type="button" class="bkb" data-bk="mgo">'+icon('cloud')+'<span>'+__("ساخت فایل پشتیبان کامل","Build the full backup file")+'<small>'+__("فایل بزرگ می‌شود؛ بهتر است به فضای ذخیره یا Wi-Fi دسترسی داشته باشی.","The file can be large; keep enough free space.")+'</small></span></button>';
+}
+async function bkmGo(){
+  var box=bk.el&&bk.el.querySelector('.bkmbox'),sel={};
+  if(box)[].forEach.call(box.querySelectorAll('input[data-g]'),function(c){if(c.checked)sel[c.dataset.g]=1});
+  bkMsg(__("در حال ساخت فایل…","Building the file…"));
+  try{await bkmExport(sel)}catch(e){bkMsg(__("ساخت پشتیبان کامل شکست خورد: ","The full backup failed: ")+String(e&&e.message||e),1)}
+}
 function openBk(){
   if(bk.el)return;
   var w=document.createElement('div');w.className='sheet-wrap';w.id='bkSheet';
@@ -2894,6 +3100,10 @@ function openBk(){
     '<button type="button" class="bkb" data-bk="copy">'+icon('edit')+("<span>"+__("کپی کردن متن پشتیبان")+"<small>"+__("برای چسباندن در یادداشت‌ها یا پیام‌رسان")+"</small></span></button>")+
     '<button type="button" class="bkb" data-bk="pick">'+icon('refresh')+("<span>"+__("بازیابی از فایل")+"<small>"+__("فایل پشتیبانی که قبلاً گرفتی را انتخاب کن")+"</small></span></button>")+
     '<input type="file" id="bkFile" accept=".json,application/json,text/plain" hidden>'+
+    '<input type="file" id="bkmFile" hidden>'+
+    '<button type="button" class="bkb" data-bk="mfile">'+icon('cloud')+("<span>"+__("پشتیبان کامل با رسانه‌ها","Full backup with media")+"<small>"+__("عکس، فیلم، صدا، یادداشت‌های دست‌خط و کتابخانه هم داخل فایل می‌آیند (.ariobk)","Photos, videos, voice, handwritten notes and the library go into the file (.ariobk)")+"</small></span></button>")+
+    '<div class="bkmbox"></div>'+
+    '<button type="button" class="bkb" data-bk="mpick">'+icon('refresh')+("<span>"+__("بازیابی پشتیبان کامل","Restore a full backup")+"<small>"+__("فایل .ariobk را انتخاب کن؛ رسانه‌ها و بعد کارها بازیابی می‌شوند","Pick the .ariobk file; media comes back first, then your tasks")+"</small></span></button>")+
     ("<textarea class=\"field\" placeholder=\""+__("یا متن پشتیبان را اینجا بچسبان")+"\" aria-label=\""+__("متن پشتیبان")+"\"></textarea>")+
     '<button type="button" class="bkb" data-bk="paste">'+icon('check')+("<span>"+__("بازیابی از متن چسبانده‌شده")+"</span></button>")+
     '<div class="bkmsg" role="status"></div></div>';
@@ -2906,7 +3116,15 @@ function openBk(){
     else if(a==='file')bkExportFile();
     else if(a==='copy')bkExportText();
     else if(a==='pick')w.querySelector('#bkFile').click();
+    else if(a==='mfile')bkmAsk();
+    else if(a==='mgo')bkmGo();
+    else if(a==='mpick')w.querySelector('#bkmFile').click();
     else if(a==='paste'){var v=w.querySelector('textarea').value.trim();if(!v){bkMsg((__("اول متن پشتیبان را بچسبان.")),1);return}bkRestore(v)}
+  });
+  w.querySelector('#bkmFile').addEventListener('change',function(e){
+    var f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;
+    bkMsg(__("در حال خواندن فایل…","Reading the file…"));
+    bkmImport(f).catch(function(){bkMsg(__("فایل ناقص یا خراب است؛ بازیابی کامل نشد.","The file is damaged or incomplete; the restore did not finish."),1)});
   });
   w.querySelector('#bkFile').addEventListener('change',function(e){
     var f=e.target.files&&e.target.files[0];if(!f)return;
@@ -3378,7 +3596,7 @@ async function voiceListen(prompt,btn){
   vcErr='';vcHit=false;
   /* somebody else is using the microphone right now (a voice message is being recorded, or another listening is running).
      A lock that was never released (older than 45 s) is ignored, so one failed try can never block the microphone for good. */
-  if(vcBusy&&((typeof VN!=='undefined'&&VN.rec)||Date.now()-vcT<45000)){vcHit=true;return ''}
+  if(vcBusy&&((typeof VN!=='undefined'&&VN.rec)||(typeof PVV!=='undefined'&&PVV.rec)||Date.now()-vcT<45000)){vcHit=true;return ''}
   vcBusy=true;vcT=Date.now();
   try{
     if(SRN){
@@ -3439,6 +3657,8 @@ async function qaMic(){
   var btn=document.getElementById('qaMic');
   var t=await voiceListen((__("کار را بگو (مثلاً فردا ساعت ۵ جلسه)")),btn);
   if(t)qaFill(t);
+  else if(vcHit)toast(__('میکروفون هنوز مشغول است؛ چند ثانیه بعد دوباره بزن','The microphone is still busy; try again in a few seconds'),null,null,'info');
+  else if(!vcErr)toast(__('چیزی شنیده نشد؛ دوباره امتحان کن','Nothing was heard; try again'),null,null,'info');
 }
 /* spoken Persian numbers and durations: "دو ساعت و نیم", "۴۵ دقیقه", "بیست و پنج تست" */
 var VW={'صفر':0,'یک':1,'یه':1,'دو':2,'سه':3,'چهار':4,'پنج':5,'شش':6,'شیش':6,'هفت':7,'هشت':8,'نه':9,'ده':10,'یازده':11,'دوازده':12,'سیزده':13,'چهارده':14,'پانزده':15,'پونزده':15,'شانزده':16,'شونزده':16,'هفده':17,'هجده':18,'نوزده':19,'بیست':20,'سی':30,'چهل':40,'پنجاه':50,'شصت':60,'هفتاد':70,'هشتاد':80,'نود':90,'صد':100,'دویست':200,'سیصد':300,'چهارصد':400,'پانصد':500,'ششصد':600,'هفتصد':700,'هشتصد':800,'نهصد':900};
@@ -4058,17 +4278,22 @@ actions.openFocus=openFocus;
 
 
 /* ---------- notification look sheet (theme, banner background, what to show) ---------- */
-var NS_THEMES=[['sys',(__("پیش‌فرض سیستم"))],['light',(__("روشن"))],['dark',(__("تیره"))],['banner',(__("بنر پروفایل"))]];
+var NS_THEMES=[['sys',(__("پیش‌فرض سیستم"))],['light',(__("روشن"))],['dark',(__("تیره"))],['banner',(__("بنر پروفایل"))],['custom',(__("رنگ دلخواه"))]];
 var NS_TOG=[['time','clock',(__("ساعت کار")),(__("مثلاً «۱۶:۰۰ تا ۱۸:۰۰» در اعلان"))],['cat','lists',(__("نام دسته")),(__("مثلاً مطالعه یا کار"))],['pri','flag',(__("اولویت")),(__("نشان «مهم» و «فوری»"))],['list','all',(__("فهرست کارها")),(__("زیر خلاصه‌ی صبح و عصر"))],['name','user',(__("نام من")),(__("کنار «صبح بخیر»"))],['focus','timer',(__("تایمر زنده‌ی تمرکز")),(__("شمارش معکوس در نوار اعلان"))]];
 function nsThemeName(){var t=NS_THEMES.filter(function(x){return x[0]===nsCfg().th})[0];return t?t[1]:''}
+function nsLum(h){var n=parseInt(String(h).slice(1),16),r=n>>16&255,g=n>>8&255,b=n&255;return (.299*r+.587*g+.114*b)/255}
 function nsPrevHTML(c){
   var meta=[c.time?'🕒 '+fa('16:00')+(" "+__("تا")+" ")+fa('18:00'):'',c.cat?(__("🏷 مطالعه")):'',c.pri?(__("🔥 فوری")):''].filter(Boolean).join('  ·  ')||(__("یادآوری"));
   var st=c.th==='banner'?' style="background:linear-gradient(90deg,rgba(8,12,28,.42),rgba(8,12,28,.68)),url(img/'+nsBannerFile()+'.webp) center/cover"':'';
-  function card(inner,col,cls){return '<div class="nsp nsp-'+c.th+(cls?' '+cls:'')+'"'+st+'><i class="nsb" style="background:'+col+'"></i>'+inner+'</div>'}
-  var h=card(("<div class=\"nsp-t\"><b>"+__("⏰ تست ریاضی فصل ۳")+"</b><span>")+esc(meta)+'</span></div>','#3D63F0');
+  if(c.th==='custom')st=' style="background:'+c.bg+';color:'+(nsLum(c.bg)>.6?'#14203f':'#fff')+'"';
+  var k=c.tx==='s'?.9:c.tx==='l'?1.14:1,av=nsHasAv()?'url(img/'+state.profile.photo+'.webp) center/cover':'linear-gradient(150deg,#6f8cff,#3D63F0)';
+  function li(col){return c.li==='none'?'':'<i class="nsp-li" style="background:'+(c.li==='photo'?av:'linear-gradient(150deg,#6f8cff,#3D63F0)')+'"></i>'}
+  function card(inner,col,extra){col=c.ac||col;return '<div class="nsp nsp-'+c.th+'"'+st+'>'+(c.bar&&c.th!=='sys'?'<i class="nsb" style="background:'+col+'"></i>':'<i class="nsb" style="background:'+col+';opacity:0;width:0"></i>')+li(col)+inner+'</div>'+(extra||'')}
+  var btns=c.ab?'<div class="nsp-ab"><span>'+__("۱۰ دقیقه بعد")+'</span><span>'+__("انجام شد")+'</span></div>':'';
+  var h=card(("<div class=\"nsp-t\"><b>"+__("⏰ تست ریاضی فصل ۳")+"</b><span>")+esc(meta)+'</span></div>','#3D63F0',btns);
   h+=card(("<div class=\"nsp-t\"><b>"+__("☀️ صبح بخیر"))+(c.name?' '+esc(displayName()):'')+'</b><span>'+fa(3)+(" "+__("کار داری")+"</span>")+(c.list?'<span>• '+fa('16:00')+("  "+__("تست ریاضی فصل ۳")+"</span><span>• ")+fa('18:30')+("  "+__("ورزش")+"</span>"):'')+'</div>','#F59E0B');
   if(c.focus)h+=card(("<div class=\"nsp-t\"><b>"+__("🎯 در حال تمرکز")+"</b><span>"+__("تست ریاضی فصل ۳")+"</span></div><em class=\"nsp-tm\">")+fa('24:59')+'</em>','#FF375F');
-  return '<div class="nsp-w">'+h+'</div>';
+  return '<div class="nsp-w" style="--nsk:'+k+'">'+h+'</div>';
 }
 function nsTest(){
   if(!AN&&!NL){toast((__("اعلان آزمایشی فقط روی برنامه‌ی اندروید کار می‌کند")),null,null,'info');return}
@@ -4095,24 +4320,37 @@ function openNsStyle(){
         BNS.filter(bnOpen).map(function(b){return '<button type="button" class="bno" data-nbn="'+b[0]+'" aria-pressed="'+(cur===b[0])+'"><span class="bnp bn-'+b[0]+'"></span><b>'+b[1]+("</b><small>"+__("باز شده")+"</small></button>")}).join('')+'</div>'+
         ("<p class=\"hint\">"+__("بنرهایی که هنوز باز نکرده‌ای اینجا نیستند؛ با بالا رفتن سطح یا VIP باز می‌شوند.")+"</p></div>");
     }
+    var NS_BG=['#1B2033','#0F172A','#2A2A2A','#FFFFFF','#FFF7E6','#E8F0FF','#1F3A2E','#3B1F3F'],NS_AC=['#3D63F0','#F59E0B','#7C4DFF','#16A34A','#FF375F','#06B6D4','#EC4899'];
+    function swatches(attr,list,cur,withAuto,cp){return '<div class="colrow">'+(withAuto?'<button type="button" class="swatch def" data-'+attr+'="" aria-pressed="'+(cur==='')+'">'+__("خودکار")+'</button>':'')+list.map(function(x){return '<button type="button" class="swatch" style="--cc:'+x+'" data-'+attr+'="'+x+'" aria-pressed="'+(cur===x)+'" aria-label="'+x+'"></button>'}).join('')+'<label class="swatch cust" aria-label="'+__("رنگ دلخواه")+'"><input type="color" data-ncp="'+cp+'" value="'+(cur||'#3D63F0')+'"></label></div>'}
+    function chipsOf(attr,list,cur){return '<div class="chips">'+list.map(function(o){return '<button type="button" class="chip" data-'+attr+'="'+o[0]+'" aria-pressed="'+(cur===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>'}
+    var look=(c.th==='custom'?("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("رنگ پس‌زمینه")+"</b></div>")+swatches('nbg',NS_BG,c.bg,false,'bg')+'</div>':'')+
+      ("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("رنگ تأکید")+"</b></div>")+swatches('nac',NS_AC,c.ac,true,'ac')+("<p class=\"hint\">"+__("رنگ آیکن کوچک و نوار کناری؛ «خودکار» یعنی هر بخش رنگ خودش را دارد.")+"</p></div>")+
+      (c.th!=='sys'?("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("اندازه متن")+"</b></div>")+chipsOf('ntx',[['s',__("کوچک")],['m',__("معمولی")],['l',__("بزرگ")]],c.tx)+'</div>':'')+
+      ("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("آیکن بزرگ")+"</b></div>")+chipsOf('nli',[['photo',__("عکس پروفایل")],['app',__("آیکن برنامه")],['none',__("بدون آیکن")]],c.li)+'</div>'+
+      '<div class="sec"><div class="qsheet">'+(c.th!=='sys'?'<button type="button" class="qrow" role="switch" aria-checked="'+!!c.bar+'" data-ntg="bar"><span class="h3d">'+icon('spark')+'</span><span class="qt"><b>'+__("نوار رنگی کنار اعلان")+'</b><small>'+__("خط باریک با رنگ هر بخش")+'</small></span><span class="sw"></span></button>':'')+
+      '<button type="button" class="qrow" role="switch" aria-checked="'+!!c.ab+'" data-ntg="ab"><span class="h3d">'+icon('check')+'</span><span class="qt"><b>'+__("دکمه‌های اعلان")+'</b><small>'+__("«۱۰ دقیقه بعد» و «انجام شد» زیر یادآور")+'</small></span><span class="sw"></span></button></div></div>';
     var tg='<div class="qsheet">'+NS_TOG.map(function(it){
       return '<button type="button" class="qrow" role="switch" aria-checked="'+!!c[it[0]]+'" data-ntg="'+it[0]+'"><span class="h3d">'+icon(it[1])+'</span><span class="qt"><b>'+it[2]+'</b><small>'+it[3]+'</small></span><span class="sw"></span></button>';
     }).join('')+'</div>';
     body.innerHTML=nsPrevHTML(c)+
       (native?'':("<p class=\"hint\">"+__("این تنظیمات روی برنامه‌ی اندروید در نوار اعلان گوشی اعمال می‌شود؛ اینجا فقط پیش‌نمایش است.")+"</p>"))+
       ("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("تم اعلان")+"</b></div>")+themes+
-      (c.th==='sys'?("<p class=\"hint\">"+__("ظاهر معمولی اندروید؛ فقط متن‌ها و رنگ آیکن زیباتر شده است.")+"</p>"):'')+'</div>'+bns+
+      (c.th==='sys'?("<p class=\"hint\">"+__("ظاهر معمولی اندروید؛ فقط متن‌ها و رنگ آیکن زیباتر شده است.")+"</p>"):'')+'</div>'+bns+look+
       ("<div class=\"sec\"><div class=\"sec-h\"><b>"+__("چه چیزی در اعلان باشد")+"</b></div>")+tg+'</div>'+
       '<div class="tt-eb"><button type="button" class="tt-btn pri" data-e="test">'+icon('bell')+(__("اعلان آزمایشی")+"</button><button type=\"button\" class=\"tt-btn\" data-e=\"close\">"+__("بستن")+"</button></div>");
   }
   paint();
   function done(){if(ui.tab==='account')render()}
   w.addEventListener('click',function(e){
-    var b=e.target.closest('[data-e],[data-nth],[data-nbn],[data-ntg]');if(!b)return;
+    var b=e.target.closest('[data-e],[data-nth],[data-nbn],[data-ntg],[data-nbg],[data-nac],[data-ntx],[data-nli]');if(!b)return;
     if(b.dataset.e==='close'){sw.close();done();return}
     if(b.dataset.e==='test'){nsTest();return}
     var c=nsCfg();
-    if(b.dataset.nth!=null)c.th=b.dataset.nth;
+    if(b.dataset.nth!=null){c.th=b.dataset.nth}
+    else if(b.dataset.nbg!=null)c.bg=b.dataset.nbg;
+    else if(b.dataset.nac!=null)c.ac=b.dataset.nac;
+    else if(b.dataset.ntx!=null)c.tx=b.dataset.ntx;
+    else if(b.dataset.nli!=null)c.li=b.dataset.nli;
     else if(b.dataset.nbn!=null)c.bn=b.dataset.nbn;
     else if(b.dataset.ntg)c[b.dataset.ntg]=!c[b.dataset.ntg];
     state.profile.ns=c;writeCache();persist();
@@ -4120,9 +4358,379 @@ function openNsStyle(){
     nsPushStyle().then(function(){nativeSync(true)});
     if(!c.focus&&FN)FN.clear().catch(function(){});
   });
+  /* the free colour picker: commit once the person confirms the colour */
+  w.addEventListener('change',function(e){
+    var i=e.target.closest('input[data-ncp]');if(!i)return;
+    var c=nsCfg();c[i.dataset.ncp]=String(i.value).toUpperCase();
+    state.profile.ns=c;writeCache();persist();paint();
+    nsPushStyle().then(function(){nativeSync(true)});
+  });
   w.querySelector('.dim').addEventListener('click',done);
 }
 actions.openNsStyle=openNsStyle;
+
+/* ---------- notification sources, pinned bar, advisor messages ----------
+   Every automatic notification belongs to a section and carries that section's icon in the status bar:
+   Ario (assistant), the advisor's four groups (plan / report / motivation / activity) and "part finished".
+   The icons are monochrome vector drawables (native/res/drawable/ic_stat_*.xml); PN_PATHS has the same shapes for the settings sheet. */
+var PN_PATHS={ario:'M12,2C7.58,2 4,5.58 4,10v11.5l2.67,-2.3 2.66,2.3 2.67,-2.3 2.67,2.3 2.66,-2.3L20,21.5V10C20,5.58 16.42,2 12,2z M7.9,8.4a1.3,1.8 0 1,0 2.6,0a1.3,1.8 0 1,0 -2.6,0z M13.5,8.4a1.3,1.8 0 1,0 2.6,0a1.3,1.8 0 1,0 -2.6,0z',adv:'M4,3h16c1.1,0 2,0.9 2,2v11c0,1.1 -0.9,2 -2,2H9.5L5,22.5V18H4c-1.1,0 -2,-0.9 -2,-2V5c0,-1.1 0.9,-2 2,-2z M6.5,7.5h11v1.6h-11z M6.5,11h7v1.6h-7z',plan:'M7,2v2H5C3.9,4 3,4.9 3,6v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V6c0,-1.1 -0.9,-2 -2,-2h-2V2h-2v2H9V2H7z M5,10h14v10H5z M7,12h4v4H7z',rep:'M6,2h8l6,6v12c0,1.1 -0.9,2 -2,2H6c-1.1,0 -2,-0.9 -2,-2V4c0,-1.1 0.9,-2 2,-2z M8,12h8v1.6H8z M8,15.5h8v1.6H8z M8,8.5h4v1.6H8z',mot:'M7,2v11h3v9l7,-12h-4l4,-8z',act:'M12,2a10,10 0 1,0 0,20a10,10 0 1,0 0,-20z M12,4.2a7.8,7.8 0 1,1 0,15.6a7.8,7.8 0 1,1 0,-15.6z M12,6.6a5.4,5.4 0 1,0 0,10.8a5.4,5.4 0 1,0 0,-10.8z M12,8.8a3.2,3.2 0 1,1 0,6.4a3.2,3.2 0 1,1 0,-6.4z M12,10.6a1.4,1.4 0 1,0 0,2.8a1.4,1.4 0 1,0 0,-2.8z',part:'M12,2a10,10 0 1,0 0,20a10,10 0 1,0 0,-20z M11,6.5h2v5.6l3.8,2.3 -1,1.7 -4.8,-2.9z'};
+function nsSrc(k){
+  var T={
+    asst:{ico:'ic_stat_ario',col:'#7C4DFF',ch:'assistant',go:'',lb:'Ario · '+__('دستیار','Assistant'),nm:__('دستیار Ario','Ario assistant'),pk:'ario'},
+    plan:{ico:'ic_stat_adv_plan',col:'#ef5b7a',ch:'advisor',go:'adv:plan',lb:__('مشاور · برنامه مطالعاتی','Advisor · Study plan'),nm:__('مشاور: برنامه مطالعاتی','Advisor: study plan'),pk:'plan'},
+    rep:{ico:'ic_stat_adv_rep',col:'#3b9bd9',ch:'advisor',go:'adv:rep',lb:__('مشاور · گزارش‌کار شبانه','Advisor · Night report'),nm:__('مشاور: گزارش‌کار شبانه','Advisor: night report'),pk:'rep'},
+    mot:{ico:'ic_stat_adv_mot',col:'#f2a93b',ch:'advisor',go:'adv:mot',lb:__('مشاور · انگیزشی','Advisor · Motivation'),nm:__('مشاور: انگیزشی','Advisor: motivation'),pk:'mot'},
+    act:{ico:'ic_stat_adv_act',col:'#8b5cf6',ch:'advisor',go:'adv:act',lb:__('مشاور · فعالیت','Advisor · Activity'),nm:__('مشاور: فعالیت','Advisor: activity'),pk:'act'},
+    part:{ico:'ic_stat_part',col:'#F97316',ch:'partend',go:'adv:act',lb:__('مشاور · پایان پارت','Advisor · Part finished'),nm:__('پایان پارت','Part finished'),pk:'part'}
+  };
+  return T[k]||T.asst;
+}
+/* puts a notification (LocalNotifications shape) into a section: channel, status-bar icon, colour, label under the title, where a tap goes */
+function nsTag(o,src,go){
+  var S=nsSrc(src),c=nsCfg();
+  o.channelId=S.ch;o.smallIcon=c.sic?S.ico:'ic_stat_barnameyar';o.iconColor=S.col;o.summaryText=S.lb;
+  o.extra=Object.assign({},o.extra,{src:src,go:go||S.go});
+  return o;
+}
+/* tap on a notification: open the section it came from */
+function nsGo(g){
+  try{
+    if(!g)return;
+    if(g==='wr'){ui.tab='stats';render();setTimeout(openWr,300);return}
+    var m=/^adv:(plan|rep|mot|act)$/.exec(g);
+    if(m){actions.kcAdv();actions.kcsec({v:m[1]});return}
+    if(g==='today'){ui.tab='today';render()}
+    if(g==='ao'){aoOpen();return}
+    if(g==='cd'){cdOpen('');return}
+  }catch(e){}
+}
+async function nsTakeGo(){
+  if(!AN)return;
+  try{var r=await AN.takeGo();if(r&&r.go)nsGo(r.go)}catch(e){}
+}
+if(AN)setInterval(function(){if(!document.hidden)nsTakeGo()},2500);
+
+
+/* ---------- new messages from Ario / the advisor ----------
+   a message the person has not seen yet (the chat is closed or the app is in the background) is announced in three ways:
+   a banner inside the app, a phone notification, and a number on the section (the Ario button, the advisor card and each advisor group).
+   The number goes away as soon as the chat is open on screen. */
+function unSecs(){return ['plan','rep','mot','act']}
+function unClean(x){
+  var o={plan:0,rep:0,mot:0,act:0,ao:0,aoq:[],dl:{},lc:0};
+  if(x&&typeof x==='object'){
+    unSecs().concat(['ao']).forEach(function(k){var n=Math.round(Number(x[k]));if(n>0&&n<1000)o[k]=n});
+    if(Array.isArray(x.aoq))o.aoq=x.aoq.filter(function(m){return m&&typeof m.t==='string'}).slice(-10).map(function(m){return {t:m.t.slice(0,600),ts:Number(m.ts)||0}});
+    if(x.dl&&typeof x.dl==='object')Object.keys(x.dl).slice(-30).forEach(function(k){if(/^[a-z]{2,4}:\d{4}-\d{2}-\d{2}$/.test(k))o.dl[k]=1});
+    o.lc=Number(x.lc)||0;
+  }
+  return o;
+}
+function unD(){var p=state.profile;if(!p.un||p.un.__ok!==1){p.un=unClean(p.un);Object.defineProperty(p.un,'__ok',{value:1,enumerable:false,writable:true})}return p.un}
+function unTotalAdv(){var d=unD();return unSecs().reduce(function(a,k){return a+d[k]},0)}
+function unViewing(src){
+  if(document.hidden)return false;
+  if(src==='asst')return typeof AO!=='undefined'&&!!AO.open;
+  return ui.tab==='kcm'&&ui.kcsec===src;
+}
+function unPut(el,n){
+  if(!el)return;
+  var b=el.querySelector(':scope > .un-b');
+  if(!n){if(b){b.classList.add('out');setTimeout(function(){if(b.parentNode&&b.classList.contains('out'))b.remove()},300)}return}
+  if(!b){b=document.createElement('span');b.className='un-b';b.setAttribute('role','status');el.appendChild(b)}
+  b.classList.remove('out');
+  var t=n>9?'9+':fa(n);
+  if(b.textContent!==t){b.textContent=t;b.classList.remove('pop');void b.offsetWidth;b.classList.add('pop')}
+  b.setAttribute('aria-label',__('پیام جدید','New message')+' '+t);
+}
+function unPaint(){
+  try{
+    var d=unD(),tot=unTotalAdv();
+    unPut(document.querySelector('.tab[data-tab="kk"]'),tot);
+    unPut(document.getElementById('aoFab'),d.ao);
+    [].forEach.call(document.querySelectorAll('[data-act="kcAdv"]'),function(el){unPut(el,tot)});
+    [].forEach.call(document.querySelectorAll('.kc-topic[data-v]'),function(el){unPut(el.querySelector('.kc-tt'),d[el.dataset.v]||0)});
+  }catch(e){}
+}
+function unClear(k){
+  try{var d=unD();if(!d[k])return;d[k]=0;if(k==='ao')d.aoq=[];writeCache();persist();unPaint()}catch(e){}
+}
+var unNid=0;
+/* src: asst | plan | rep | mot | act. o.native === false: the phone notification already exists (a scheduled one) */
+function msgNew(src,title,body,o){
+  o=o||{};
+  try{
+    if(unViewing(src))return false;
+    var d=unD(),k=src==='asst'?'ao':src,cf=nsCfg();
+    d[k]=Math.min(999,d[k]+1);
+    if(src==='asst'&&o.keep!==false){d.aoq.push({t:body,ts:Date.now()});d.aoq=d.aoq.slice(-10)}
+    writeCache();persist();unPaint();
+    if(src!=='asst'&&kcMuted(src))return true;
+    if(o.banner!==false&&!document.hidden)notify('info',title,body,__('باز کردن','Open'),function(){nsGo(src==='asst'?'ao':'adv:'+src)});
+    var allow=src==='asst'?cf.sa:src==='act'?cf.sp:cf.sm;
+    if(o.native!==false&&allow&&state.profile.notif&&(AN||NL)){
+      var n=nsTag(Object.assign({id:2100000700+(unNid++%20),title:title,body:body,schedule:{at:new Date(Date.now()+600),allowWhileIdle:true},extra:{kind:'sum'}},nsLook('sum',body)),src,src==='asst'?'ao':'');
+      if(nsCustom())AN.add({items:[nsToAN(n)]}).catch(function(){});
+      else if(NL)NL.schedule({notifications:[n]}).catch(function(){});
+    }
+    return true;
+  }catch(e){return false}
+}
+/* messages that were sent while the app was closed (their phone notification already came): put them in the chats and count them */
+function msgCatchUp(){
+  try{
+    var d=unD(),now=Date.now(),cf=nsCfg(),p=state.profile,td=todayKey(),ch=false,i;
+    if(!d.lc){d.lc=now;return}
+    var from=Math.max(d.lc,now-3*864e5);d.lc=now;
+    var at=function(k,hm){var q=hm.split(':').map(Number),x=parse(k);x.setHours(q[0],q[1],0,0);return x.getTime()};
+    for(i=-3;i<=0;i++){
+      var k=addDays(td,i),w,key;
+      if(cf.sm&&cf.mm&&HMRE.test(cf.mm)&&advUsed()&&!kcMuted('mot')){
+        w=at(k,cf.mm);key='mot:'+k;
+        if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;kcD().ch.mot.push({r:'a',t:kcQs()[Math.floor(w/864e5)%kcQs().length],ts:w});d.mot++;ch=true}
+      }
+      if(cf.sm&&cf.mr&&HMRE.test(cf.mr)&&advUsed()&&!kcMuted('rep')&&!rpD()[k]){
+        w=at(k,cf.mr);key='rep:'+k;
+        if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;kcD().ch.rep.push({r:'a',t:kcRepMsg(w/864e5),ts:w});d.rep++;ch=true}
+      }
+      if(cf.sm&&cf.ml&&HMRE.test(cf.ml)&&advUsed()&&!kcMuted('rep')&&!rpD()[addDays(k,-1)]){
+        w=at(k,cf.ml);key='late:'+k;
+        if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;kcD().ch.rep.push({r:'a',t:kcLateMsg(w/864e5),ts:w});d.rep++;ch=true}
+      }
+      if(cf.sm&&cf.mw&&!EN&&advUsed()&&!kcMuted('plan')&&addDays(weekStart(k),6)===k){
+        w=kcWkEndAt(weekStart(k));key='wk:'+k;
+        if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;kcD().ch.plan.push({r:'a',t:kcWkMsg(w/864e5),ts:w,wq:addDays(k,1)});d.plan++;ch=true}
+      }
+      if(cf.sm&&cf.mw&&!EN&&advUsed()&&!kcMuted('plan')){
+        var ex=kcD().wx.filter(function(z){return z.x&&z.d===addDays(k,1)});
+        w=at(k,KC_EXH);key='ex:'+k;
+        if(ex.length&&w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;kcD().ch.plan.push({r:'a',t:kcExamMsg(ex),ts:w});d.plan++;ch=true}
+      }
+      if(i===0&&cf.sa){
+        var open=state.tasks.filter(function(t){return t.d===td&&!t.done}).length;
+        if(open&&HMRE.test(p.msum||'')){
+          w=at(k,p.msum);key='sum:'+k;
+          if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;d.aoq.push({t:__('☀️ صبح بخیر! امروز','☀️ Good morning! Today you have')+' '+fa(open)+' '+__('کار داری.','tasks.'),ts:w});d.ao++;ch=true}
+        }
+        if(open&&HMRE.test(p.mev||'')){
+          w=at(k,p.mev);key='eve:'+k;
+          if(w>from&&w<=now&&!d.dl[key]){d.dl[key]=1;d.aoq.push({t:fa(open)+' '+__('کار هنوز انجام نشده؛ ببین چه کارهایی مانده.','tasks are still not done; see what is left.'),ts:w});d.ao++;ch=true}
+        }
+      }
+    }
+    d.aoq=d.aoq.slice(-10);
+    ['plan','rep','mot','act','ao'].forEach(function(z){if(d[z]>999)d[z]=999});
+    if(ch){writeCache();persist()}
+    unPaint();
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden)return;
+  msgCatchUp();
+  try{if(ui.tab==='kcm'&&ui.kcsec)unClear(ui.kcsec);if(typeof AO!=='undefined'&&AO.open)unClear('ao')}catch(e){}
+});
+
+/* ----- advisor's own notifications: a motivational message and a reminder for the night report (only for people who use the advisor) ----- */
+function advUsed(){
+  try{
+    var t0=state.profile.tt;if(t0&&Array.isArray(t0.rows)&&t0.cells)return true;
+    if(Object.keys(rpD()).length)return true;
+    var ch=kcD().ch||{};return Object.keys(ch).some(function(k){return ch[k]&&ch[k].length});
+  }catch(e){return false}
+}
+function kaAdvNotifs(){
+  var out=[],c=nsCfg(),now=Date.now(),td=todayKey(),i;
+  if(!c.sm||!advUsed())return out;
+  var at=function(k,hm){var q=hm.split(':').map(Number),d=parse(k);d.setHours(q[0],q[1],0,0);return d.getTime()};
+  var d0=Math.floor(now/864e5);
+  for(i=0;i<4;i++){
+    var k=addDays(td,i);
+    if(c.mm&&!kcMuted('mot')){
+      var w=at(k,c.mm);
+      if(w>now+2000){
+        var q=kcQs()[(d0+i)%kcQs().length];
+        out.push(nsTag(Object.assign({id:2100000560+i,title:__('⚡ پیام امروز مشاور','⚡ Today’s message from your advisor'),body:q,schedule:{at:new Date(w),allowWhileIdle:true},extra:{kind:'mot'}},nsLook('sum',q)),'mot'));
+      }
+    }
+    if(c.mr&&!kcMuted('rep')){
+      var w2=at(k,c.mr);
+      if(w2>now+2000&&!(i===0&&rpD()[k])){
+        var dn=i===0?state.tasks.filter(function(t){return t.d===k&&t.done}).length:0;
+        var b=kcRepMsg(now/864e5+i)+(dn?' '+fa(dn)+' '+__('کار امروز انجام شده.','tasks done today.'):'');
+        out.push(nsTag(Object.assign({id:2100000570+i,title:__('📝 گزارش‌کار امشب','📝 Tonight’s report'),body:b,schedule:{at:new Date(w2),allowWhileIdle:true},extra:{kind:'rep'}},nsLook('sum',b)),'rep'));
+      }
+    }
+    /* late night (about 1-2 AM): the report of the day that just ended is still missing -> the advisor asks "where is the report?" */
+    if(c.ml&&!kcMuted('rep')){
+      var w3=at(k,c.ml),rk=addDays(k,-1);
+      if(w3>now+2000&&!rpD()[rk]){
+        var b3=kcLateMsg(w3/864e5);
+        out.push(nsTag(Object.assign({id:2100000580+i,title:__('📝 گزارش‌کار کجاست؟','📝 Where is your report?'),body:b3,schedule:{at:new Date(w3),allowWhileIdle:true},extra:{kind:'rep'}},nsLook('sum',b3)),'rep'));
+      }
+    }
+  }
+  /* weekly: the timetable week is over -> the advisor asks for next week's exams and school assignments */
+  if(c.mw&&!kcMuted('plan')&&!EN){
+    for(var j=0;j<2;j++){
+      var wk=addDays(weekStart(td),7*j),w4=kcWkEndAt(wk);
+      if(w4>now+2000){
+        var b4=kcWkMsg(w4/864e5);
+        out.push(nsTag(Object.assign({id:2100000590+j,title:__('📚 آزمون‌ها و تکلیف‌های هفته‌ی بعد','📚 Next week’s exams and assignments'),body:b4,schedule:{at:new Date(w4),allowWhileIdle:true},extra:{kind:'plan'}},nsLook('sum',b4)),'plan'));
+      }
+    }
+  }
+  /* the day before each exam (from the advisor's own list) */
+  if(c.mw&&!kcMuted('plan')&&!EN){
+    kcExamDays().slice(0,20).forEach(function(e,j){
+      var w5=at(addDays(e.d,-1),KC_EXH);
+      if(w5>now+2000){
+        var b5=kcExamMsg(e.l);
+        out.push(nsTag(Object.assign({id:2100000610+j,title:__('📝 فردا آزمون داری','📝 You have an exam tomorrow'),body:b5,schedule:{at:new Date(w5),allowWhileIdle:true},extra:{kind:'plan'}},nsLook('sum',b5)),'plan'));
+      }
+    });
+  }
+  return out;
+}
+
+/* ----- pinned bar: what it shows at a given moment, and a timeline of the moments it changes (so it stays right while the app is closed) ----- */
+function pnHm(ms){var d=new Date(ms);return pad(d.getHours())+':'+pad(d.getMinutes())}
+function pinSnap(at){
+  var c=nsCfg(),dk=key(new Date(at)),ts=state.tasks.filter(function(t){return t.d===dk}),
+      dn=ts.filter(function(t){return t.done}).length,run=null,nx=null,
+      hmAt=function(s){var q=pt(s),d=parse(dk);d.setHours(q.h,q.m,0,0);return d.getTime()};
+  if(c.pp){
+    var t0=state.profile.tt;
+    if(t0&&Array.isArray(t0.rows)&&t0.cells){try{
+      var T=ttGet();
+      ttPlanItems(T).forEach(function(x){
+        if(x.d!==dk||!x.tm)return;
+        var st=hmAt(x.tm),en=kaEnd(x);
+        if(!en||st>at||en<=at||kaCellDone(T,kaRid(x.k),x.di))return;
+        if(!run||st>run.st)run={x:x,st:st,en:en};
+      });
+    }catch(e){}}
+  }
+  var prog=ts.length?fa(dn)+'/'+fa(ts.length):'',title,text,left='',end=0,ico='ic_stat_barnameyar',col='#3D63F0';
+  if(c.pn){
+    var open=sortDay(ts.filter(function(t){return !t.done}));
+    nx=open.filter(function(t){return !t.tm||hmAt(t.tm)>=at-6e5})[0]||open[0]||null;
+  }
+  if(run){
+    title='📚 '+run.x.name;
+    text=run.x.part+' · '+__('تا','until')+' '+fa(pnHm(run.en))+(c.pg&&prog?' · '+prog:'');
+    end=run.en;col='#F97316';if(c.sic)ico='ic_stat_part';
+  }else if(nx){
+    title='⏭ '+nx.t;
+    text=nx.tm?'🕒 '+nsTm(nx):__('بدون ساعت','No time set');
+    if(c.pg)left=prog;
+  }else if(ts.length){
+    var all=dn===ts.length;
+    title=all?'✅ '+__('همه‌ی کارهای امروز انجام شد','All of today’s tasks are done'):__('امروز','Today');
+    text=fa(dn)+' '+__('از','of')+' '+fa(ts.length)+' '+__('کار انجام شد','tasks done');
+    if(c.pg)left=prog;
+    if(all)col='#16A34A';
+  }else{
+    title=__('امروز کاری ثبت نشده','Nothing planned for today');
+    text=__('یک کار اضافه کن تا اینجا نشان داده شود','Add a task and it will show here');
+  }
+  return {title:title,text:text,sub:'Ario',left:left,end:end,ico:ico,col:col,go:'today',lock:!!c.pl,kind:'pin'};
+}
+function pinBounds(now){
+  var td=todayKey(),tm=addDays(td,1),set={},c=nsCfg();
+  var add=function(t){if(t>now+3000&&t<now+48*36e5)set[Math.floor(t/1000)]=t};
+  var hm=function(k,v){var q=pt(v),d=parse(k);d.setHours(q.h,q.m,0,0);return d.getTime()};
+  state.tasks.forEach(function(t){
+    if(t.d!==td&&t.d!==tm)return;
+    if(t.tm)add(hm(t.d,t.tm));
+    if(t.te)add(hm(t.d,t.te));
+  });
+  var t0=state.profile.tt;
+  if(c.pp&&t0&&Array.isArray(t0.rows)&&t0.cells){try{
+    ttPlanItems(ttGet()).forEach(function(x){
+      if(x.d!==td&&x.d!==tm)return;
+      if(x.tm)add(hm(x.d,x.tm));
+      var e=kaEnd(x);if(e)add(e);
+    });
+  }catch(e){}}
+  add(parse(tm).getTime());
+  return Object.keys(set).map(function(k){return set[k]}).sort(function(a,b){return a-b});
+}
+function pinPlan(){
+  var now=Date.now(),b=pinBounds(now),items=[],i;
+  for(i=0;i<b.length&&i<30;i++){
+    var sn=pinSnap(b[i]+1000);
+    sn.id=2100000500+i;sn.at=b[i]+500;sn.ch='pin';
+    items.push(sn);
+  }
+  return {now:pinSnap(now),items:items};
+}
+
+/* ----- settings sheet: pinned bar + messages of each section ----- */
+function pnSvg(k){return '<svg class="pn-ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="'+PN_PATHS[k]+'"/></svg>'}
+function nsTestSrc(src){
+  if(!AN&&!NL){toast(__('اعلان آزمایشی فقط روی برنامه‌ی اندروید کار می‌کند','Test notifications only work in the Android app'),null,null,'info');return}
+  if(!state.profile.notif){toast(__('اول «اعلان سیستم» را در تنظیمات سریع روشن کن','Turn on “System notifications” in Quick settings first'),null,null,'warn');return}
+  var M={
+    asst:['asst',__('☀️ پیام آزمایشی از Ario','☀️ Test message from Ario'),__('این‌جا دستیار Ario برایت پیام می‌فرستد.','Your Ario assistant will message you here.')],
+    adv:['mot',__('⚡ پیام آزمایشی مشاور','⚡ Test message from your advisor'),kcQs()[0]],
+    part:['part',__('⏰ «ریاضی» تمام شد','⏰ “Maths” is over'),__('آیا جلسه را دیدی و یا پارت را کامل انجام دادی؟','Did you watch the session or finish the part?')]
+  },m=M[src];if(!m)return;
+  var id=2100000951+Object.keys(M).indexOf(src);
+  var n=nsTag(Object.assign({id:id,title:m[1],body:m[2],schedule:{at:new Date(Date.now()+3000),allowWhileIdle:true},extra:{kind:'sum'}},nsLook('sum',m[2])),m[0]);
+  try{
+    if(nsCustom())AN.add({items:[nsToAN(n)]}).catch(function(){});
+    else if(NL)NL.schedule({notifications:[n]}).catch(function(){});
+    toast(__('تا چند ثانیه‌ی دیگر اعلان می‌آید؛ آیکون آن را در نوار بالای گوشی ببین','A notification arrives in a few seconds; look for its icon in the status bar'),null,null,'ok');
+  }catch(e){toast(__('ارسال اعلان آزمایشی انجام نشد','Could not send the test notification'),null,null,'warn')}
+}
+function openPinSheet(){
+  var ttl=__('نوار ثابت و پیام‌ها','Pinned bar & messages');
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div><div class="ns-body pn-body"></div>',ttl);
+  var w=sw.w,body=w.querySelector('.pn-body');
+  function tg(k,ic,t,sb){return '<button type="button" class="qrow" role="switch" aria-checked="'+!!nsCfg()[k]+'" data-ptg="'+k+'"><span class="h3d">'+icon(ic)+'</span><span class="qt"><b>'+t+'</b><small>'+sb+'</small></span><span class="sw"></span></button>'}
+  function chips(k,opts){var cur=nsCfg()[k];return '<div class="chips">'+opts.map(function(o){return '<button type="button" class="chip" data-ptm="'+k+'" data-v="'+o[0]+'" aria-pressed="'+(cur===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>'}
+  function sec(h,inner,hint){return '<div class="sec"><div class="sec-h"><b>'+h+'</b></div>'+inner+(hint?'<p class="hint">'+hint+'</p>':'')+'</div>'}
+  function paint(){
+    var c=nsCfg(),h='';
+    if(!AN)h+='<p class="hint">'+__('این تنظیمات روی برنامه‌ی اندروید در نوار اعلان گوشی اعمال می‌شود.','These settings apply to the notification shade of the Android app.')+'</p>';
+    h+=sec(__('نوار اعلان ثابت','Pinned bar'),'<div class="qsheet">'+tg('pin','pin',__('نوار اعلان ثابت','Pinned bar'),__('همیشه در نوار اعلان می‌ماند و خودش به‌روز می‌شود','Stays in the shade and keeps itself up to date'))+
+      (c.pin?tg('pn','check',__('کار بعدی','Next task'),__('نزدیک‌ترین کار انجام‌نشده‌ی امروز','The nearest unfinished task of today'))+
+        tg('pp','clock',__('پارت جاری','Current part'),__('نام پارت جدول با شمارش معکوس زنده','Timetable part with a live countdown'))+
+        tg('pg','spark',__('پیشرفت امروز','Today’s progress'),__('مثلاً «۳/۸» کار انجام‌شده','For example “3/8” tasks done'))+
+        tg('pl','lock',__('نمایش روی صفحه‌ی قفل','Show on the lock screen'),__('اگر خاموش باشد، محتوا روی قفل پنهان می‌شود','When off, the content is hidden on the lock screen')):'')+'</div>',
+      __('اگر نوار را با کشیدن پاک کنی، در تغییر بعدی دوباره برمی‌گردد. برای حذف کامل، همین‌جا خاموشش کن.','If you swipe it away it comes back at the next change. To remove it completely, switch it off here.'));
+    h+=sec(__('پیام‌ها در نوار اعلان','Messages in the shade'),'<div class="qsheet">'+
+      tg('sa','chat',__('پیام‌های دستیار Ario','Ario assistant messages'),__('خلاصه‌ی صبح، یادآور عصر، هدف و بازنگری هفته','Morning summary, evening reminder, goal and weekly review'))+
+      tg('sm','pen',__('پیام‌های مشاور','Advisor messages'),__('پیام انگیزشی و یادآور گزارش‌کار شبانه','Motivation and the night-report reminder'))+
+      tg('sp','timer',__('پایان زمان پارت','Part finished'),__('وقتی زمان یک پارت جدول تمام می‌شود می‌پرسم انجامش دادی یا نه','When a timetable part ends I ask if you did it'))+
+      tg('sic','bell',__('آیکون هر بخش در نوار بالا','Section icon in the status bar'),__('هر پیام آیکون بخش خودش را نشان می‌دهد','Each message shows the icon of its own section'))+'</div>');
+    if(c.sm)h+=sec(__('مشاور','Advisor'),'<div class="sec-h"><b>'+__('پیام انگیزشی روزانه','Daily motivation')+'</b></div>'+chips('mm',[['',__('خاموش','Off')],['08:00',fa('08:00')],['13:00',fa('13:00')],['17:00',fa('17:00')]])+
+      '<div class="sec-h"><b>'+__('یادآور گزارش‌کار شبانه','Night-report reminder')+'</b></div>'+chips('mr',[['',__('خاموش','Off')],['20:00',fa('20:00')],['21:30',fa('21:30')],['23:00',fa('23:00')]])+
+      '<div class="sec-h"><b>'+__('پیام نیمه‌شب اگر گزارش ثبت نشده بود','Late-night message if no report was filed')+'</b></div>'+chips('ml',[['',__('خاموش','Off')],['01:00',fa('01:00')],['01:30',fa('01:30')],['02:00',fa('02:00')]])+
+      '<div class="qsheet">'+tg('mw','pen',__('درخواست آزمون‌ها و تکلیف‌های هفته‌ی بعد','Ask for next week’s exams and assignments'),__('آخر هر هفته، بعد از تمام شدن جدول، مشاور می‌خواهد آن‌ها را بفرستی و یک روز قبل از هر آزمون یادآوری می‌کند','At the end of each week, after the timetable, the advisor asks for them and reminds you the day before each exam'))+'</div>',
+      __('این‌ها فقط وقتی می‌آیند که از مشاور یا جدول کنکوریا استفاده کرده باشی؛ اگر گروهی را بی‌صدا کرده باشی پیامش نمی‌آید.','These only come if you use the advisor or the Konkoria timetable; a muted group sends nothing.'));
+    var lg=['asst','plan','rep','mot','act','part'].map(function(k){var S=nsSrc(k);return '<div class="pn-lg-i" style="--pc:'+S.col+'"><i>'+pnSvg(S.pk)+'</i><span>'+S.nm+'</span></div>'}).join('');
+    h+=sec(__('آیکون هر بخش','Section icons'),'<div class="pn-lg">'+lg+'</div>');
+    h+='<div class="tt-eb pn-tests"><button type="button" class="tt-btn pri" data-e="test" data-s="asst">'+icon('bell')+__('آزمایش دستیار','Test assistant')+'</button><button type="button" class="tt-btn" data-e="test" data-s="adv">'+__('آزمایش مشاور','Test advisor')+'</button><button type="button" class="tt-btn" data-e="test" data-s="part">'+__('آزمایش پایان پارت','Test part end')+'</button></div>';
+    body.innerHTML=h;
+  }
+  paint();
+  function done(){if(ui.tab==='account')render()}
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e],[data-ptg],[data-ptm]');if(!b)return;
+    if(b.dataset.e==='close'){sw.close();done();return}
+    if(b.dataset.e==='test'){nsTestSrc(b.dataset.s);return}
+    var c=nsCfg();
+    if(b.dataset.ptg){
+      c[b.dataset.ptg]=!c[b.dataset.ptg];
+      if(b.dataset.ptg==='pin'&&c.pin&&!state.profile.notif)toast(__('اول «اعلان سیستم» را در تنظیمات سریع روشن کن','Turn on “System notifications” in Quick settings first'),null,null,'warn');
+    }else if(b.dataset.ptm)c[b.dataset.ptm]=b.dataset.v;
+    state.profile.ns=c;writeCache();persist();
+    paint();
+  });
+  w.querySelector('.dim').addEventListener('click',done);
+}
+actions.openPinSheet=openPinSheet;
 
 /* ---------- account extras ---------- */
 function hmCycle(key,opts){var i=opts.indexOf(state.profile[key]||'');state.profile[key]=opts[(i+1)%opts.length];mutate();nativeSync(true)}
@@ -4130,6 +4738,12 @@ actions.cycleMsum=function(){hmCycle('msum',['','07:00','08:00','09:00'])};
 actions.cycleMev=function(){hmCycle('mev',['','18:00','20:00','21:30'])};
 actions.toggleTidy=function(){var on=!inkTidyOn();inkTidySet(on);toast(on?__('مرتب‌نویسی دست‌خط روشن شد. هنگام نوشتن با قلم در کتابخانه، کلمه‌ها روی یک خط می‌نشینند و فاصله‌شان مرتب می‌شود.','Tidy handwriting is on. When you write with the pen in the library, words line up and their spacing is evened out.'):__('مرتب‌نویسی دست‌خط خاموش شد.','Tidy handwriting is off.'),null,null,'info');render()};
 actions.toggleOcr=function(){var on=!ocrOn();ocrSet(on);toast(on?__('دست‌خط به متن روشن شد. در یادداشت‌ها از منوی صفحه، «تبدیل دست‌خط این صفحه به متن» را بزن؛ یادداشت‌هایی که می‌بندی هم خودکار فهرست می‌شوند و در کادر جستجوی یادداشت‌ها پیدا می‌شوند.','Handwriting to text is on. In a note, use “Handwriting on this page to text” in the page menu; notes you close are also indexed automatically and can be found in the notes search box.'):__('دست‌خط به متن خاموش شد.','Handwriting to text is off.'),null,null,'info');render()};
+actions.toggleHap=function(){
+  var on=!hapOn();
+  try{localStorage.setItem('ario.hap',on?'1':'0')}catch(e){}
+  if(on){hapLast=0;hap('send')}
+  toast(on?__('لرزش ملایم روشن شد.','Gentle vibration is on.'):__('لرزش ملایم خاموش شد.','Gentle vibration is off.'),null,null,'ok');render();
+};
 actions.toggleMotion=function(){var on=!shMotionOff();try{localStorage.setItem('ario_redmotion',on?'1':'0')}catch(e){}toast(on?__('کاهش حرکت روشن شد؛ علامت‌های آریو بدون انیمیشن و یکجا ظاهر می‌شوند.','Reduce motion is on; Ario’s marks now appear at once, without animation.'):__('کاهش حرکت خاموش شد؛ علامت‌های آریو با انیمیشن کشیده می‌شوند.','Reduce motion is off; Ario’s marks are drawn with an animation.'),null,null,'ok');render()};
 actions.toggleVnStt=function(){var on=!vnSttOn();try{localStorage.setItem('ario.vnstt',on?'1':'0')}catch(e){}toast(on?__('بعد از این، مشاور و آریو حرف‌های پیام صوتی و ویدیویی را می‌فهمند.','From now on the advisor and Ario understand what you say in voice and video messages.'):__('فهمیدن پیام صوتی خاموش شد.','Understanding voice messages is off.'),null,null,'info');render()};
 actions.toggleWake=function(){var on=!aoWakeGet();try{localStorage.setItem('ario.wake',on?'1':'0')}catch(e){}if(on){setTimeout(aoWakeStart,300);toast(__('وقتی برنامه باز است، با گفتن «آریو» باز می‌شوم. کمی باتری مصرف می‌کند.','While the app is open, say “Ario” to open me. This uses a little battery.'))}else{AO.wk=false}render()};
@@ -4172,6 +4786,7 @@ function wFinish(skip){
   }
   state.profile.welcomed=true;
   closeWelcome();mutate();
+  if(!state.profile.tour&&!(wl.via==='email'&&sbOn()&&!sbSess()))setTimeout(function(){if(!state.profile.tour)tourLaunch(false)},700);
   if(!skip&&wl.via==='email'&&sbOn()&&!sbSess())setTimeout(function(){sbSheet(okEmail(em)?em:'')},350);
   if(!skip&&n)notify('info',(__("خوش آمدی")),(__("سلام")+" ")+n+(__("، Ario آماده است")));
 }
@@ -4186,7 +4801,11 @@ function wNext(){
   }
   if(wl.i<3){wl.i++;wDraw()}else wFinish(false)
 }
-function maybeWelcome(){if(String(state.profile.name||'').trim()||!wl.el.hidden)return;openWelcome()}
+function maybeWelcome(){
+  if(!wl.el.hidden)return;
+  if(String(state.profile.name||'').trim()){if(!state.profile.welcomed&&!state.profile.tour)tourLaunch(false);return}
+  openWelcome();
+}
 $('#wNext').addEventListener('click',wNext);
 $('#wBack').addEventListener('click',function(){if(wl.i>0){wl.i--;wDraw()}});
 $('#wName').addEventListener('input',wCheck);
@@ -4198,7 +4817,144 @@ wl.el.addEventListener('click',function(e){
   setTimeout(function(){$('#wName').focus({preventScroll:true})},120);
 });
 ['#wName','#wEmail'].forEach(function(q){$(q).addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();wNext()}})});
-actions.showWelcome=function(){openWelcome()};
+actions.showWelcome=function(){tourLaunch(true)};
+/* ---------- guided tour (first launch, and "مشاهده مجدد آموزش" in Settings) ----------
+   Every step lights up the real button it talks about (switching to its page first), with Back / Next and Skip.
+   Finishing OR skipping it once marks profile.tour, so it never opens by itself again. */
+var TR={on:false,i:0,tok:0,busy:false,el:null,start:'today',replay:false};
+function tourSteps(){
+  return [
+    {t:__('به Ario خوش آمدی 👋','Welcome to Ario 👋'),x:__('یک تور کوتاه می‌گیریم تا ببینی هر بخش چه کاری برایت می‌کند. هر وقت خواستی می‌توانی رد کنی.','A short tour to show what each part does. You can skip it any time.')},
+    {tab:'today',sel:'.tab[data-tab="today"]',t:__('امروز','Today'),x:__('کارهای امروزت اینجاست. روی دایرهٔ هر کار بزن تا انجام‌شده شود.','Your tasks for today live here. Tap the circle of a task to mark it done.')},
+    {tab:'today',sel:'#fab',t:__('افزودن کار جدید','Add a new task'),x:__('با این دکمه کار تازه بساز؛ نام، زمان و دسته‌اش را مشخص کن.','Create a new task with this button: set its name, time and category.')},
+    {tab:'today',sel:'.bellbtn',t:__('اعلان‌ها','Notifications'),x:__('پیام‌های Ario و مشاور و یادآورها اینجا جمع می‌شوند؛ عدد قرمز یعنی چیز تازه‌ای هست.','Messages from Ario and your advisor, plus reminders, collect here. A red number means something new.')},
+    {tab:'today',sel:'#aoFab',t:__('آریو، دستیار صوتی','Ario, your voice assistant'),x:__('با او حرف بزن یا بنویس؛ کار اضافه می‌کند، گزارش می‌سازد و به سؤال‌هایت جواب می‌دهد.','Talk or type to it: it adds tasks, builds reports and answers your questions.')},
+    {tab:'week',sel:'.tab[data-tab="week"]',t:__('برنامه','Plan'),x:__('نمای هفته؛ کارها را روز‌به‌روز ببین و برنامهٔ هفته‌ات را مرتب کن.','The week view: see your tasks day by day and organise your week.')},
+    {tab:'kk',sel:'.tab[data-tab="kk"]',t:__('کنکوریا','Konkoria'),x:__('جدول مطالعه، گزارش‌کار شبانه، شمارش معکوس کنکور و گفتگو با مشاور اینجاست.','The study timetable, nightly report, Konkur countdown and the advisor chat are here.')},
+    {tab:'stats',sel:'.tab[data-tab="stats"]',t:__('آمار','Stats'),x:__('پیشرفت، ساعت‌های مطالعه و تمرکزت را در نمودارها ببین.','See your progress, study hours and focus time in charts.')},
+    {tab:'account',sel:'.tab[data-tab="account"]',t:__('حساب','Account'),x:__('مشخصات، ظاهر برنامه، اعلان‌ها و تنظیمات اینجاست. این آموزش را هم از «تنظیمات ← مشاهده مجدد آموزش» دوباره می‌بینی.','Your profile, look, notifications and settings are here. You can replay this tour from Settings → Replay the tour.')}
+  ];
+}
+function tourWait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function tourKey(e){if(TR.on&&e.key==='Escape'){e.stopPropagation();tourEnd()}}
+function tourEnd(){
+  if(!TR.on)return false;
+  TR.on=false;TR.tok++;
+  var o=TR.el;TR.el=null;
+  if(o){o.classList.add('out');setTimeout(function(){if(o.parentNode)o.remove()},280)}
+  document.removeEventListener('keydown',tourKey,true);window.removeEventListener('resize',tourPlace);
+  if(!state.profile.tour){state.profile.tour=true;persist()}
+  var want=TR.replay?TR.start:'today',tb=document.querySelector('.tab[data-tab="'+want+'"]');
+  if(tb&&ui.tab!==want)tb.click();
+  return true;
+}
+function tourStart(replay){
+  if(TR.on)return;
+  var wlv=document.getElementById('wl');if(wlv&&!wlv.hidden)return;
+  TR.on=true;TR.replay=!!replay;TR.start=ui.tab||'today';TR.i=0;TR.busy=false;
+  var o=document.createElement('div');o.id='tour';o.className='tour';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-label',__('آموزش برنامه','App tour'));
+  o.innerHTML='<div class="tour-dim"></div><i class="tour-spot"></i><div class="tour-card glass"><div class="tour-dots" aria-hidden="true"></div><h3 class="tour-t"></h3><p class="tour-x"></p><div class="tour-nav"><button type="button" class="tour-sk"></button><span class="tour-sp"></span><button type="button" class="tour-pv"></button><button type="button" class="tour-nx"></button></div></div>';
+  o.addEventListener('click',function(e){
+    var b=e.target.closest('button');e.stopPropagation();if(!b||TR.busy)return;
+    if(b.classList.contains('tour-sk'))tourEnd();
+    else if(b.classList.contains('tour-pv'))tourShow(TR.i-1,-1);
+    else if(b.classList.contains('tour-nx')){if(TR.i>=tourSteps().length-1)tourEnd();else tourShow(TR.i+1,1)}
+  });
+  document.body.appendChild(o);TR.el=o;
+  document.addEventListener('keydown',tourKey,true);window.addEventListener('resize',tourPlace);
+  tourShow(0,1);
+  requestAnimationFrame(function(){requestAnimationFrame(function(){o.classList.add('in')})});
+}
+async function tourShow(i,dir){
+  var S=tourSteps(),tok=++TR.tok;TR.busy=true;
+  while(i>=0&&i<S.length){
+    var st=S[i],el=null;
+    if(st.tab&&ui.tab!==st.tab){var tb=document.querySelector('.tab[data-tab="'+st.tab+'"]');if(tb){tb.click();await tourWait(520);window.scrollTo(0,0)}}
+    if(!TR.on||tok!==TR.tok)return;
+    if(st.sel){el=document.querySelector(st.sel);var r=el&&el.getBoundingClientRect();if(!r||r.width<2||r.height<2||r.bottom<0||r.top>innerHeight)el=null}
+    if(!st.sel||el)break;
+    i+=dir;
+  }
+  if(!TR.on||tok!==TR.tok)return;
+  if(i>=S.length){tourEnd();return}
+  if(i<0)i=0;
+  TR.i=i;tourPlace();TR.busy=false;
+}
+function tourPlace(){
+  if(!TR.on||!TR.el)return;
+  var S=tourSteps(),st=S[TR.i],o=TR.el,sp=o.querySelector('.tour-spot'),cd=o.querySelector('.tour-card'),vw=window.innerWidth,vh=window.innerHeight,n=S.length,last=TR.i===n-1;
+  o.querySelector('.tour-t').textContent=st.t;o.querySelector('.tour-x').textContent=st.x;
+  o.querySelector('.tour-dots').innerHTML=S.map(function(x,k){return '<i'+(k===TR.i?' class="on"':'')+'></i>'}).join('')+'<small>'+fa(TR.i+1)+' '+__('از','of')+' '+fa(n)+'</small>';
+  var sk=o.querySelector('.tour-sk'),pv=o.querySelector('.tour-pv'),nx=o.querySelector('.tour-nx');
+  sk.textContent=__('رد کردن','Skip');sk.hidden=last;
+  pv.textContent=__('قبلی','Back');pv.hidden=TR.i===0;
+  nx.textContent=last?__('پایان','Done'):(TR.i===0?__('شروع آموزش','Start'):__('بعدی','Next'));
+  var el=st.sel?document.querySelector(st.sel):null,r=el?el.getBoundingClientRect():null,pad=7,cw=Math.min(340,vw-32);
+  cd.style.width=cw+'px';
+  var ch=cd.offsetHeight,top,left;
+  if(r&&r.width>1){
+    var rr=Math.min(26,Math.min(r.width,r.height)/2+pad);
+    sp.style.cssText='top:'+(r.top-pad)+'px;left:'+(r.left-pad)+'px;width:'+(r.width+pad*2)+'px;height:'+(r.height+pad*2)+'px;border-radius:'+rr+'px';
+    o.classList.add('has');
+    var below=(r.top+r.height/2)<vh*0.5;
+    top=below?r.bottom+pad+16:r.top-pad-16-ch;
+    left=r.left+r.width/2-cw/2;
+  }else{
+    o.classList.remove('has');
+    top=(vh-ch)/2;left=(vw-cw)/2;
+  }
+  top=Math.max(12,Math.min(vh-ch-12,top));left=Math.max(16,Math.min(vw-cw-16,left));
+  cd.style.top=Math.round(top)+'px';cd.style.left=Math.round(left)+'px';
+  nx.focus({preventScroll:true});
+}
+/* soft black curtain: screen fades to black, we jump to the main page, the black melts away, then the tour starts */
+var tourLaunching=false;
+async function tourLaunch(replay){
+  if(TR.on||tourLaunching)return;
+  var wlv=document.getElementById('wl');if(wlv&&!wlv.hidden)return;
+  if(!replay&&state.profile.tour)return;
+  tourLaunching=true;
+  var v=document.createElement('div');v.className='tour-veil';v.setAttribute('aria-hidden','true');document.body.appendChild(v);
+  void v.offsetWidth;v.classList.add('on');
+  await tourWait(760);
+  try{if(ui.tab!=='today'){var tb=document.querySelector('.tab[data-tab="today"]');if(tb)tb.click()}window.scrollTo(0,0)}catch(e){}
+  await tourWait(480);
+  v.classList.remove('on');
+  await tourWait(950);
+  v.remove();tourLaunching=false;
+  tourStart(!!replay);
+}
+actions.replayTour=function(){tourLaunch(true)};
+function advToneSample(t){
+  var qs=EN||ARB?KC_Q:(t==='friendly'?KC_QF:t==='blunt'?KC_QB:KC_Q);
+  var rp=t==='formal'?__('گزارش‌کار امروزت را بنویس تا برایت تحلیل کنم.','Write today’s report and I’ll analyse it for you.'):(EN?(t==='friendly'?KC_REPFE:KC_REPBE):(t==='friendly'?KC_REPF:KC_REPB))[0];
+  return [rp,qs[3]];
+}
+function openAdvTone(){
+  var ttl=__('لحن مشاور','Advisor’s tone');
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div><div class="ns-body at-body"></div>',ttl);
+  var w=sw.w,body=w.querySelector('.at-body');
+  var desc={formal:[__('محترمانه و مرتب؛ مثل یک مشاور جدی.','Polite and tidy, like a serious advisor.')],friendly:[__('صمیمی و خودمونی، با کمی شوخی.','Warm and casual, with a little humour.')],blunt:[__('رک، شوخ و تیکه‌انداز؛ بدون تعارف و بدون توهین. وقتی استرس داری، مهربان می‌ماند.','Blunt, funny and teasing: no sugar-coating, no insults. It stays gentle when you are stressed.')]};
+  function paint(){
+    var cur=advTone(),h='<p class="hint">'+__('این لحن روی پیام انگیزشی، یادآور گزارش‌کار، جواب‌های گفتگو و اعلان‌های مشاور اثر می‌گذارد.','This tone applies to motivation messages, the report reminder, chat answers and the advisor’s notifications.')+'</p><div class="qsheet">';
+    ['formal','friendly','blunt'].forEach(function(t){
+      h+='<button type="button" class="qrow" role="radio" aria-checked="'+(cur===t)+'" data-tone="'+t+'"><span class="h3d at-e">'+ADV_TONE_N[t][0]+'</span><span class="qt"><b>'+__(ADV_TONE_N[t][1],ADV_TONE_N[t][2])+'</b><small>'+desc[t][0]+'</small></span><span class="at-r'+(cur===t?' on':'')+'" aria-hidden="true"></span></button>';
+    });
+    h+='</div><div class="sec"><div class="sec-h"><b>'+__('نمونه','Preview')+'</b></div>'+advToneSample(cur).map(function(x){return '<div class="kcx-m a at-s"><p>'+esc(x)+'</p></div>'}).join('')+'</div>';
+    body.innerHTML=h;
+  }
+  paint();
+  function done(){if(ui.tab==='account')render()}
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e],[data-tone]');if(!b)return;
+    if(b.dataset.e==='close'){sw.close();done();return}
+    state.profile.advTone=b.dataset.tone;writeCache();persist();paint();
+  });
+  w.querySelector('.dim').addEventListener('click',done);
+}
+actions.openAdvTone=openAdvTone;
+
+
 actions.sbOpen=function(){sbSheet()};
 
 /* ---------- app info ---------- */
@@ -4286,7 +5042,7 @@ function ttGet(){
 function ttCell(t,rid,d){
   var c=t.cells[rid+'_'+d];if(!c||typeof c!=='object')return null;
   var tx=typeof c.t==='string'?c.t.slice(0,80):'',cc=(typeof c.c==='number'&&c.c>=0&&c.c<TT_COL.length)?Math.floor(c.c):-1,hh=typeof c.h==='string'?c.h.slice(0,14):'',kk=(typeof c.k==='number'&&c.k>=0&&c.k<TT_TC.length)?Math.floor(c.k):-1,ic=ttIc(c.ic),nn=typeof c.n==='string'?c.n.slice(0,300):'';
-  return (tx||cc>-1||hh||kk>-1||ic||nn)?{t:tx,c:cc,h:hh,k:kk,ic:ic,n:nn}:null;
+  return (tx||cc>-1||hh||kk>-1||ic||nn)?{t:tx,c:cc,h:hh,k:kk,ic:ic,n:nn,dn:typeof c.dn==='string'?c.dn.slice(0,10):''}:null;
 }
 function ttClamp(v,a,b,d){v=Number(v);if(!isFinite(v))v=d;return Math.max(a,Math.min(b,v))}
 function ttInfo(t,i){
@@ -4343,7 +5099,7 @@ function ttDates(t,raw){
   return out;
 }
 function ttGrid(){
-  var t=ttGet(),ti=ttTodayIdx(t),ds=ttDates(t);
+  var t=ttGet(),ti=ttTodayIdx(t),ds=ttDates(t),spm=spTTCounts();
   var h='<div class="tt-grid" style="--np:'+t.rows.length+'"><button type="button" class="tt-c tt-corner tt-cd" data-tt="corner" data-n="0" aria-label="آیکون ستون تاریخ">'+ttIco(t.cic[0])+'تاریخ</button><button type="button" class="tt-c tt-corner tt-cy" data-tt="corner" data-n="1" aria-label="آیکون ستون روز">'+ttIco(t.cic[1])+'روز</button>';
   t.rows.forEach(function(r,i){
     h+='<button type="button" class="tt-c tt-h" data-tt="row" data-r="'+r.id+'" aria-label="ویرایش ساعت پارت '+fa(i+1)+'"><b>'+ttIco(r.ic)+'پارت '+fa(i+1)+'</b><small'+(r.k>-1?' style="color:'+TT_TC[r.k]+'"':'')+'>'+esc(r.l)+'</small></button>';
@@ -4352,8 +5108,8 @@ function ttGrid(){
     var tod=d===ti;
     h+='<button type="button" class="tt-c tt-dt'+(tod?' today':'')+'" data-tt="date" data-d="'+d+'" aria-label="تغییر تاریخ '+dn+'">'+esc(ds[d])+'</button><button type="button" class="tt-c tt-dy'+(tod?' today':'')+'" data-tt="day" data-d="'+d+'" aria-label="آیکون '+dn+'">'+ttIco(t.dic[d])+dn+'</button>';
     t.rows.forEach(function(r,i){
-      var c=ttCell(t,r.id,d),tm=(c&&c.h)||r.l;
-      h+='<button type="button" class="tt-c tt-x'+(c&&(c.t||c.c>-1||c.ic)?' on':'')+(c&&c.n?' hasn':'')+(tod?' today':'')+'" data-tt="cell" data-r="'+r.id+'" data-d="'+d+'"'+((c&&(c.c>-1||c.k>-1))?' style="'+(c.c>-1?'--tc:'+TT_COL[c.c]+';':'')+(c.k>-1?'--tmc:'+TT_TC[c.k]+';':'')+'"':'')+' aria-label="'+dn+'، پارت '+fa(i+1)+'، '+esc(tm)+(c&&c.t?'، '+esc(c.t):'')+'"><span class="tx">'+(c&&c.ic?ttIco(c.ic):'')+(c&&c.t?esc(c.t):'')+'</span><span class="tm">'+esc(tm)+'</span></button>';
+      var c=ttCell(t,r.id,d),tm=(c&&c.h)||r.l,spn=spm?(spm[spCellKey(t,r.id,d)]||0):0,dn=c&&c.t&&kaCellDone(t,r.id,d);
+      h+='<button type="button" class="tt-c tt-x'+(c&&(c.t||c.c>-1||c.ic)?' on':'')+(c&&c.n?' hasn':'')+(spn?' haspf':'')+(dn?' kdone':'')+(tod?' today':'')+'" data-tt="cell" data-r="'+r.id+'" data-d="'+d+'"'+((c&&(c.c>-1||c.k>-1))?' style="'+(c.c>-1?'--tc:'+TT_COL[c.c]+';':'')+(c.k>-1?'--tmc:'+TT_TC[c.k]+';':'')+'"':'')+' aria-label="'+dn+'، پارت '+fa(i+1)+'، '+esc(tm)+(c&&c.t?'، '+esc(c.t):'')+(dn?'، انجام شد':'')+'"><span class="tx">'+(c&&c.ic?ttIco(c.ic):'')+(c&&c.t?esc(c.t):'')+'</span><span class="tm">'+esc(tm)+'</span>'+(spn?'<span class="sp-b" aria-hidden="true">'+SP_MINI+fa(spn)+'</span>':'')+(dn?'<span class="ktk" aria-hidden="true">'+icon('check')+'</span>':'')+'</button>';
     });
   });
   /* extra row under Friday: no date / day, free info cells (photo, name, weekly call, start, end, 2 free) */
@@ -4369,6 +5125,7 @@ function ttRedraw(){
   if(!ttEl)return;
   var sc=ttEl.querySelector('.tt-scroll');if(sc)sc.innerHTML=ttGrid();
   ttApplyBtn();
+  try{nativeSync()}catch(e){}
   var n=ttCount(),nm=ttName(ttGet()),s=ttEl.querySelector('.tt-ti small');if(s)s.textContent=(nm?nm+' · ':'')+(n?fa(n)+' خانه پر شده':'روی هر خانه بزن و بنویس');
 }
 
@@ -4481,7 +5238,7 @@ function ttCellSheet(rid,d){
     ids.forEach(function(p){
       var k=p+'_'+d,ex=t.cells[k]||{},keep=clr?'':(p===rid?h:(ex.h||'')),kk=clr?-1:(p===rid?st.k:(typeof ex.k==='number'?ex.k:-1));
       var ic=clr?'':st.ic,nn=clr?'':(p===rid?nf.value.trim().slice(0,300):(ex.n||''));
-      if(text||c>-1||keep||kk>-1||ic||nn)t.cells[k]={t:text,c:c,h:keep,k:kk,ic:ic,n:nn};else delete t.cells[k];
+      if(text||c>-1||keep||kk>-1||ic||nn)t.cells[k]={t:text,c:c,h:keep,k:kk,ic:ic,n:nn,dn:(clr||!text)?'':(typeof ex.dn==='string'?ex.dn:'')};else delete t.cells[k];
     });
     persist();ttRedraw();sw.close();
   }
@@ -4872,8 +5629,17 @@ function ttCellView(rid,d){
     '<div class="ttv-h"'+(c&&c.c>-1?' style="--tc:'+TT_COL[c.c]+'"':'')+'>'+(c&&c.ic?ttIco(c.ic,'tti ttv-ic'):'')+'<b>'+(c&&c.t?esc(c.t):'خانهٔ خالی')+'</b></div>'+
     '<div class="ttv-r"><span>'+icon('clock','tti')+'ساعت درس: <b>'+esc(tm)+'</b></span><span>پارت '+fa(pi+1)+'</span></div>'+
     '<div class="ttv-i"><small>اطلاعات</small><p>'+(c&&c.n?esc(c.n):'<em>اطلاعاتی برای این خانه نوشته نشده است.</em>')+'</p></div>'+
-    '</div><div class="tt-eb"><button type="button" class="tt-btn" data-e="close">بستن</button></div>','اطلاعات خانه');
-  sw.w.addEventListener('click',function(e){var b=e.target.closest('[data-e="close"]');if(b)sw.close()});
+    '<div class="ttv-i sp-ts" hidden><small>'+__('مدارک مطالعه','Study proofs')+'</small><div class="sp-th"></div></div>'+
+    '</div><div class="tt-eb">'+(c&&c.t?'<button type="button" class="tt-btn pri kdbtn" data-e="kdone" aria-pressed="'+kaCellDone(t,rid,d)+'">'+icon('check')+'<span></span></button>':'')+'<button type="button" class="tt-btn" data-e="close">بستن</button></div>','اطلاعات خانه');
+  spCellThumbs(sw.w,spCellKey(t,rid,d));
+  var kb=sw.w.querySelector('.kdbtn');
+  function kpaint(){if(!kb)return;var on=kaCellDone(ttGet(),rid,d);kb.setAttribute('aria-pressed',String(on));kb.querySelector('span').textContent=on?'انجام شده ✓ · برداشتن تیک':'تیک بزن: انجام شد'}
+  kpaint();
+  sw.w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e]');if(!b)return;
+    if(b.dataset.e==='close'){sw.close();return}
+    if(b.dataset.e==='kdone'){kaToggleCell(rid,d);kpaint();ttRedraw()}
+  });
 }
 function openTTEditor(view){
   if(ttEl)return;
@@ -5464,7 +6230,7 @@ function ttpClean(a){
       var hd=x.data;if(!hd.cells||typeof hd.cells!=='object')hd.cells={};if(!hd.info||typeof hd.info!=='object')hd.info={};
       return {id:x.id.slice(0,40),ws:/^\d{4}-\d{2}-\d{2}$/.test(x.ws)?x.ws:'',upd:Number(x.upd)||Date.now(),data:hd};
     }):[];
-    return {id:p.id.slice(0,40),name:String(p.name||'').slice(0,80),upd:Number(p.upd)||Date.now(),data:d,h:h,hm:p.hm?1:0};
+    return {id:p.id.slice(0,40),name:String(p.name||'').slice(0,80),upd:Number(p.upd)||Date.now(),data:d,h:h,hm:p.hm?1:0,tpl:p.tpl?1:0};
   });
 }
 function ttPlans(){var p=state.profile;if(!Array.isArray(p.ttp))p.ttp=[];return p.ttp}
@@ -5620,6 +6386,31 @@ function ttStartNew(name){
     persist();openTTEditor(false);
   });
 }
+/* ---------- v273: plan templates ----------
+   Star a saved plan to make it a template (templates stay at the top of the list). "+" on a template makes a new plan for a student from it:
+   same table, the name cell is the student's name, the weekly history starts fresh. A template can be sent to several students at once. */
+function ttToggleTpl(id){
+  var p=ttPlans().find(function(x){return x.id===id});if(!p)return;hap('sel');
+  p.tpl=p.tpl?0:1;persist();ttListPaint();
+  toast(p.tpl?'«'+(p.name||'برنامه')+'» قالب شد.':'علامت قالب برداشته شد.',null,null,'ok');
+}
+function ttUseTpl(id){
+  var p=ttPlans().find(function(x){return x.id===id});if(!p)return;
+  askText({title:'نام دانش‌آموز برای برنامهٔ تازه',val:'',btn:'ساخت برنامه',fn:function(v){
+    var nm=String(v||'').trim().slice(0,80);
+    if(!nm){toast('نام را بنویس.',null,null,'warn');return}
+    var d=ttClone(p.data);
+    d.ws=ttIso(ttSat(new Date()));
+    var f=d.info&&d.info[1];
+    d.info=d.info||{};
+    d.info[1]=(f&&typeof f==='object')?Object.assign({},f,{t:nm,i:''}):{t:nm,i:'',ic:'',z:1,s:1,x:0,y:0};
+    var np={id:uid(),name:nm,upd:Date.now(),data:d,h:[],hm:0,tpl:0};
+    ttPlans().push(np);
+    ttHRecord(np,d);
+    persist();ttListPaint();
+    toast('برنامهٔ «'+nm+'» از قالب ساخته شد.',null,null,'ok');
+  }});
+}
 function ttDelPlan(id){
   var pl=ttPlans(),i=pl.findIndex(function(x){return x.id===id});if(i<0)return;var p=pl[i];
   askConfirm({title:'حذف برنامه‌ی «'+(p.name||'بدون نام')+'»؟',msg:'این برنامه از فهرست پاک می‌شود. بعد از حذف چند ثانیه فرصت داری بازگردانی کنی.',btns:[{t:'حذف برنامه',cls:'bad',fn:function(){
@@ -5640,20 +6431,22 @@ function ttCardHtml(t,nm,upd,id,draft){
   var label=nm||'بدون نام';
   return '<div class="ttl-card glass" role="listitem"><button type="button" class="ttl-main" data-ttl="'+(draft?'draft':'open')+'" data-id="'+esc(id)+'">'+
     '<span class="ttl-av">'+(ph&&ph.i?'<img alt="" src="'+esc(ph.i)+'">':icon('user'))+'</span>'+
-    '<span class="ttl-tx"><b>'+esc(label)+(draft?'<span class="ttl-tag">ذخیره‌نشده</span>':'')+'</b>'+
+    '<span class="ttl-tx"><b>'+esc(label)+(draft?'<span class="ttl-tag">ذخیره‌نشده</span>':'')+(function(){var q=draft?null:ttPlans().find(function(z){return z.id===id});return q&&q.tpl?'<span class="ttl-tag tpl">قالب</span>':''})()+'</b>'+
     '<small>'+esc(t.title||'برنامه کنکوریا')+'</small>'+
     '<small>'+(n?fa(n)+' خانه پر شده':'خالی')+(dt?' · '+esc(dt):'')+(function(){var q=ttPlans().find(function(z){return z.id===id});return q&&q.h&&q.h.length>1?' · '+fa(q.h.length)+' هفته':''})()+'</small></span></button>'+
+    (draft?'':(function(){var q=ttPlans().find(function(z){return z.id===id}),on=q&&q.tpl;return (on?'<button type="button" class="ttl-del ttl-snd" data-ttl="use" data-id="'+esc(id)+'" aria-label="ساخت برنامه از قالب '+esc(label)+'">'+icon('plus')+'</button>':'')+'<button type="button" class="ttl-del ttl-tp'+(on?' on':'')+'" data-ttl="tpl" data-id="'+esc(id)+'" aria-pressed="'+(on?'true':'false')+'" aria-label="'+(on?'برداشتن علامت قالب از ':'علامت‌گذاری به‌عنوان قالب: ')+esc(label)+'">'+icon('star')+'</button>'})())+
+    (draft?'':'<button type="button" class="ttl-del ttl-snd" data-ttl="send" data-id="'+esc(id)+'" aria-label="ارسال برنامه '+esc(label)+' به دانش‌آموز">'+icon('send')+'</button>')+
     '<button type="button" class="ttl-del" data-ttl="'+(draft?'deld':'del')+'" data-id="'+esc(id)+'" aria-label="حذف برنامه '+esc(label)+'">'+icon('trash')+'</button></div>';
 }
 function ttListPaint(){
   var w=ttLs;if(!w)return;
-  var raw=w.querySelector('.ttl-q').value,q=ttNorm(raw),all=ttPlans().slice().sort(function(a,b){return b.upd-a.upd}),
+  var raw=w.querySelector('.ttl-q').value,q=ttNorm(raw),all=ttPlans().slice().sort(function(a,b){return (b.tpl?1:0)-(a.tpl?1:0)||b.upd-a.upd}),
     hit=q?all.filter(function(p){return ttNorm(p.name).indexOf(q)>-1}):all,dr=ttDraft(),h='';
   if(dr&&(!q||ttNorm(ttName(dr)).indexOf(q)>-1))h+=ttCardHtml(dr,ttName(dr),0,'draft',true);
   hit.forEach(function(p){h+=ttCardHtml(p.data,p.name,p.upd,p.id,false)});
   if(!h){
-    if(q)h='<div class="ttl-empty"><p>برنامه‌ای با این نام پیدا نشد.</p><button type="button" class="tt-btn pri" data-ttl="newq">'+icon('plus')+'ساخت برنامه برای «'+esc(raw.trim())+'»</button></div>';
-    else h='<div class="ttl-empty"><p>هنوز برنامه‌ای ذخیره نکرده‌ای.<br>برای هر دانش‌آموز یک برنامه بنویس؛ به نام خودش ذخیره می‌شود.</p><button type="button" class="tt-btn pri" data-ttl="new">'+icon('plus')+'ساخت اولین برنامه</button></div>';
+    if(q)h='<div class="ttl-empty">'+emptyArtHTML('plans','برنامه‌ای با این نام پیدا نشد','',null,'sm')+'<button type="button" class="tt-btn pri" data-ttl="newq">'+icon('plus')+'ساخت برنامه برای «'+esc(raw.trim())+'»</button></div>';
+    else h='<div class="ttl-empty">'+emptyArtHTML('plans','هنوز برنامه‌ای ذخیره نکرده‌ای','برای هر دانش‌آموز یک برنامه بنویس؛ به نام خودش ذخیره می‌شود. یک برنامهٔ خوب را با ستاره «قالب» کن تا بارها استفاده شود.',null)+'<button type="button" class="tt-btn pri" data-ttl="new">'+icon('plus')+'ساخت اولین برنامه</button></div>';
   }
   w.querySelector('.ttl-ls').innerHTML=h;
   var n=all.length,s=w.querySelector('.tt-ti small');
@@ -5664,6 +6457,7 @@ function openTTList(){
   var w=document.createElement('div');w.className='tt-page tt-list';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');w.setAttribute('aria-label','برنامه‌های کنکوریا');
   w.innerHTML='<header class="tt-bar"><button type="button" class="round glass" data-ttl="close" aria-label="بستن">'+icon('close')+'</button>'+
     '<div class="tt-ti"><div class="tt-tr"><b class="ttl-h">کنکوریا</b><span class="vbadge">'+icon('star')+'ویژه</span></div><small></small></div>'+
+    '<button type="button" class="round glass" data-ttl="lk" aria-label="اتصال دانش‌آموزان">'+icon('user')+'</button>'+
     '<button type="button" class="round glass" data-ttl="new" aria-label="برنامه‌ی جدید">'+icon('plus')+'</button></header>'+
     '<div class="ttl-qw">'+icon('search')+'<input class="field ttl-q" type="search" enterkeyhint="search" autocomplete="off" placeholder="جستجوی نام دانش‌آموز" aria-label="جستجوی نام دانش‌آموز"></div>'+
     '<div class="ttl-ls" role="list"></div>';
@@ -5681,6 +6475,10 @@ function openTTList(){
     else if(a==='newq')ttStartNew(w.querySelector('.ttl-q').value.trim());
     else if(a==='del')ttDelPlan(b.dataset.id);
     else if(a==='deld')ttDelDraft();
+    else if(a==='lk')openCnx('c');
+    else if(a==='send')cnxSendPlan(b.dataset.id);
+    else if(a==='tpl')ttToggleTpl(b.dataset.id);
+    else if(a==='use')ttUseTpl(b.dataset.id);
   });
   requestAnimationFrame(function(){requestAnimationFrame(function(){w.classList.add('open')})});
 }
@@ -5698,6 +6496,554 @@ function closeTT(){
   if(ui.tab==='account'||ui.tab==='week'||ui.tab==='kk')render();
 }
 actions.openTT=openTTList;
+
+/* ---------- counselor <-> student link (v271) ----------
+   A counselor makes an invite code, the student types it, and from then on the counselor can send a saved Konkuria plan to that student.
+   Tables: public.links (code, counselor, student) and public.shared_plans (the plans sent) - see supabase/setup.sql. Needs a signed-in account.
+   The student's phone looks for new plans (shared_plans with seen_at = null) when the app opens, comes back to the screen, and every few minutes;
+   each plan becomes a saved plan "lk_<plan_key>" (a second send of the same plan updates it and adds the week to its history). */
+var CNX={links:[],sent:[],rep:[],mine:[],uid:'',el:null,busy:0,tick:0,pulling:false,lt:0,chk:0};
+var CNX_ST='ario.lk.st',CNX_PR='ario.lk.pr',CNX_CO='ario.lk.co',CNX_AU='ario.lk.au',CNX_RN='ario.lk.rn';
+function cnxOn(){return sbOn()&&!!sbSess()}
+function cnxIsStudent(){try{return localStorage.getItem(CNX_ST)==='1'}catch(e){return false}}
+function cnxSetStudent(v){try{if(v)localStorage.setItem(CNX_ST,'1');else localStorage.removeItem(CNX_ST)}catch(e){}}
+function cnxNewCode(){
+  var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',a=new Uint8Array(8),s='',i;   /* 32 letters: 256 % 32 = 0, so no letter is more likely */
+  crypto.getRandomValues(a);for(i=0;i<8;i++)s+=A.charAt(a[i]%32);return s;
+}
+function cnxFmt(c){c=String(c||'');return c.slice(0,4)+'-'+c.slice(4)}
+function cnxNormCode(v){
+  return String(v||'').replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}).replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+async function cnxReq(path,method,body,extra){
+  try{
+    var r=await sbReq(path,method,body,extra),j=null;
+    try{j=await r.json()}catch(e){}
+    return {ok:r.ok,st:r.status,j:j};
+  }catch(e){return {ok:false,st:0,j:null,off:true}}
+}
+function cnxMsg(m,err){var e=CNX.el&&CNX.el.querySelector('.cx-msg');if(e){e.textContent=m||'';e.className='cx-msg'+(err?' err':'')}}
+function cnxNetErr(r){return r&&r.off?__("اینترنت در دسترس نیست","No internet connection"):__("انجام نشد. دوباره امتحان کن","That did not work. Try again")}
+/* loads the links of this account (as counselor and as student) and what the counselor has sent */
+async function cnxLoad(){
+  var s=sbSess();if(!s||!sbOn())return false;
+  CNX.uid=s.uid;
+  var a=await cnxReq('/rest/v1/links?select=id,code,counselor_id,counselor_name,student_id,student_name,created_at,linked_at,expires_at&order=created_at.desc&limit=200');
+  if(!a.ok||!Array.isArray(a.j))return false;
+  CNX.links=a.j;
+  cnxSetStudent(a.j.some(function(l){return l.student_id===s.uid}));
+  var mine=a.j.some(function(l){return l.counselor_id===s.uid});
+  if(mine){
+    var b=await cnxReq('/rest/v1/shared_plans?counselor_id=eq.'+encodeURIComponent(s.uid)+'&select=id,link_id,plan_key,title,sent_at,seen_at&order=sent_at.desc&limit=150');
+    CNX.sent=b.ok&&Array.isArray(b.j)?b.j:[];
+  }else CNX.sent=[];
+  try{if(mine)localStorage.setItem(CNX_CO,'1');else localStorage.removeItem(CNX_CO)}catch(e){}
+  cwSync();
+  /* v272: reports (the text itself is fetched only when the counselor opens one) */
+  var since=addDays(todayKey(),-60);
+  CNX.rep=[];CNX.mine=[];
+  if(mine){
+    var c=await cnxReq('/rest/v1/student_reports?counselor_id=eq.'+encodeURIComponent(s.uid)+'&day=gte.'+since+'&select=id,link_id,day,sp,cl,te,tc,cr,parts,sent_at,seen_at&order=day.desc&limit=1000');
+    CNX.rep=c.ok&&Array.isArray(c.j)?c.j:[];
+  }
+  if(a.j.some(function(l){return l.student_id===s.uid})){
+    var d=await cnxReq('/rest/v1/student_reports?student_id=eq.'+encodeURIComponent(s.uid)+'&day=gte.'+since+'&select=link_id,day,sent_at,seen_at&order=day.desc&limit=200');
+    CNX.mine=d.ok&&Array.isArray(d.j)?d.j:[];
+  }
+  CNX.lt=Date.now();
+  return true;
+}
+function cnxMyLinks(){return CNX.links.filter(function(l){return l.counselor_id===CNX.uid})}
+function cnxMyCounselors(){return CNX.links.filter(function(l){return l.student_id===CNX.uid})}
+function cnxDate(v){try{return mk({year:'numeric',month:'long',day:'numeric'}).format(new Date(v))}catch(e){return ''}}
+function cnxShare(code){
+  var txt=__("کد دعوت Ario: ","Ario invite code: ")+cnxFmt(code)+"\n"+__("در برنامه: حساب کاربری ← تنظیمات ← اتصال مشاور و دانش‌آموز، این کد را وارد کن.","In the app: Account > Settings > Advisor link, enter this code.");
+  var S=capGet('Share');
+  if(S){S.share({text:txt,dialogTitle:__("ارسال کد دعوت","Send the invite code")}).catch(function(){});return}
+  if(navigator.share){navigator.share({text:txt}).catch(function(){});return}
+  try{navigator.clipboard.writeText(txt);toast(__("کد کپی شد","Code copied"),null,null,'ok')}catch(e){toast(cnxFmt(code),null,null,'info')}
+}
+async function cnxMake(){
+  var inp=CNX.el&&CNX.el.querySelector('#lkNm'),nm=inp?inp.value.trim().slice(0,80):'',s=sbSess();
+  if(!s){return}
+  cnxMsg(__("در حال ساخت کد…","Making the code…"));
+  var r,i,code;
+  for(i=0;i<3;i++){
+    code=cnxNewCode();
+    r=await cnxReq('/rest/v1/links','POST',{code:code,counselor_id:s.uid,counselor_name:String(displayName()).slice(0,80),student_name:nm},{Prefer:'return=representation'});
+    if(r.ok||r.st!==409)break;                       /* 409 = this code exists already: try another */
+  }
+  if(!r.ok){cnxMsg(r.st===404||r.st===401?__("جدول‌های اتصال هنوز در Supabase ساخته نشده‌اند (فایل supabase/setup.sql را اجرا کن).","The link tables are not in Supabase yet (run supabase/setup.sql)."):cnxNetErr(r),1);return}
+  if(inp)inp.value='';
+  cnxMsg(__("کد ساخته شد؛ آن را برای دانش‌آموز بفرست.","Code made; send it to the student."));
+  await cnxLoad();cnxPaint();
+}
+async function cnxRevoke(id,linked){
+  askConfirm({title:linked?__("قطع ارتباط؟","End the link?"):__("حذف کد؟","Delete the code?"),msg:linked?__("دانش‌آموز دیگر برنامه‌ای از تو نمی‌گیرد و گزارش‌هایی که این دانش‌آموز برایت فرستاده از داشبوردت پاک می‌شود. برنامه‌هایی که تا حالا فرستاده‌ای در گوشی او می‌مانند.","The student will stop getting plans from you, and the reports this student sent you are deleted from your dashboard. Plans already sent stay on their phone."):__("این کد دیگر کار نمی‌کند.","This code will stop working."),btns:[{t:linked?__("قطع ارتباط","End link"):__("حذف","Delete"),cls:'bad',fn:async function(){
+    var r=await cnxReq('/rest/v1/links?id=eq.'+encodeURIComponent(id),'DELETE',null,{Prefer:'return=minimal'});
+    if(!r.ok){cnxMsg(cnxNetErr(r),1);return}
+    await cnxLoad();cnxPaint();
+  }}]});
+}
+async function cnxRedeem(){
+  var el=CNX.el;if(!el)return;
+  var code=cnxNormCode(el.querySelector('#lkCode').value),nm=el.querySelector('#lkMe').value.trim().slice(0,80);
+  if(code.length!==8){cnxMsg(__("کد ۸ حرفی است؛ دوباره نگاه کن.","The code has 8 characters; check it again."),1);return}
+  cnxMsg(__("در حال اتصال…","Connecting…"));
+  var r=await cnxReq('/rest/v1/rpc/redeem_link','POST',{p_code:code,p_name:nm});
+  if(!r.ok){cnxMsg(r.st===404?__("تابع اتصال هنوز در Supabase ساخته نشده (فایل supabase/setup.sql را اجرا کن).","The link function is not in Supabase yet (run supabase/setup.sql)."):cnxNetErr(r),1);return}
+  var j=r.j||{};
+  if(!j.ok){
+    var M={notfound:__("این کد پیدا نشد.","Code not found."),self:__("این کد را خودت ساخته‌ای؛ آن را به دانش‌آموز بده.","You made this code yourself; give it to the student."),used:__("این کد قبلاً برای کس دیگری استفاده شده.","This code was already used by someone else."),expired:__("این کد منقضی شده؛ از مشاور کد تازه بگیر.","This code has expired; ask for a new one.")};
+    cnxMsg(M[j.err]||cnxNetErr(r),1);return;
+  }
+  cnxSetStudent(true);
+  el.querySelector('#lkCode').value='';
+  cnxMsg(__("وصل شدی به ","Connected to ")+(j.counselor_name||__("مشاور","your advisor"))+'.');
+  await cnxLoad();cnxPaint();cnxPull();
+}
+async function cnxLeave(id){
+  askConfirm({title:__("قطع ارتباط با مشاور؟","Leave this advisor?"),msg:__("برنامه‌هایی که تا حالا گرفته‌ای در گوشی‌ات می‌مانند. گزارش‌هایی که برای این مشاور فرستاده‌ای از نزد او پاک می‌شود (گزارش‌های خودت در برنامه می‌مانند).","Plans you already got stay on your phone. The reports you sent this advisor are deleted from their dashboard (your own reports stay in the app)."),btns:[{t:__("قطع ارتباط","Leave"),cls:'bad',fn:async function(){
+    var r=await cnxReq('/rest/v1/links?id=eq.'+encodeURIComponent(id),'DELETE',null,{Prefer:'return=minimal'});
+    if(!r.ok){cnxMsg(cnxNetErr(r),1);return}
+    await cnxLoad();cnxPaint();
+  }}]});
+}
+function cnxPaint(){
+  var w=CNX.el;if(!w)return;
+  var me=cnxMyLinks(),st=cnxMyCounselors(),h='';
+  if(!me.length)h='<p class="hint2">'+__("هنوز کدی نساخته‌ای. برای هر دانش‌آموز یک کد بساز و برایش بفرست.","No codes yet. Make one for each student and send it.")+'</p>';
+  me.forEach(function(l){
+    var linked=!!l.student_id,last=CNX.sent.find(function(x){return x.link_id===l.id});
+    var sub=linked?(__("وصل شده","Connected")+(l.linked_at?' · '+cnxDate(l.linked_at):'')):(__("در انتظار دانش‌آموز · تا ","Waiting for the student · until ")+cnxDate(l.expires_at));
+    if(linked){var rs=cnxRepStat(l);sub+='<br>'+(rs.last?__("آخرین گزارش: ","Last report: ")+cnxAgo(rs.ago)+(rs.unseen?' · '+fa(rs.unseen)+__(" جدید"," new"):''):__("هنوز گزارشی نفرستاده","No report yet"))}
+    if(last)sub+='<br>'+__("آخرین برنامه: ","Last plan: ")+esc(last.title||'')+' · '+cnxDate(last.sent_at)+' · '+(last.seen_at?__("دیده شد","seen"):__("هنوز دیده نشده","not seen yet"));
+    h+='<div class="cx-card"><div class="cx-tx"><b>'+esc(l.student_name||__("بدون نام","No name"))+(linked?'<span class="cx-tag ok">'+__("متصل","linked")+'</span>':'<span class="cx-tag">'+__("منتظر","pending")+'</span>')+'</b>'+
+      (linked?'':'<div class="cx-code" dir="ltr">'+esc(cnxFmt(l.code))+'</div>')+'<small>'+sub+'</small></div>'+
+      '<div class="cx-ac">'+(linked?'<button type="button" class="cx-b" data-lk="dash" data-id="'+esc(l.id)+'" aria-label="'+__("داشبورد","Dashboard")+'">'+icon('stats')+'</button>':'<button type="button" class="cx-b" data-lk="share" data-c="'+esc(l.code)+'" aria-label="'+__("ارسال کد","Send the code")+'">'+icon('send')+'</button>')+
+      '<button type="button" class="cx-b bad" data-lk="rev" data-id="'+esc(l.id)+'" data-l="'+(linked?1:0)+'" aria-label="'+__("حذف","Delete")+'">'+icon('trash')+'</button></div></div>';
+  });
+  w.querySelector('.cx-cl').innerHTML=h;
+  var s2='';
+  st.forEach(function(l){
+    s2+='<div class="cx-card"><div class="cx-tx"><b>'+esc(l.counselor_name||__("مشاور","Advisor"))+'<span class="cx-tag ok">'+__("متصل","linked")+'</span></b><small>'+__("برنامه‌هایی که بفرستد خودکار در «کنکوریا» می‌آید.","Plans they send appear in Konkuria by themselves.")+'</small></div>'+
+      '<div class="cx-ac"><button type="button" class="cx-b bad" data-lk="leave" data-id="'+esc(l.id)+'" aria-label="'+__("قطع ارتباط","Leave")+'">'+icon('close')+'</button></div></div>';
+  });
+  if(st.length)s2+='<button type="button" class="chip cx-au" data-lk="auto" aria-pressed="'+cnxAuto()+'">'+__("ارسال خودکار گزارش‌کار به مشاور","Send my daily report to my advisor automatically")+'</button><p class="hint2">'+__("مشاور فقط گزارش‌کارهایی را می‌بیند که تو می‌فرستی (جدول و بقیهٔ اطلاعاتت را نمی‌بیند). ارسال دستی: در صفحهٔ گزارش‌کار، دکمهٔ «ارسال گزارش به مشاور».","Your advisor only sees the reports you send (not your timetable or anything else). To send by hand, use the “Send to my advisor” button on the report page.")+'</p>';
+  w.querySelector('.cx-st').innerHTML=s2;
+}
+function openCnx(focus){
+  if(CNX.el)return;
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+__("اتصال مشاور و دانش‌آموز","Advisor and student link")+'</h2><button type="button" data-lk="close">'+__("بستن","Close")+'</button></div><div class="cx-body"></div>',__("اتصال مشاور و دانش‌آموز","Advisor and student link"));
+  var w=sw.w;CNX.el=w;w.classList.add('cx');
+  var origClose=sw.close;sw.close=function(){CNX.el=null;origClose()};
+  w.querySelector('.dim').addEventListener('click',function(){CNX.el=null});
+  var body=w.querySelector('.cx-body');
+  if(!sbOn()||!sbSess()){
+    body.innerHTML='<p class="hint2">'+__("برای اتصال، اول با ایمیل وارد حساب شو (حساب کاربری ← ورود یا ساخت حساب).","Sign in with your e-mail first (Account > Sign in).")+'</p><button type="button" class="tt-btn pri" data-lk="login">'+__("ورود یا ساخت حساب","Sign in or create an account")+'</button>';
+  }else{
+    body.innerHTML=
+      '<div class="sec" id="lkC"><div class="sec-h"><b>'+__("من مشاورم","I am an advisor")+'</b></div>'+
+      '<p class="hint2">'+__("برای هر دانش‌آموز یک کد بساز و برایش بفرست. وقتی کد را وارد کرد، با دکمهٔ ارسال در فهرست برنامه‌های کنکوریا برنامه‌اش را برایش می‌فرستی.","Make a code for each student. Once they enter it, you can send a saved Konkuria plan to them.")+'</p>'+
+      '<input class="field" id="lkNm" type="text" maxlength="80" placeholder="'+__("نام دانش‌آموز (اختیاری)","Student name (optional)")+'" aria-label="'+__("نام دانش‌آموز","Student name")+'">'+
+      '<button type="button" class="tt-btn pri cx-mk" data-lk="make">'+icon('plus')+__("ساخت کد دعوت","Make an invite code")+'</button><button type="button" class="tt-btn cx-mk" data-lk="dash">'+icon('stats')+__("داشبورد دانش‌آموزان","Students dashboard")+'</button><div class="cx-cl"></div></div>'+
+      '<div class="sec" id="lkS"><div class="sec-h"><b>'+__("من دانش‌آموزم","I am a student")+'</b></div>'+
+      '<p class="hint2">'+__("کدی که مشاورت داده را وارد کن تا برنامه‌هایش خودکار برایت بیاید.","Enter the code your advisor gave you to get their plans automatically.")+'</p>'+
+      '<input class="field" id="lkCode" type="text" dir="ltr" maxlength="12" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX" aria-label="'+__("کد دعوت","Invite code")+'">'+
+      '<input class="field" id="lkMe" type="text" maxlength="80" placeholder="'+__("نام تو (مشاور همین را می‌بیند)","Your name (your advisor sees it)")+'" aria-label="'+__("نام تو","Your name")+'" value="'+esc(state.profile.name||'')+'">'+
+      '<button type="button" class="tt-btn pri cx-mk" data-lk="redeem">'+icon('check')+__("اتصال","Connect")+'</button><div class="cx-st"></div></div>';
+  }
+  body.insertAdjacentHTML('beforeend','<div class="cx-msg" role="status"></div>');
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-lk]');if(!b)return;var a=b.dataset.lk;
+    if(a==='close')sw.close();
+    else if(a==='login'){sw.close();sbSheet()}
+    else if(a==='make')cnxMake();
+    else if(a==='redeem')cnxRedeem();
+    else if(a==='share')cnxShare(b.dataset.c);
+    else if(a==='rev')cnxRevoke(b.dataset.id,b.dataset.l==='1');
+    else if(a==='leave')cnxLeave(b.dataset.id);
+    else if(a==='auto'){cnxSetAuto(!cnxAuto());cnxPaint()}
+    else if(a==='dash')cdOpen(b.dataset.id||'');
+  });
+  if(cnxOn()){
+    cnxMsg(__("در حال بارگیری…","Loading…"));
+    cnxLoad().then(function(ok){
+      if(!CNX.el)return;
+      if(!ok){cnxMsg(__("بارگیری نشد؛ اینترنت یا جدول‌های Supabase را بررسی کن.","Could not load; check the internet or the Supabase tables."),1);return}
+      cnxMsg('');cnxPaint();
+      if(focus){var t=w.querySelector(focus==='s'?'#lkS':'#lkC');if(t&&t.scrollIntoView)t.scrollIntoView({block:'start'})}
+    });
+  }
+}
+actions.openCnx=function(){openCnx()};
+/* the counselor sends a saved plan: choose the student (the one whose name matches the plan comes first) */
+async function cnxSendPlan(planId){
+  var p=ttPlans().find(function(x){return x.id===planId});if(!p)return;
+  if(!cnxOn()){toast(__("اول وارد حساب شو (حساب کاربری ← ورود یا ساخت حساب).","Sign in first."),null,null,'warn');return}
+  toast(__("در حال بررسی دانش‌آموزان…","Checking your students…"),null,null,'info',1);
+  if(!(await cnxLoad())){toast(__("بارگیری نشد؛ اینترنت یا جدول‌های Supabase را بررسی کن.","Could not load; check the internet or the Supabase tables."),null,null,'warn');return}
+  var ls=cnxMyLinks().filter(function(l){return l.student_id});
+  if(!ls.length){askConfirm({title:__("دانش‌آموزی وصل نیست","No student is linked"),msg:__("اول یک کد دعوت بساز و به دانش‌آموز بده. وقتی وارد کرد، می‌توانی برنامه را بفرستی.","Make an invite code and give it to the student first."),btns:[{t:__("ساخت کد","Make a code"),cls:'pri',fn:function(){openCnx('c')}}]});return}
+  var nn=ttNorm(p.name);
+  ls.sort(function(a,b){return (ttNorm(b.student_name)===nn?1:0)-(ttNorm(a.student_name)===nn?1:0)});
+  var h='<div class="sheet-top"><span></span><h2>'+__("ارسال به دانش‌آموز","Send to a student")+'</h2><button type="button" data-e="close">'+__("بستن","Close")+'</button></div>'+
+    '<p class="hint2">'+__("برنامهٔ «","Plan \"")+esc(p.name||'')+__("» برای چه کسانی فرستاده شود؟ می‌توانی چند نفر را انتخاب کنی. عکس‌های داخل جدول فرستاده نمی‌شوند.","\" - who should get it? You can pick several students. Photos inside the table are not sent.")+'</p>'+
+    ls.map(function(l){var m=ttNorm(l.student_name)===nn&&nn;return '<button type="button" class="cx-pick cx-multi'+(m?' hit':'')+'" data-pk="'+esc(l.id)+'" aria-pressed="false"><span class="cx-chk" aria-hidden="true"></span><span><b>'+esc(l.student_name||__("بدون نام","No name"))+'</b>'+(m?'<small>'+__("هم‌نام برنامه","same name as the plan")+'</small>':'')+'</span></button>'}).join('')+
+    '<div class="cx-sendbar"><button type="button" class="tt-btn" data-all="1">'+__("انتخاب همه","Select all")+'</button><button type="button" class="tt-btn pri" data-go="1" disabled>'+icon('send')+'<span>'+__("ارسال","Send")+'</span></button></div>';
+  var sw=ttSheetWrap(h,__("ارسال به دانش‌آموز","Send to a student")),w=sw.w,go=w.querySelector('[data-go]');
+  function picked(){return [].slice.call(w.querySelectorAll('.cx-multi[aria-pressed="true"]')).map(function(x){return x.dataset.pk})}
+  function upd(){var n=picked().length;go.disabled=!n;go.querySelector('span').textContent=n>1?__("ارسال به ","Send to ")+fa(n)+__(" نفر"," students"):__("ارسال","Send")}
+  w.addEventListener('click',async function(e){
+    if(e.target.closest('[data-e="close"]')){sw.close();return}
+    if(e.target.closest('[data-all]')){
+      var cs=w.querySelectorAll('.cx-multi'),all=picked().length===cs.length;
+      [].forEach.call(cs,function(x){x.setAttribute('aria-pressed',all?'false':'true');x.classList.toggle('sel',!all)});upd();return;
+    }
+    var b=e.target.closest('.cx-multi');
+    if(b){hap('sel');var on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on?'true':'false');b.classList.toggle('sel',on);upd();return}
+    if(!e.target.closest('[data-go]')||go.disabled)return;
+    var ids=picked(),sel=ls.filter(function(x){return ids.indexOf(x.id)>-1});
+    if(!sel.length)return;
+    [].forEach.call(w.querySelectorAll('button'),function(x){if(!x.matches('[data-e]'))x.disabled=true});
+    var key=ttSnapKey(p.data,p.upd),data=ttSnapData(p.data,key);
+    if(JSON.stringify(data).length>1500000){sw.close();toast(__("برنامه خیلی بزرگ است.","The plan is too big."),null,null,'warn');return}
+    var ok=[],bad=null,i;
+    for(i=0;i<sel.length;i++){
+      var r=await cnxReq('/rest/v1/shared_plans','POST',{link_id:sel[i].id,counselor_id:CNX.uid,student_id:sel[i].student_id,plan_key:String(p.id).slice(0,34),title:String(p.name||'').slice(0,80),data:data},{Prefer:'return=minimal'});
+      if(r.ok)ok.push(sel[i]);else bad=r;
+    }
+    sw.close();
+    if(ok.length){
+      hap('send');
+      toast(__("برنامه برای ","Plan sent to ")+(ok.length===1?(ok[0].student_name||__("دانش‌آموز","the student")):fa(ok.length)+__(" دانش‌آموز"," students"))+__(" فرستاده شد","")+(bad?' · '+fa(sel.length-ok.length)+__(" نفر نرسید"," failed"):'')+'.',null,null,bad?'warn':'ok');
+      return;
+    }
+    toast(bad&&bad.st===404?__("جدول‌های اتصال هنوز در Supabase ساخته نشده‌اند.","The link tables are not in Supabase yet."):cnxNetErr(bad),null,null,'warn');
+  });
+}
+/* ----- student side: take the plans that arrived ----- */
+function cnxImport(r){
+  var d=r.data;if(!d||typeof d!=='object'||!Array.isArray(d.rows))return null;
+  var key=String(r.plan_key||r.id).replace(/[^\w-]/g,'').slice(0,34)||String(r.id).replace(/-/g,'').slice(0,12),id='lk_'+key;
+  var tmp=ttpClean([{id:id,name:String(r.title||'').slice(0,80),upd:Date.parse(r.sent_at)||Date.now(),data:d}])[0];
+  if(!tmp)return null;
+  var pl=ttPlans(),p=pl.find(function(x){return x.id===id}),isNew=!p;
+  if(p){p.name=tmp.name||p.name;p.upd=tmp.upd;p.data=tmp.data}else{p=tmp;pl.push(p)}
+  ttHRecord(p,p.data);
+  var cur=state.profile.ttCur;
+  /* the open table is replaced only when it is empty, or already a plan from the advisor, and nothing is being edited */
+  if(!ttEl&&!ttDraft()&&(!cur||String(cur).indexOf('lk_')===0)){state.profile.tt=ttClone(p.data);state.profile.ttCur=id}
+  return {p:p,isNew:isNew};
+}
+async function cnxPull(){
+  if(CNX.pulling||!cnxOn()||!cnxIsStudent())return;
+  var s=sbSess();CNX.pulling=true;
+  try{
+    var r=await cnxReq('/rest/v1/shared_plans?student_id=eq.'+encodeURIComponent(s.uid)+'&seen_at=is.null&select=id,plan_key,title,data,sent_at&order=sent_at.asc&limit=20');
+    if(!r.ok||!Array.isArray(r.j)||!r.j.length)return;
+    var got=[],ids=[];
+    r.j.forEach(function(x){var o=cnxImport(x);if(o){got.push(o);ids.push(x.id)}else ids.push(x.id)});
+    if(got.length){
+      var last=got[got.length-1].p,nm=last.name||'';
+      var t=__("مشاور برنامهٔ تازه‌ات را فرستاد","Your advisor sent your new plan")+(nm?' «'+nm+'»':'')+'. '+__("از «کنکوریا» ببینش.","Open it in Konkuria.");
+      kcD().ch.plan.push({r:'a',t:'📋 '+t,ts:Date.now()});
+      persist();writeCache();
+      msgNew('plan',__("📋 برنامهٔ تازه از مشاور","📋 New plan from your advisor"),t);
+      if(ttLs)ttListPaint();
+      if(ui.tab==='kk'||ui.tab==='week'||ui.tab==='account')render();
+    }
+    var now=new Date().toISOString();
+    for(var i=0;i<ids.length;i++)await cnxReq('/rest/v1/shared_plans?id=eq.'+encodeURIComponent(ids[i]),'PATCH',{seen_at:now},{Prefer:'return=minimal'});
+  }catch(e){}
+  finally{CNX.pulling=false}
+}
+/* when to look: a few seconds after start, whenever the app comes back to the screen, and every 4 minutes while it is open */
+function cnxTick(){
+  try{
+    if(!cnxOn()||document.hidden)return;
+    cwFg();
+    if(cnxIsCounselor())cnxRepCheck();
+    if(cnxIsStudent()){
+      cnxPull();
+      if(Date.now()-CNX.lt>6e5)cnxLoad();   /* keeps "sent / seen" of the reports fresh */
+      return;
+    }
+    var last=0;try{last=Number(localStorage.getItem(CNX_PR))||0}catch(e){}
+    if(Date.now()-last>12*36e5){try{localStorage.setItem(CNX_PR,String(Date.now()))}catch(e){}cnxLoad().then(function(){if(cnxIsStudent())cnxPull()})}   /* a new phone: find out once if this account is a student's */
+  }catch(e){}
+}
+setTimeout(function(){cwSync();cnxTick()},5000);
+setInterval(cnxTick,240000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(cnxTick,1200)});
+
+/* ---------- v272: the student sends the daily report to the counselor; the counselor's simple dashboard ----------
+   Table public.student_reports (one row per link + day; see supabase/setup.sql). The student writes only through send_report(),
+   the counselor marks a report as seen only through mark_reports_seen(). The counselor gets the numbers of the last 60 days
+   (study minutes, tests, correct answers) for the dashboard; the report text is fetched only when one report is opened.
+   Sending is by hand (button on the report page) or automatic after a report is saved (switch in the link sheet, off at first). */
+function cnxIsCounselor(){try{return localStorage.getItem(CNX_CO)==='1'}catch(e){return false}}
+function cnxAuto(){try{return localStorage.getItem(CNX_AU)==='1'}catch(e){return false}}
+function cnxSetAuto(v){try{if(v)localStorage.setItem(CNX_AU,'1');else localStorage.removeItem(CNX_AU)}catch(e){}}
+function cnxDaysAgo(k){return Math.round((parse(todayKey())-parse(k))/864e5)}
+function cnxAgo(n){return n<=0?__("امروز","today"):n===1?__("دیروز","yesterday"):fa(n)+__(" روز پیش"," days ago")}
+function cnxNm(l){return (l&&l.student_name)||__("دانش‌آموز","Student")}
+
+/* ----- student side ----- */
+function rpCnBtn(k){
+  if(!k||!cnxOn()||!cnxIsStudent()||!rpD()[k])return '';
+  var m=CNX.mine.find(function(x){return x.day===k}),note='';
+  if(m)note='<small>'+(m.seen_at?__("به مشاور فرستاده شد · دیده شد","Sent to your advisor · seen"):__("به مشاور فرستاده شد · هنوز دیده نشده","Sent to your advisor · not seen yet"))+'</small>';
+  return '<div class="rp-cn"><button type="button" class="rp-b" data-rp="tocn">'+icon('send')+(m?__("ارسال دوبارهٔ گزارش به مشاور","Send again to my advisor"):__("ارسال گزارش به مشاور","Send to my advisor"))+'</button>'+note+'</div>';
+}
+async function cnxSendReport(k,silent){
+  var r=rpD()[k];if(!r||!cnxOn()||!cnxIsStudent())return false;
+  if(!silent)toast(__("در حال ارسال…","Sending…"),null,null,'info',1);
+  if(!(await cnxLoad())){toast(silent?__("گزارش برای مشاور فرستاده نشد؛ بعداً از صفحهٔ گزارش دستی بفرست.","The report was not sent to your advisor; send it by hand from the report page later."):__("بارگیری نشد؛ اینترنت یا جدول‌های Supabase را بررسی کن.","Could not load; check the internet or the Supabase tables."),null,null,'warn');return false}
+  var ls=cnxMyCounselors();
+  if(!ls.length){if(!silent)toast(__("به مشاوری وصل نیستی.","You are not linked to an advisor."),null,null,'warn');return false}
+  if(silent||ls.length===1)return cnxPostReport(ls,k,silent);
+  var h='<div class="sheet-top"><span></span><h2>'+__("ارسال به مشاور","Send to an advisor")+'</h2><button type="button" data-e="close">'+__("بستن","Close")+'</button></div>'+
+    '<p class="hint2">'+__("گزارش این روز برای کدام مشاور فرستاده شود؟","Which advisor should get this report?")+'</p>'+
+    ls.map(function(l){return '<button type="button" class="cx-pick" data-pk="'+esc(l.id)+'">'+icon('user')+'<span><b>'+esc(l.counselor_name||__("مشاور","Advisor"))+'</b></span>'+icon('send')+'</button>'}).join('');
+  var sw=ttSheetWrap(h,__("ارسال به مشاور","Send to an advisor")),w=sw.w;
+  w.addEventListener('click',function(e){
+    if(e.target.closest('[data-e="close"]')){sw.close();return}
+    var b=e.target.closest('[data-pk]');if(!b)return;
+    var l=ls.find(function(x){return x.id===b.dataset.pk});if(!l)return;
+    sw.close();cnxPostReport([l],k,false);
+  });
+  return true;
+}
+async function cnxPostReport(ls,k,silent){
+  var r=rpD()[k],ok=[],bad=null,i;
+  if(!r)return false;
+  for(i=0;i<ls.length;i++){
+    var x=await cnxReq('/rest/v1/rpc/send_report','POST',{p_link:ls[i].id,p_day:k,p_sp:r.sp,p_cl:r.cl,p_te:r.te,p_tc:r.tc,p_cr:r.cr,p_parts:r.n,p_body:String(r.t||'').slice(0,9000)});
+    if(x.ok&&x.j&&x.j.ok)ok.push(ls[i]);else bad=x;
+  }
+  if(ok.length){
+    cnxLoad().then(function(){if(rpEl&&(rpv||(rp&&rp.ph==='done')))rpPaint();if(CNX.el)cnxPaint()});
+    hap('send');toast(__("گزارش برای ","Report sent to ")+ok.map(function(l){return l.counselor_name||__("مشاور","your advisor")}).join(__("، ",", "))+__(" فرستاده شد","")+'.',null,null,'ok');
+    return true;
+  }
+  var j=bad&&bad.j||{};
+  toast(bad&&bad.st===404?__("تابع ارسال گزارش هنوز در Supabase ساخته نشده (فایل supabase/setup.sql را اجرا کن).","The report function is not in Supabase yet (run supabase/setup.sql)."):j.err==='day'?__("این گزارش برای ارسال خیلی قدیمی است (حداکثر ۶۰ روز).","This report is too old to send (60 days at most)."):j.err==='nolink'?__("ارتباط با مشاور دیگر برقرار نیست.","You are no longer linked to this advisor."):cnxNetErr(bad),null,null,'warn');
+  return false;
+}
+
+/* ----- counselor side: numbers per student ----- */
+function cnxRepStat(l){
+  var td=todayKey(),by={},rs=CNX.rep.filter(function(x){return x.link_id===l.id}),i,
+      o={days:[],sp7:0,te7:0,tc7:0,cr7:0,n7:0,unseen:0,last:'',ago:999,streak:0,st:'none',by:by,rs:rs};
+  rs.forEach(function(x){by[x.day]=x;if(!x.seen_at)o.unseen++;if(!o.last||x.day>o.last)o.last=x.day});
+  for(i=6;i>=0;i--){
+    var k=addDays(td,-i),r=by[k];
+    o.days.push({k:k,sp:r?r.sp:0,te:r?r.te:0,has:!!r});
+    if(r){o.sp7+=r.sp;o.te7+=r.te;o.tc7+=r.tc;o.cr7+=r.cr;o.n7++}
+  }
+  if(o.last){o.ago=cnxDaysAgo(o.last);o.st=o.ago<=1?'ok':o.ago<=3?'warn':'bad'}
+  var k2=by[td]?td:addDays(td,-1);
+  while(by[k2]){o.streak++;k2=addDays(k2,-1)}
+  return o;
+}
+/* a phone notice for the counselor when new reports arrived (checked with the other periodic checks) */
+async function cnxRepCheck(){
+  if(CNX.chk||!cnxOn())return;
+  CNX.chk=1;
+  try{
+    await cwAdopt();
+    var s=sbSess(),r=await cnxReq('/rest/v1/student_reports?counselor_id=eq.'+encodeURIComponent(s.uid)+'&seen_at=is.null&select=link_id,day,sent_at&order=sent_at.desc&limit=30');
+    if(!r.ok||!Array.isArray(r.j)||!r.j.length)return;
+    var last=0;try{last=Number(localStorage.getItem(CNX_RN))||0}catch(e){}
+    var fresh=r.j.filter(function(x){return Date.parse(x.sent_at)>last});
+    var rnNew=Date.parse(r.j[0].sent_at)||Date.now();
+    try{localStorage.setItem(CNX_RN,String(rnNew))}catch(e){}
+    try{if(AN&&AN.cwMark)AN.cwMark({rn:rnNew}).catch(function(){})}catch(e){}
+    if(!fresh.length)return;
+    if(!CNX.links.length||CNX.uid!==s.uid)await cnxLoad();
+    var t,b;
+    if(fresh.length===1){
+      var l=CNX.links.find(function(x){return x.id===fresh[0].link_id});
+      t=__("📝 گزارش‌کار تازه","📝 New daily report");b=cnxNm(l)+' · '+F.long.format(parse(fresh[0].day));
+    }else{t=__("📝 گزارش‌کار تازه","📝 New daily reports");b=fa(fresh.length)+__(" گزارش تازه از دانش‌آموزانت"," new reports from your students")}
+    notify('info',t,b,__("داشبورد","Dashboard"),function(){cdOpen('')});
+  }catch(e){}
+  finally{CNX.chk=0}
+}
+
+/* ----- the dashboard (a sheet): list of students -> one student -> one report ----- */
+/* ---------- v275: picture empty states + loading skeletons ---------- */
+var EMPTY_ART={
+  chart:'<svg viewBox="0 0 120 96" class="ea" aria-hidden="true"><rect x="10" y="10" width="100" height="76" rx="14" class="ea-f"/><rect x="26" y="52" width="12" height="22" rx="4" class="ea-s"/><rect x="48" y="38" width="12" height="36" rx="4" class="ea-s ea-d"/><rect x="70" y="28" width="12" height="46" rx="4" class="ea-s"/><rect x="92" y="44" width="0" height="0"/><path d="M24 30l20 12 18-14 24 10" class="ea-l"/><circle cx="86" cy="38" r="4" class="ea-p"/></svg>',
+  plans:'<svg viewBox="0 0 120 96" class="ea" aria-hidden="true"><rect x="14" y="12" width="92" height="72" rx="12" class="ea-f"/><path d="M14 32h92M46 32v52M76 32v52M14 50h92M14 68h92" class="ea-l ea-t"/><rect x="50" y="53" width="22" height="12" rx="4" class="ea-s"/><rect x="80" y="35" width="22" height="12" rx="4" class="ea-s ea-d"/><circle cx="98" cy="20" r="3" class="ea-p"/></svg>',
+  chat:'<svg viewBox="0 0 120 96" class="ea" aria-hidden="true"><path d="M20 18h58a10 10 0 0 1 10 10v16a10 10 0 0 1-10 10H46l-14 12v-12h-12a10 10 0 0 1-10-10V28a10 10 0 0 1 10-10z" class="ea-f"/><rect x="58" y="60" width="52" height="24" rx="11" class="ea-s"/><path d="M98 82l9 8v-9z" class="ea-s"/><circle cx="34" cy="36" r="3.5" class="ea-p"/><circle cx="48" cy="36" r="3.5" class="ea-p ea-d"/><circle cx="62" cy="36" r="3.5" class="ea-p"/></svg>'
+};
+/* art = chart | plans | chat. btn = [label, attributes] or null */
+function emptyArtHTML(art,title,text,btn,cls){
+  return '<div class="empty-art '+(cls||'')+'">'+EMPTY_ART[art]+'<h3>'+title+'</h3>'+(text?'<p>'+text+'</p>':'')+(btn?'<button type="button" class="btn" '+btn[1]+'>'+btn[0]+'</button>':'')+'</div>';
+}
+function skelHTML(kind){
+  var sum='<div class="skl-sum"><i class="skl"></i><i class="skl"></i><i class="skl"></i></div>';
+  if(kind==='report')return '<div class="skl-wrap" aria-hidden="true"><i class="skl skl-h"></i><i class="skl skl-l"></i><i class="skl skl-l w80"></i><i class="skl skl-l w60"></i><i class="skl skl-l w90"></i><i class="skl skl-l w70"></i></div>';
+  return '<div class="skl-wrap" role="status" aria-label="'+__("در حال بارگیری…","Loading…")+'">'+sum+[0,1,2,3].map(function(){return '<div class="skl-card"><i class="skl skl-dot"></i><span><i class="skl skl-l w60"></i><i class="skl skl-l w40"></i></span><i class="skl skl-mini"></i></div>'}).join('')+'</div>';
+}
+var CD={el:null,sw:null,view:'',day:'',txt:''};
+function cdMsg(m,err){var e=CD.el&&CD.el.querySelector('.cd-msg');if(e){e.textContent=m||'';e.className='cd-msg'+(err?' err':'')}}
+function cdOpen(id){
+  if(CD.el)return;
+  if(!cnxOn()){toast(__("اول وارد حساب شو (حساب کاربری ← ورود یا ساخت حساب).","Sign in first."),null,null,'warn');return}
+  var ttl=__("داشبورد دانش‌آموزان","Students dashboard");
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-cd="close">'+__("بستن","Close")+'</button></div><div class="cd-body"></div><div class="cd-msg" role="status"></div>',ttl);
+  var w=sw.w;w.classList.add('cd');CD.el=w;CD.sw=sw;CD.view=id||'';CD.day='';CD.txt='';
+  var oc=sw.close;sw.close=function(){CD.el=null;oc()};
+  w.querySelector('.dim').addEventListener('click',function(){CD.el=null});
+  w.addEventListener('click',cdClick);
+  w.querySelector('.cd-body').innerHTML=skelHTML('list');
+  cnxLoad().then(function(ok){
+    if(!CD.el)return;
+    if(!ok){w.querySelector('.cd-body').innerHTML='';cdMsg(__("بارگیری نشد؛ اینترنت یا جدول‌های Supabase را بررسی کن.","Could not load; check the internet or the Supabase tables."),1);return}
+    cdMsg('');cdPaint();
+    if(CNX.el)cnxPaint();
+  });
+}
+function cdBar(d,key,mx,fmt){
+  var v=d[key]||0,h=v?Math.max(8,Math.round(v/mx*100)):3;
+  return '<div class="cd-col'+(d.has?' on':'')+'"><b>'+(v?fmt(v):'')+'</b><span><i style="height:'+h+'%"></i></span><small>'+WK[parse(d.k).getDay()]+'</small></div>';
+}
+function cdDays(l,n){
+  var st=cnxRepStat(l),td=todayKey(),a=[],i;
+  for(i=n-1;i>=0;i--){var k=addDays(td,-i),r=st.by[k];a.push({k:k,sp:r?r.sp:0,te:r?r.te:0,has:!!r})}
+  return a;
+}
+function cdPct(cr,tc){return tc?fa(Math.round(cr/tc*100))+'٪':'—'}
+/* ---------- v273: exam / test analysis for the advisor (from the daily reports: tests, tests with an answer key, correct answers) ----------
+   Four weekly windows (28 days). Accuracy counts only tests that had an answer key (tc). Nothing is guessed per lesson: the reports carry no lesson split. */
+function cdExamWeeks(l){
+  var st=cnxRepStat(l),td=todayKey(),out=[],w,i;
+  for(w=0;w<4;w++){
+    var o={te:0,tc:0,cr:0,n:0,sp:0};
+    for(i=0;i<7;i++){var r=st.by[addDays(td,-(w*7+i))];if(r){o.te+=r.te;o.tc+=r.tc;o.cr+=r.cr;o.sp+=r.sp;o.n++}}
+    o.pc=o.tc?Math.round(o.cr/o.tc*100):null;
+    out.push(o);
+  }
+  return out;   /* [0] = last 7 days, [1] = the 7 before, ... */
+}
+function cdExamHTML(l){
+  var wk=cdExamWeeks(l),tot={te:0,tc:0,cr:0,n:0},i,h='';
+  wk.forEach(function(x){tot.te+=x.te;tot.tc+=x.tc;tot.cr+=x.cr;tot.n+=x.n});
+  h='<h3 class="cd-h">'+__("تحلیل آزمون","Test analysis")+'</h3>';
+  if(!tot.te){return h+'<p class="hint2">'+__("در ۲۸ روز گذشته تستی در گزارش‌ها ثبت نشده.","No tests in the reports of the last 28 days.")+'</p>'}
+  h+='<div class="cd-sum"><div><b>'+fa(tot.te)+'</b><small>'+__("تست در ۲۸ روز","tests, 28 days")+'</small></div><div><b>'+cdPct(tot.cr,tot.tc)+'</b><small>'+__("درصد درست","correct")+'</small></div><div><b>'+(tot.n?fa(Math.round(tot.te/tot.n)):'—')+'</b><small>'+__("تست در روز گزارش‌دار","tests per reported day")+'</small></div></div>';
+  var mx=Math.max.apply(null,wk.map(function(x){return x.te}).concat([10]));
+  h+='<section class="cd-ch"><h3>'+__("هفته به هفته","Week by week")+'</h3>';
+  for(i=3;i>=0;i--){
+    var x=wk[i],lab=i===0?__("۷ روز اخیر","Last 7 days"):fa(i*7+1)+'–'+fa(i*7+7)+__(" روز پیش"," days ago");
+    h+='<div class="cd-wk"><span class="cd-wl">'+lab+'</span><span class="cd-wb"><i style="width:'+(x.te?Math.max(4,Math.round(x.te/mx*100)):0)+'%"></i></span><b>'+fa(x.te)+'</b><em>'+(x.pc==null?'—':fa(x.pc)+'٪')+'</em></div>';
+  }
+  h+='<small class="cd-wn">'+__("نوار = تعداد تست · عدد سمت چپ = درصد درست (فقط تست‌های دارای کلید)","bar = tests · right = % correct (tests with an answer key only)")+'</small></section>';
+  /* short, plain findings */
+  var a=wk[0],b=wk[1],ins=[];
+  if(!a.te&&b.te)ins.push(['bad',__("این هفته تستی نزده؛ هفتهٔ قبل ","No tests this week; last week ")+fa(b.te)+__(" تست زده بود."," tests.")]);
+  else if(a.te&&b.te){
+    var dt=Math.round((a.te-b.te)/b.te*100);
+    if(dt<=-30)ins.push(['warn',__("تعداد تست نسبت به هفتهٔ قبل ","Test count is ")+fa(Math.abs(dt))+__("٪ کمتر شده."," lower than last week.")]);
+    else if(dt>=30)ins.push(['ok',__("تعداد تست نسبت به هفتهٔ قبل ","Test count is ")+fa(dt)+__("٪ بیشتر شده."," higher than last week.")]);
+  }
+  if(a.tc>=10&&b.tc>=10){
+    var dp=a.pc-b.pc;
+    if(dp<=-8)ins.push(['bad',__("درصد درست ","Accuracy ")+fa(Math.abs(dp))+__(" واحد نسبت به هفتهٔ قبل افت کرده."," points lower than last week.")]);
+    else if(dp>=8)ins.push(['ok',__("درصد درست ","Accuracy ")+fa(dp)+__(" واحد نسبت به هفتهٔ قبل بهتر شده."," points higher than last week.")]);
+  }
+  if(tot.te>=20&&tot.tc<tot.te*0.5)ins.push(['warn',__("نیمی از تست‌ها کلید پاسخ نداشتند؛ درصدشان حساب نشده.","About half of the tests had no answer key, so they are not in the percentage.")]);
+  if(tot.tc>=30&&tot.cr/tot.tc<0.4)ins.push(['bad',__("درصد درست کلی پایین است؛ شاید وقت مرور و تحلیل غلط‌ها لازم باشد.","Overall accuracy is low; the mistakes may need a review.")]);
+  if(ins.length)h+='<div class="cd-ins">'+ins.map(function(x){return '<p class="'+x[0]+'">'+x[1]+'</p>'}).join('')+'</div>';
+  return h;
+}
+function cdPaint(){
+  var w=CD.el;if(!w)return;
+  var body=w.querySelector('.cd-body'),ls=cnxMyLinks().filter(function(l){return l.student_id}),h='';
+  if(CD.view){
+    var l0=ls.find(function(x){return x.id===CD.view});
+    if(l0){cdDetail(body,l0);return}
+    CD.view='';CD.day='';
+  }
+  if(!ls.length){body.innerHTML=emptyArtHTML('chart',__("هنوز دانش‌آموزی وصل نیست","No student is linked yet"),__("یک کد دعوت بساز و به دانش‌آموزت بده. وقتی وارد کرد، گزارش‌هایش اینجا می‌آید.","Make an invite code and give it to your student. Their reports will show up here."),[icon('plus')+__("ساخت کد دعوت","Make an invite code"),'data-cd="invite"']);return}
+  var rows=ls.map(function(l){return {l:l,s:cnxRepStat(l)}}),ord={bad:0,none:1,warn:2,ok:3},today=0,late=0,unseen=0;
+  rows.forEach(function(r){if(r.s.ago===0)today++;if(r.s.st==='bad')late++;unseen+=r.s.unseen});
+  rows.sort(function(a,b){return ord[a.s.st]-ord[b.s.st]||b.s.unseen-a.s.unseen});
+  h='<div class="cd-sum"><div><b>'+fa(ls.length)+'</b><small>'+__("دانش‌آموز","students")+'</small></div><div><b>'+fa(today)+'</b><small>'+__("گزارش امروز","reported today")+'</small></div><div class="'+(late?'bad':'')+'"><b>'+fa(late)+'</b><small>'+__("بدون گزارش ۴+ روز","no report 4+ days")+'</small></div></div>';
+  h+=rows.map(function(r){
+    var s=r.s,mx=Math.max.apply(null,s.days.map(function(d){return d.sp}).concat([60]));
+    var sub=s.last?__("آخرین گزارش: ","Last report: ")+cnxAgo(s.ago)+(s.unseen?' · <u>'+fa(s.unseen)+__(" جدید"," new")+'</u>':''):__("هنوز گزارشی نفرستاده","No report yet");
+    return '<button type="button" class="cd-card" data-cd="open" data-id="'+esc(r.l.id)+'"><span class="cd-dot '+s.st+'" aria-hidden="true"></span>'+
+      '<div class="cd-tx"><b>'+esc(cnxNm(r.l))+'</b><small>'+sub+'</small></div>'+
+      '<div class="cd-mini" aria-hidden="true">'+s.days.map(function(d){return '<i class="'+(d.has?'on':'')+'" style="height:'+(d.sp?Math.max(12,Math.round(d.sp/mx*100)):6)+'%"></i>'}).join('')+'</div>'+
+      '<div class="cd-num"><b>'+kkHrs(s.sp7)+'</b><small>'+__("ساعت ۷ روز","h / 7 days")+'</small></div></button>';
+  }).join('');
+  if(unseen)h+='<button type="button" class="tt-btn cd-all" data-cd="seenall">'+icon('check')+__("همه را خوانده‌شده کن","Mark all as seen")+'</button>';
+  body.innerHTML=h;
+}
+function cdDetail(body,l){
+  var s=cnxRepStat(l),h='',d14=cdDays(l,14),mxS=Math.max.apply(null,d14.map(function(d){return d.sp}).concat([60])),mxT=Math.max.apply(null,d14.map(function(d){return d.te}).concat([10]));
+  var st={ok:__("منظم","on track"),warn:__("چند روز بدون گزارش","a few days without a report"),bad:__("مدتی است گزارش نداده","no report for a while"),none:__("هنوز گزارشی نفرستاده","no report yet")}[s.st];
+  h='<div class="cd-top"><button type="button" class="cx-b" data-cd="back" aria-label="'+__("بازگشت","Back")+'">'+icon('chev','cd-bk')+'</button><div><b>'+esc(cnxNm(l))+'</b><small><span class="cd-dot '+s.st+'"></span>'+st+'</small></div></div>';
+  h+='<div class="cd-sum"><div><b>'+kkShort(s.sp7)+'</b><small>'+__("مطالعه در ۷ روز","study, 7 days")+'</small></div><div><b>'+fa(s.te7)+'</b><small>'+__("تست در ۷ روز","tests, 7 days")+'</small></div><div><b>'+cdPct(s.cr7,s.tc7)+'</b><small>'+__("درصد درست","correct")+'</small></div></div>';
+  h+='<div class="cd-sum"><div><b>'+(s.n7?kkShort(Math.round(s.sp7/s.n7)):'—')+'</b><small>'+__("میانگین روز گزارش‌دار","avg per reported day")+'</small></div><div><b>'+fa(s.n7)+'/'+fa(7)+'</b><small>'+__("روز گزارش‌دار","days reported")+'</small></div><div><b>'+fa(s.streak)+'</b><small>'+__("روز پیاپی","day streak")+'</small></div></div>';
+  h+='<section class="cd-ch"><h3>'+__("ساعت مطالعه (۱۴ روز)","Study hours (14 days)")+'</h3><div class="cd-bars">'+d14.map(function(d){return cdBar(d,'sp',mxS,kkHrs)}).join('')+'</div></section>';
+  h+='<section class="cd-ch"><h3>'+__("تعداد تست (۱۴ روز)","Tests (14 days)")+'</h3><div class="cd-bars">'+d14.map(function(d){return cdBar(d,'te',mxT,fa)}).join('')+'</div></section>';
+  h+=cdExamHTML(l);
+  h+='<h3 class="cd-h">'+__("گزارش‌ها","Reports")+'</h3>';
+  if(!s.rs.length)h+=emptyArtHTML('chart',__("هنوز گزارشی نرسیده","No report yet"),__("وقتی دانش‌آموز گزارش‌کارش را بفرستد اینجا می‌آید و اعلان می‌گیری.","It shows up here when the student sends a report, and you get a notice."),null,'sm');
+  s.rs.slice(0,40).forEach(function(r){
+    h+='<button type="button" class="cd-rep" data-cd="rep" data-id="'+esc(l.id)+'" data-day="'+esc(r.day)+'"><div><b>'+esc(F.long.format(parse(r.day)))+'</b><small>'+(r.sp?kkShort(r.sp)+' · ':'')+fa(r.te)+__(" تست"," tests")+(r.tc?' · '+cdPct(r.cr,r.tc)+__(" درست"," correct"):'')+'</small></div>'+(r.seen_at?'':'<span class="cd-new">'+__("جدید","new")+'</span>')+icon('chev','cd-go')+'</button>';
+  });
+  body.innerHTML=h;
+}
+async function cdShowReport(id,day){
+  var w=CD.el;if(!w)return;
+  var body=w.querySelector('.cd-body'),l=cnxMyLinks().find(function(x){return x.id===id});
+  CD.day=day;CD.txt='';
+  body.innerHTML=skelHTML('report');
+  var r=await cnxReq('/rest/v1/student_reports?link_id=eq.'+encodeURIComponent(id)+'&day=eq.'+encodeURIComponent(day)+'&select=body,sent_at,seen_at&limit=1');
+  if(!CD.el||CD.day!==day)return;
+  var x=r.ok&&Array.isArray(r.j)?r.j[0]:null;
+  if(!x){CD.day='';cdMsg(cnxNetErr(r),1);cdPaint();return}
+  cdMsg('');
+  CD.txt=x.body||'';
+  body.innerHTML='<div class="cd-top"><button type="button" class="cx-b" data-cd="back" aria-label="'+__("بازگشت","Back")+'">'+icon('chev','cd-bk')+'</button><div><b>'+esc(cnxNm(l))+'</b><small>'+esc(F.long.format(parse(day)))+' · '+__("فرستاده شد ","sent ")+esc(cnxDate(x.sent_at))+'</small></div></div>'+
+    '<div class="rp-res"><pre class="rp-form" dir="rtl">'+(CD.txt?esc(CD.txt):esc(__("متنی همراه گزارش نیست.","This report has no text.")))+'</pre></div>'+
+    '<button type="button" class="tt-btn pri cx-mk" data-cd="copy">'+icon('copy')+__("کپی گزارش","Copy the report")+'</button>';
+  if(!x.seen_at){
+    cnxReq('/rest/v1/rpc/mark_reports_seen','POST',{p_link:id,p_day:day}).then(function(m){
+      if(!m.ok)return;
+      var now=new Date().toISOString();
+      CNX.rep.forEach(function(y){if(y.link_id===id&&y.day===day&&!y.seen_at)y.seen_at=now});
+      if(CNX.el)cnxPaint();
+    });
+  }
+}
+async function cdSeenAll(id){
+  var ls=id?cnxMyLinks().filter(function(l){return l.id===id}):cnxMyLinks().filter(function(l){return l.student_id}),i,now=new Date().toISOString();
+  for(i=0;i<ls.length;i++){
+    var m=await cnxReq('/rest/v1/rpc/mark_reports_seen','POST',{p_link:ls[i].id});
+    if(m.ok)CNX.rep.forEach(function(y){if(y.link_id===ls[i].id&&!y.seen_at)y.seen_at=now});
+  }
+  if(CD.el)cdPaint();
+  if(CNX.el)cnxPaint();
+}
+function cdClick(e){
+  var b=e.target.closest('[data-cd]');if(!b)return;
+  var a=b.dataset.cd,w=CD.el;if(!w)return;
+  if(a==='close')CD.sw.close();
+  else if(a==='open'){CD.view=b.dataset.id;CD.day='';cdPaint();w.querySelector('.sheet').scrollTop=0}
+  else if(a==='rep'){cdShowReport(b.dataset.id,b.dataset.day);w.querySelector('.sheet').scrollTop=0}
+  else if(a==='back'){if(CD.day)CD.day='';else CD.view='';cdMsg('');cdPaint();w.querySelector('.sheet').scrollTop=0}
+  else if(a==='copy')rpCopy(b,CD.txt);
+  else if(a==='seenall')cdSeenAll('');
+  else if(a==='invite'){CD.sw.close();openCnx('c')}
+}
+actions.openCd=function(){cdOpen('')};
 
 /* ---------- Konkooria tab: study hours (hours/minutes per day, smart totals) ----------
    Data lives in state.profile.kk = {goal:minutes, subs:[custom subjects], d:{'YYYY-MM-DD':[{id,m,s,a,b,n,ts}]}}
@@ -5963,7 +7309,7 @@ function rpPaint(){
   var w=rpEl;if(!w)return;var body=w.querySelector('.rp-body'),h='';
   if(!rpv){if(rp.ph==='done'){if(state.profile.rpd){state.profile.rpd=null;writeCache();persist()}}else rpDraftSave()}
   if(rpv){
-    h='<div class="rp-res"><pre class="rp-form" dir="rtl">'+esc((rpD()[rpv]||{}).t||'')+'</pre></div>'+RP_IMG+'<div class="rp-ft"><button type="button" class="rp-b rp-del" data-rp="delv">حذف</button><button type="button" class="pill3d primary rp-nx" data-rp="copy">'+icon('check')+'کپی فرم</button></div>';
+    h='<div class="rp-res"><pre class="rp-form" dir="rtl">'+esc((rpD()[rpv]||{}).t||'')+'</pre></div>'+RP_IMG+rpCnBtn(rpv)+'<div class="rp-ft"><button type="button" class="rp-b rp-del" data-rp="delv">حذف</button><button type="button" class="pill3d primary rp-nx" data-rp="copy">'+icon('check')+'کپی فرم</button></div>';
   }else if(rp.ph==='ask'){
     var qs=rpQs();if(rp.i>=qs.length)rp.i=qs.length-1;
     var q=qs[rp.i],v=rp.a[q.k],last=rp.i===qs.length-1,ok=!q.req||!!v;
@@ -5980,7 +7326,7 @@ function rpPaint(){
   }else if(rp.ph==='busy'){
     h='<div class="rp-q rp-c" role="status"><div class="rp-dots" aria-hidden="true"><i></i><i></i><i></i></div><h2>در حال آماده کردن فرم</h2></div>';
   }else{
-    h='<div class="rp-res"><pre class="rp-form" dir="rtl">'+esc(rp.txt)+'</pre></div>'+RP_IMG+
+    h='<div class="rp-res"><pre class="rp-form" dir="rtl">'+esc(rp.txt)+'</pre></div>'+RP_IMG+rpCnBtn(rpDayKey())+
       '<div class="rp-ft"><button type="button" class="rp-b" data-rp="edit">ویرایش</button><button type="button" class="rp-b" data-rp="again">فرم جدید</button><button type="button" class="pill3d primary rp-nx" data-rp="copy">'+icon('check')+'کپی فرم</button></div>';
   }
   body.innerHTML=h;
@@ -6224,6 +7570,7 @@ function openRP(){
     else if(a==='copy')rpCopy(b,rpv?(rpD()[rpv]||{}).t:rp.txt);
     else if(a==='delv')rpDelSaved();
     else if(a==='img')rpImage(rpv?(rpD()[rpv]||{}).t:rp.txt,rpv||rpDayKey(),b);
+    else if(a==='tocn')cnxSendReport(rpv||rpDayKey(),false);
     else if(a==='make'){rp.ph='busy';rpPaint();rpTm=setTimeout(function(){rp.txt=rpBuild();rp.ph='done';rpStore();rpPaint()},2200)}
   });
   w.addEventListener('input',function(){
@@ -6261,6 +7608,7 @@ function rpStore(){
   state.profile.rp=rpClean(state.profile.rp);state.profile.rpd=null;
   kcRecordReport(k);
   mutate();notify('ok','گزارش ذخیره شد',F.long.format(parse(k)));
+  try{if(cnxAuto()&&cnxOn()&&cnxIsStudent())cnxSendReport(k,true)}catch(e){}
 }
 function rpHistHTML(){
   var D=rpD(),ks=Object.keys(D).sort();
@@ -6339,14 +7687,18 @@ function kcFbClean(f){
   return {k:typeof f.k==='string'?f.k.slice(0,40):'',ts:Number(f.ts)||0,it:it};
 }
 function kcChClean(c){
-  var o={plan:[],rep:[],mot:[]};
+  var o={plan:[],rep:[],mot:[],act:[]};
   if(c&&typeof c==='object')Object.keys(o).forEach(function(k){
     if(!Array.isArray(c[k]))return;
     o[k]=c[k].slice(-150).map(function(m){
       if(!m||typeof m.t!=='string'||!m.t)return null;
-      var q={r:m.r==='u'?'u':'a',t:m.t.slice(0,600),ts:Number(m.ts)||0};if(typeof m.k==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(m.k))q.k=m.k;if(typeof m.re==='string'&&m.re&&m.re.length<=8)q.re=m.re;if(m.pin)q.pin=1;
+      var q={r:m.r==='u'?'u':'a',t:m.t.slice(0,600),ts:Number(m.ts)||0};if(typeof m.k==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(m.k))q.k=m.k;if(typeof m.re==='string'&&m.re&&m.re.length<=8)q.re=m.re;if(m.pin)q.pin=1;if(typeof m.wq==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(m.wq))q.wq=m.wq;if(m.wd)q.wd=1;
+      /* "activity" group question: which table part it is about (k = YYYY-MM-DD|rowId) and the answer so far ('' none, y yes, n no) */
+      var qq=m.q;if(qq&&typeof qq==='object'&&typeof qq.k==='string'&&/^\d{4}-\d{2}-\d{2}\|[\w-]{1,40}$/.test(qq.k))q.q={k:qq.k,s:qq.s==='y'?'y':qq.s==='n'?'n':''};
       /* voice / video message: keep what the player and the "understood text" need */
       var vv=m.vn;if(vv&&typeof vv==='object'&&typeof vv.id==='string'&&/^[\w-]{1,40}$/.test(vv.id))q.vn={id:vv.id,k:vv.k==='v'?'v':'a',d:Math.max(0,Math.min(7200,Number(vv.d)||0)),w:Array.isArray(vv.w)?vv.w.slice(0,60).map(function(n){return Math.max(1,Math.min(9,Math.round(Number(n)||1)))}):[],tx:typeof vv.tx==='string'?vv.tx.slice(0,800):''};
+      /* study-proof photo / video: only the small facts; the file itself lives in IndexedDB (sp_<id>) */
+      var pp=m.ph;if(pp&&typeof pp==='object'&&typeof pp.id==='string'&&/^[\w-]{1,40}$/.test(pp.id))q.ph={id:pp.id,k:pp.k==='v'?'v':'p',d:Math.max(0,Math.min(7200,Number(pp.d)||0)),tid:typeof pp.tid==='string'?pp.tid.slice(0,60):'',tn:typeof pp.tn==='string'?pp.tn.slice(0,80):'',own:pp.own?1:0};
       return q;
     }).filter(Boolean);
   });
@@ -6355,7 +7707,7 @@ function kcChClean(c){
 /* mute settings of the three advisor chats: u = 0 not muted, -1 forever, or the time it ends; s = 1 sound off; p = 1 preview hidden */
 function kcMuClean(x){
   var o={};
-  if(x&&typeof x==='object')['plan','rep','mot'].forEach(function(k){
+  if(x&&typeof x==='object')['plan','rep','mot','act'].forEach(function(k){
     var v=x[k];if(!v||typeof v!=='object')return;
     var u=Number(v.u)||0;if(u!==-1&&!(u>0&&u<4e12))u=0;
     var e={u:u,s:v.s?1:0,p:v.p?1:0};if(e.u||e.s||e.p)o[k]=e;
@@ -6363,11 +7715,17 @@ function kcMuClean(x){
   return o;
 }
 function kcMuted(sec){var m=(kcD().mu||{})[sec];return !!(m&&(m.u===-1||m.u>Date.now()))}
-function kcWpClean(x){var o={};if(x&&typeof x==='object')['plan','rep','mot'].forEach(function(k){if(x[k]==='w1'||x[k]==='w2'||x[k]==='w3'||x[k]==='w4')o[k]=x[k]});return o}
+function kcWpClean(x){var o={};if(x&&typeof x==='object')['plan','rep','mot','act'].forEach(function(k){if(x[k]==='w1'||x[k]==='w2'||x[k]==='w3'||x[k]==='w4')o[k]=x[k]});return o}
 function kcClean(x){
-  var o={dis:'',ts:0,fr:null,fp:null,ch:{plan:[],rep:[],mot:[]}};
-  if(x&&typeof x==='object'){o.ch=kcChClean(x.ch);if(x.lx&&typeof x.lx==='object'){var lxo={},lxn=0;Object.keys(x.lx).forEach(function(w){if(lxn<300&&w.length<=24&&typeof x.lx[w]==='string'&&/^[a-z]{2,10}$/.test(x.lx[w])){lxo[w]=x.lx[w];lxn++}});o.lx=lxo}if(typeof x.dis==='string'&&/^[\w-]{0,24}$/.test(x.dis))o.dis=x.dis;o.ts=Number(x.ts)||0;o.fr=kcFbClean(x.fr);o.fp=kcFbClean(x.fp);o.mu=kcMuClean(x.mu);o.wp=kcWpClean(x.wp)}
+  var o={dis:'',ts:0,fr:null,fp:null,ch:{plan:[],rep:[],mot:[],act:[]}};
+  if(x&&typeof x==='object'){o.ch=kcChClean(x.ch);if(x.lx&&typeof x.lx==='object'){var lxo={},lxn=0;Object.keys(x.lx).forEach(function(w){if(lxn<300&&w.length<=24&&typeof x.lx[w]==='string'&&/^[a-z]{2,10}$/.test(x.lx[w])){lxo[w]=x.lx[w];lxn++}});o.lx=lxo}if(typeof x.dis==='string'&&/^[\w-]{0,24}$/.test(x.dis))o.dis=x.dis;o.ts=Number(x.ts)||0;o.fr=kcFbClean(x.fr);o.fp=kcFbClean(x.fp);o.mu=kcMuClean(x.mu);o.wx=kcWxClean(x.wx);o.wp=kcWpClean(x.wp);if(Array.isArray(x.pn))o.pn=x.pn.filter(function(k,i){return ['plan','rep','mot','act'].indexOf(k)>=0&&x.pn.indexOf(k)===i})}
   return o;
+}
+/* exams and assignments the student sent to the advisor (kept only beside the advisor, not in the task list): [{t,d,tm,x}] x = 1 for an exam */
+function kcWxClean(a){
+  if(!Array.isArray(a))return [];
+  var lim=addDays(todayKey(),-30);
+  return a.filter(function(z){return z&&typeof z.t==='string'&&z.t&&(z.d===''||(typeof z.d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(z.d)&&z.d>=lim))}).slice(-60).map(function(z){return {t:z.t.slice(0,100),d:z.d||'',tm:/^([01]\d|2[0-3]):[0-5]\d$/.test(z.tm||'')?z.tm:'',x:z.x?1:0}});
 }
 function kcD(){var p=state.profile;p.kc=kcClean(p.kc);return p.kc}
 /* free text ("ریاضی: فصل ۳", "تست زیست") -> a known lesson name, or '' */
@@ -6776,6 +8134,140 @@ function kcBuild(){
 }
 /* motivation: a message built from the student's own numbers + a daily line */
 var KC_Q=['کنکور مسابقه‌ی سرعت نیست؛ مسابقه‌ی ادامه دادن است. امروز فقط یک پارت را کامل کن.','هر تستی که امروز می‌زنی، یک سؤال کمتر از آزمون اصلی است که تو را غافلگیر می‌کند.','انگیزه گاهی می‌آید و گاهی نه؛ عادت همیشه می‌ماند. ساعت مطالعه‌ات را ثابت نگه دار.','اگر امروز سخت بود، عالی است: دقیقاً همین روزها فاصله‌ی تو را با بقیه زیاد می‌کنند.','لازم نیست همه‌چیز را همین امروز بدانی؛ فقط باید از دیروزت جلوتر باشی.','غلط‌های امروز، درست‌های روز کنکور هستند. از هر غلط یک نکته بنویس.','یک جلسه‌ی ۲۵ دقیقه‌ای را شروع کن. شروع کردن سخت‌ترین بخش کار است.','استراحت جزئی از برنامه است نه دشمنش. خوب بخواب تا خوب یاد بگیری.','خودت را با دیگران مقایسه نکن؛ نمودار خودت را با هفته‌ی قبل خودت مقایسه کن.','پشتکار یعنی در روزهایی که حال نداری هم کمی بخوانی.','هدف بزرگ را به کارهای کوچک روزانه بشکن؛ کوه را قدم‌به‌قدم بالا می‌روند.','تو تا اینجا آمده‌ای؛ همین نشان می‌دهد می‌توانی ادامه بدهی.','هر روز که برنامه را انجام می‌دهی، به خودت ثابت می‌کنی که قولت قابل اعتماد است.','اشتباه کردن بخشی از یادگیری است. مهم این است که دفعه‌ی بعد همان اشتباه را تکرار نکنی.'];
+/* ---------- how the advisor talks: رسمی (formal) · دوستانه (friendly) · راست و پوست‌کنده (blunt, with playful teasing) ----------
+   The choice (Settings → لحن مشاور) changes the daily motivation, the night-report reminder (notification and chat), the chat answers and the group previews. */
+function advTone(){var t=state.profile.advTone;return t==='friendly'||t==='blunt'?t:'formal'}
+var ADV_TONE_N={formal:['🎩','رسمی','Formal'],friendly:['😄','دوستانه','Friendly'],blunt:['😏','راست و پوست‌کنده','Blunt']};
+function advToneName(t){var n=ADV_TONE_N[t||advTone()];return n[0]+' '+__(n[1],n[2])}
+var KC_QF=['هوی رفیق! کنکور دوومیدانی نیست، ماراتنه 🏃 امروز فقط یه پارت رو تموم کن، بقیه‌اش با من.','هر تستی که امروز می‌زنی یه سؤال کمتر از آزمونیه که می‌خواد غافلگیرت کنه. بزن بریم! 😄','انگیزه میاد و می‌ره، عادت می‌مونه. ساعت درس‌خوندنت رو ثابت نگه دار، قول می‌دم جواب بده.','امروز سخت بود؟ عالیه! دقیقاً همین روزاس که تو رو از بقیه جدا می‌کنه 😉','لازم نیست امروز همه‌چیز رو بلد باشی؛ فقط یه ذره از دیروزت جلوتر باش. همین!','غلطای امروز، درستای روز کنکورن. از هر غلط یه نکته بنویس، بعداً ازم تشکر می‌کنی 😎','فقط ۲۵ دقیقه! تایمر رو بذار و شروع کن؛ سخت‌ترین قسمتش همون شروع کردنه.','استراحت دشمن برنامه نیست، جزئشه. یه چایی بخور، یه نفس بکش و برگرد 🍵','خودت رو با بقیه مقایسه نکن؛ نمودار خودت رو با هفته‌ی پیش خودت مقایسه کن 📈','پشتکار یعنی همون روزایی که حال نداری هم یه کم بخونی. یه کم! بیشتر نمی‌خوام 😅','کوه رو یه‌دفعه بالا نمی‌رن، قدم‌به‌قدم. قدمِ امروزت رو بردار 🏔️','تا اینجا اومدی، یعنی می‌تونی ادامه بدی. من که بهت ایمان دارم 💚','هر روز که برنامه رو انجام می‌دی، به خودت ثابت می‌کنی قولت قابل اعتماده. بریم یه قول دیگه رو عملی کنیم؟ 😉','اشتباه کردن جزو یادگیریه؛ فقط یه شرط داره: دفعه‌ی بعد همون اشتباه رو تکرار نکنی 😄'];
+var KC_QB=['کنکور مسابقه‌ی سرعت نیست، ولی تو که اصلاً راه نیفتادی! 😏 بلند شو یه پارت تموم کن.','هر تستی که نزنی، یه سؤال بیشتر تو آزمون می‌مونه که نمی‌تونی حلش کنی. حالا تست بزن!','انگیزه؟ اون که قهر کرده رفته. عادت بساز، وگرنه بشین منتظر شانس بمون 🍀 (که نمیاد).','سخته؟ آره سخته. فکر کردی کنکور رو با آرزو قبول می‌شن؟ بخون ببینم 😤','همین الان داری گوشی چک می‌کنی، نه؟ بذارش زمین و ۲۵ دقیقه بخون. میبینمت 👀','غلطاتو یادداشت کن! وگرنه روز کنکور همونا رو با افتخار دوباره غلط می‌زنی 🙃','خودتو با بقیه مقایسه نکن؛ اول ببین خودت امروز چی خوندی... آها هیچی؟ پس شروع کن!','استراحتت تموم شد. نه، جدی می‌گم؛ تموم شد. برگرد سر درست 😒','اگه اینقدر وقت داری که به بهونه‌ی نخوندن فکر کنی، همون وقت رو بخون!','پشتکار یعنی وقتی حال نداری هم بخونی. حال داشتن که هنر نیست، قهرمان 😏','کوه رو قدم‌به‌قدم بالا می‌رن، نه با نگاه کردن بهش. بلند شو، اولین قدم با توئه.','تا اینجا اومدی؟ خب حالا نصفه‌راه ولش نکن، از آدمای نصفه‌کاره بدم میاد 😌','برنامه رو انجام ندی هم اعتماد به نفست میره هم من ازت ناامید می‌شم... یه کاری کن نیام سراغت!','اشتباه کردن اشکال نداره، اشکال اینه که ده بار همونو تکرار کنی. برو غلطاتو مرور کن!'];
+function kcQs(){if(EN||ARB)return KC_Q;var t=advTone();return t==='friendly'?KC_QF:t==='blunt'?KC_QB:KC_Q}
+var KC_REPF=['هوی! گزارش‌کار امشبت رو بنویس تا برات تحلیلش کنم 😄','وقت گزارش‌کاره رفیق 📝 دو دقیقه وقت بذار، تحلیلش با من.','گزارش امروز رو نفرستادی ها! بنویس ببینم چیکار کردی 😉'],
+    KC_REPB=['هی یارو، گزارش‌کار کجاست؟ بفرست وگرنه ناکارت می‌کنم 😤','گزارش‌کار؟ کو؟ نبینم امشب بی‌گزارش بخوابی که پیدات می‌کنم 😏','فکر کردی یادم می‌ره؟ گزارش‌کار امروز رو بفرست، منتظرم ⏳','نفرستی ثبت می‌کنم «امروز هیچی نخوند» 😈 زود باش!'],
+    KC_REPFE=['Hey! Write tonight’s report and I’ll break it down for you 😄','Report time, buddy 📝 Two minutes and I’ll do the analysis.'],
+    KC_REPBE=['Hey you, where’s the report? Send it or I’m taking you out 😤','Report? Where is it? Don’t you dare go to sleep without one 😏'];
+function kcRepMsg(seed){
+  var t=advTone(),a;
+  if(t==='formal')return __('گزارش‌کار امروزت را بنویس تا برایت تحلیل کنم.','Write today’s report and I’ll analyse it for you.');
+  a=EN?(t==='friendly'?KC_REPFE:KC_REPBE):(t==='friendly'?KC_REPF:KC_REPB);
+  return a[Math.abs(Math.floor(seed||0))%a.length];
+}
+var KC_LATEF=['ساعت از ۱ شب گذشته و هنوز خبری از گزارش‌کار نیست! 😅 بنویسش، زود تحلیلش می‌کنم.','هوی رفیق، گزارش‌کار امروزت کجاست؟ 📝 قبل از خواب دو دقیقه وقت بذار.','گزارش‌کار رو نفرستادی ها! یه چیزی بنویس تا فردا با برنامه‌ی بهتر شروع کنیم 😉'],
+    KC_LATEB=['ساعت ۱ نصفه‌شبه و گزارش‌کار کجاست؟! 😤 بفرست وگرنه فردا حسابت با منه.','نصفه‌شب شده، گزارش‌کار هنوز نیومده! 😏 بی‌گزارش نمی‌خوابی که؟','گزارش‌کار؟ کو؟ ⏳ هنوز منتظرم؛ نفرستی «امروز هیچی نخوند» ثبت می‌کنم 😈'],
+    KC_LATEFE=['It’s past 1 AM and your report is still missing! 😅 Write it and I’ll analyse it right away.','Hey buddy, where is today’s report? 📝 Two minutes before bed.'],
+    KC_LATEBE=['It’s the middle of the night and where is the report?! 😤 Send it or we’ll talk tomorrow.','Past midnight and still no report 😏 Don’t you dare sleep without one.'];
+function kcLateMsg(seed){
+  var t=advTone(),a;
+  if(t==='formal')return __('گزارش‌کار امروزت هنوز ثبت نشده است. لطفاً قبل از خواب آن را بنویس تا برایت تحلیل کنم.','Today’s report hasn’t been filed yet. Please write it before you sleep and I’ll analyse it for you.');
+  a=EN?(t==='friendly'?KC_LATEFE:KC_LATEBE):(t==='friendly'?KC_LATEF:KC_LATEB);
+  return a[Math.abs(Math.floor(seed||0))%a.length];
+}
+/* ---- weekly request: "send next week's exams and school assignments"; what the student sends in the "plan" group is registered as tasks ---- */
+/* when the week that starts on wsKey is over: the end of the last part of its last day in the timetable (between 17:00 and 22:00, 20:00 when the table is empty) */
+function kcWkEndAt(wsKey){
+  var mx=0,m;
+  try{
+    var t=ttGet();
+    t.rows.forEach(function(r){
+      var c=ttCell(t,r.id,6);if(!c||!c.t)return;
+      var tt=ttParseTime(c.h||r.l),e=tt.te||tt.tm;if(!e)return;
+      var q=e.split(':').map(Number),v=q[0]*60+(q[1]||0);if(v>mx)mx=v;
+    });
+  }catch(e){}
+  m=Math.max(17*60,Math.min(22*60,mx||20*60));
+  var d=parse(addDays(wsKey,6));d.setHours(Math.floor(m/60),m%60,0,0);return d.getTime();
+}
+var KC_WKF=['هفته‌ی جدولت تموم شد! 🎉 آزمون‌ها و تکلیف‌های مدرسه‌ی هفته‌ی بعد رو همین‌جا بفرست (هر مورد یه خط، با روزش؛ مثلاً «آزمون ریاضی شنبه»). خودم ثبتشون می‌کنم و یه روز قبل از هر آزمون یادآوری می‌کنم. وقتی تموم شد بنویس «تمام».'],
+    KC_WKB=['هفته تموم شد! 😤 آزمون‌ها و تکلیف‌های مدرسه‌ی هفته‌ی بعد کجان؟ هر مورد یه خط با روزش بفرست، من ثبتشون می‌کنم و قبل از هر آزمون یادآوری می‌کنم. آخرش «تمام» بنویس.'];
+function kcWkMsg(seed){
+  var t=advTone();
+  if(t==='friendly')return KC_WKF[0];
+  if(t==='blunt')return KC_WKB[0];
+  return __('هفته‌ی جدول و برنامه‌ات تمام شد. لطفاً آزمون‌ها و تکلیف‌های مدرسه‌ی هفته‌ی بعد را همین‌جا بفرست (هر مورد در یک خط و همراه روز؛ مثلاً «آزمون ریاضی شنبه» یا «تکلیف فیزیک سه‌شنبه»). من آن‌ها را نزد خودم ثبت می‌کنم و یک روز قبل از هر آزمون یادآوری می‌کنم. وقتی تمام شد، بنویس «تمام».','Your timetable week is over. Please send next week’s exams and school assignments here, one per line with the day. I will note them and remind you the day before each exam. Write “done” when finished.');
+}
+/* the open request: the latest advisor message of the "plan" group that asks for them, not closed, at most 10 days old */
+function kcWqPending(){
+  var c=kcD().ch.plan,i,m;
+  for(i=c.length-1;i>=0;i--){m=c[i];if(m.r==='a'&&m.wq)return (!m.wd&&Date.now()-m.ts<10*864e5)?m:null}
+  return null;
+}
+var KCW_DAYS=[['چهارشنبه',4],['پنجشنبه',5],['سهشنبه',3],['یکشنبه',1],['دوشنبه',2],['جمعه',6],['شنبه',0]],
+    KCW_MON=['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+var kcwPF=null;
+/* Persian month/day -> the next such Gregorian date (searched from yesterday up to a year ahead) */
+function kcwJal(m,d){
+  try{
+    if(!kcwPF)kcwPF=new Intl.DateTimeFormat('en-US-u-ca-persian-nu-latn',{month:'numeric',day:'numeric'});
+    var td=todayKey(),n,k,o;
+    for(n=-1;n<400;n++){
+      k=addDays(td,n);o={};
+      kcwPF.formatToParts(parse(k)).forEach(function(x){o[x.type]=+x.value});
+      if(o.month===m&&o.day===d)return k;
+    }
+  }catch(e){}
+  return '';
+}
+/* the date a phrase talks about: a weekday of the requested week, tomorrow/day after, or a Persian date; '' if none */
+function kcwDate(q,nw){
+  var m,i;
+  if((m=/(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(q))){var r=kcwJal(+m[2],+m[3]);if(r)return r}
+  if((m=/(\d{1,2})\s*(فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند)/.exec(q))){var r2=kcwJal(KCW_MON.indexOf(m[2])+1,+m[1]);if(r2)return r2}
+  if((m=/(?:^|\D)(\d{1,2})\/(\d{1,2})(?:\D|$)/.exec(q))&&+m[1]<=12&&+m[2]<=31){var r3=kcwJal(+m[1],+m[2]);if(r3)return r3}
+  if(/پسفردا/.test(q))return addDays(todayKey(),2);
+  if(/فردا/.test(q))return addDays(todayKey(),1);
+  for(i=0;i<KCW_DAYS.length;i++)if(q.indexOf(KCW_DAYS[i][0])>-1)return addDays(nw,KCW_DAYS[i][1]);
+  return '';
+}
+/* the student's message -> {items, done}; items = [{t,d,tm,x}] x = true for an exam */
+function kcwParse(txt,nw){
+  var q0=String(txt||'').replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}).replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/ي/g,'ی').replace(/ك/g,'ک'),
+      items=[],done=/^\s*(تمام|تموم|همین|همینا|همینها|همین‌ها|ندارم|نداریم|چیزی نیست|چیزی ندارم|هیچی|فعلا همین|فعلاً همین)(?:\s|[.!،]|$)/.test(q0.replace(/\u200c/g,''));
+  if(done)return {items:[],done:true};
+  var KW='آزمون|امتحان|کوییز|کوئیز|مستمر|تکلیف|مشق|تمرین|پروژه',
+      parts=q0.split(/[\n\r؛;.]+/),segs=[];
+  parts.forEach(function(p){p.split(new RegExp('(?:\\s*[،,]\\s*|\\s+و\\s+|\\s+)(?=(?:'+KW+')(?:\\s|$))')).forEach(function(z){segs.push(z)})});
+  segs.forEach(function(z){
+    var t=z.replace(/^[\s\-–—•*·\d]+[\-.)]?\s*/,'').replace(/[\s،,]+$/,'').trim();
+    if(t.length<3||!/[\u0600-\u06FFa-zA-Z]/.test(t))return;
+    if(/^(سلام|باشه|ممنون|مرسی|ok|okay|تشکر)[\s!.]*$/i.test(t))return;
+    var n=t.replace(/\u200c/g,'').replace(/(یک|دو|سه|چهار|پنج)\s+شنبه/g,'$1شنبه'),
+        x=/آزمون|امتحان|کوییز|کوئیز|مستمر/.test(t),hw=/تکلیف|مشق|تمرین|پروژه/.test(t),tm='',mt;
+    if((mt=/ساعت\s*(\d{1,2})(?::(\d{2}))?/.exec(n))&&+mt[1]<24)tm=pad(+mt[1])+':'+pad(+(mt[2]||0));
+    items.push({t:(x||hw?t:'تکلیف: '+t).slice(0,100),d:kcwDate(n,nw),tm:tm,x:x&&!hw});
+  });
+  return {items:items,done:false};
+}
+/* returns the advisor's answer when the message was handled as part of the open request, else null */
+function kcWqTake(t){
+  var m=kcWqPending();if(!m)return null;
+  var r=kcwParse(t,m.wq);
+  if(r.done){m.wd=1;persist();return 'باشه، همه‌ی موارد را نزد خودم ثبت کردم. موفق باشی! 💪 اگر بعداً مورد دیگری یادت آمد، همین‌جا بنویس.'}
+  if(!r.items.length)return 'متوجه نشدم 🙈 هر مورد را در یک خط بنویس؛ مثلاً «آزمون ریاضی شنبه» یا «تکلیف فیزیک سه‌شنبه». اگر چیزی نداری بنویس «تمام».';
+  var wx=kcD().wx,added=[],dup=0;
+  r.items.forEach(function(x){
+    if(wx.some(function(y){return y.t===x.t&&y.d===x.d})){dup++;return}
+    wx.push({t:x.t,d:x.d,tm:x.tm,x:x.x?1:0});added.push(x);
+  });
+  if(added.length)persist();
+  var lines=added.slice(0,8).map(function(x){var d='';try{d=x.d?F.long.format(parse(x.d)):'بدون روز'}catch(e){d=x.d}return '• '+(x.x?'🧪 ':'📝 ')+x.t+' — '+d});
+  if(added.length>8)lines.push('و '+fa(added.length-8)+' مورد دیگر');
+  var nod=added.some(function(x){return !x.d});
+  return '✅ نزد مشاور ثبت شد:\n'+(lines.join('\n')||'همه‌ی این موارد از قبل ثبت شده بودند.')+(dup&&added.length?'\n('+fa(dup)+' مورد تکراری رد شد)':'')+(nod?'\nروز بعضی‌ها را نگفتی؛ بدون تاریخ ثبت شدند و یادآوری ندارند.':'')+(added.some(function(x){return x.x&&x.d})?'\nیک روز قبل از هر آزمون یادآوری می‌کنم. ⏰':'')+'\nاگر مورد دیگری هست بفرست، وگرنه بنویس «تمام».';
+}
+/* exam reminder: the day before, at 18:00 */
+var KC_EXH='18:00';
+function kcExamMsg(list){
+  var t=advTone(),n=list.map(function(z){return z.t}).join(' · ');
+  if(t==='friendly')return 'هوی! فردا آزمون داری: '+n+' 📝 امشب یه مرور سبک بکن و زود بخواب 🌙';
+  if(t==='blunt')return 'فردا آزمونه: '+n+' 😤 هنوز نخوندی؟ بشین مرور کن، بعد بخواب!';
+  return 'یادآوری: فردا آزمون داری ('+n+'). امشب مرور کن و زود بخواب.';
+}
+/* [{d: exam day, l: that day's exams}] for the exams of the advisor's list that are still to come */
+function kcExamDays(){
+  var by={};
+  kcD().wx.forEach(function(z){if(z.x&&z.d)(by[z.d]=by[z.d]||[]).push(z)});
+  return Object.keys(by).sort().map(function(d){return {d:d,l:by[d]}});
+}
 function kcMotHTML(a){
   var o=[],st=0;try{st=kkStreak()}catch(e){}
   if(st>=3)o.push({ic:'star',h:fa(st)+' روز پیاپی!',t:''+fa(st)+' روز است که پشت‌سرهم مطالعه ثبت کرده‌ای. این پیوستگی از ساعت‌های طولانی مهم‌تر است؛ زنجیره را نشکن.'});
@@ -6784,24 +8276,178 @@ function kcMotHTML(a){
   if(a.acc!=null&&a.tc>=20&&a.acc>=60)o.push({ic:'target',h:'درصدهایت خوب است',t:'درصد درست تست‌هایت '+fa(Math.round(a.acc))+'٪ است. تلاش‌هایت نتیجه داده؛ حالا دنبال درس‌های ضعیف‌تر برو.'});
   if(!o.length)o.push({ic:'bulb',h:'امروز شروع کن',t:'هر مسیری با یک قدم شروع می‌شود. امروز یک جلسه‌ی مطالعه ثبت کن تا مربی بتواند برایت پیام‌های شخصی‌تر بنویسد.'});
   var h=o.map(function(x){return '<div class="kc-tip"><span class="kc-ti">'+icon(x.ic)+'</span><div><b>'+x.h+'</b><p>'+x.t+'</p></div></div>'}).join('');
-  var d=new Date(),i=((ui.kcq==null?Math.floor(d.getTime()/864e5):ui.kcq)%KC_Q.length+KC_Q.length)%KC_Q.length;
-  return '<div class="kc-body"><div class="kc-quote glass"><p>«'+KC_Q[i]+'»</p><button type="button" class="tt-btn" data-kc="q">پیام بعدی</button></div><div class="kc-tips">'+h+'</div></div>';
+  var d=new Date(),QQ=kcQs(),i=((ui.kcq==null?Math.floor(d.getTime()/864e5):ui.kcq)%QQ.length+QQ.length)%QQ.length;
+  return '<div class="kc-body"><div class="kc-quote glass"><p>«'+QQ[i]+'»</p><button type="button" class="tt-btn" data-kc="q">پیام بعدی</button></div><div class="kc-tips">'+h+'</div></div>';
 }
 /* the smart coach is a normal page (like rank estimate), not a pop-up window */
 function viewCoach(){
   var b=kcBuild();
-  return head('از گزارش‌ها و ساعت‌هایت','مربی هوشمند',{back:1,backAct:'kcBack',backTxt:'کنکوریا'})+'<button type="button" class="wrcard glass kc-big" data-act="kcAdv"><span class="ib" style="background:linear-gradient(145deg,#34d399,#0f9d74)">'+icon('chat')+'</span><div><b>من و مشاور</b><small>گفتگو با مشاور · برنامه مطالعاتی · گزارش‌کار شبانه · انگیزشی</small></div></button>'+
+  return head('از گزارش‌ها و ساعت‌هایت','مربی هوشمند',{back:1,backAct:'kcBack',backTxt:'کنکوریا'})+'<button type="button" class="wrcard glass kc-big" data-act="kcAdv"><span class="ib" style="background:linear-gradient(145deg,#34d399,#0f9d74)">'+icon('chat')+'</span><div><b>من و مشاور</b><small>گفتگو با مشاور · برنامه مطالعاتی · گزارش‌کار شبانه · انگیزشی · فعالیت</small></div></button>'+
     '<div class="kc-body">'+b.st+'</div>'+b.all;
 }
-var KC_TOP=[['plan','📚','برنامه مطالعاتی','ب','#ef5b7a'],['rep','📝','گزارش‌کار شبانه','گ','#3b9bd9'],['mot','⚡','انگیزشی','ا','#f2a93b']];
+var KC_TOP=[['plan','📚','برنامه مطالعاتی','ب','#ef5b7a'],['rep','📝','گزارش‌کار شبانه','گ','#3b9bd9'],['mot','⚡','انگیزشی','ا','#f2a93b'],['act','🎯','فعالیت','ف','#8b5cf6']];
+
+/* ---------- گروه «فعالیت» در «من و مشاور» ----------
+   When the time of a table part ends, Ario asks in this group: "did you watch the session / finish the part?".
+   A "yes" (button or typed) ticks that cell in the table and, if it isn't ticked yet, the linked task too.
+   key = YYYY-MM-DD|rowId (same key as ttPlanItems); t.ak remembers which parts were already asked. */
+function kaRid(key){return key.slice(11)}
+function kaItem(t,key){return ttPlanItems(t).filter(function(z){return z.k===key})[0]||null}
+function kaTask(key){return state.tasks.filter(function(y){return y.ttk===key})[0]||null}
+function kaDk(t,d){var s0=ttWs(t);return ttIso(new Date(s0.getFullYear(),s0.getMonth(),s0.getDate()+d,12))}
+/* c.dn holds the DATE it was ticked for, so a table that repeats every week starts each week unticked */
+function kaCellDone(t,rid,d){
+  var c=t.cells[rid+'_'+d];if(!c||typeof c!=='object'||!c.t)return false;
+  var dk=kaDk(t,d);
+  if(c.dn===dk)return true;
+  var tk=kaTask(dk+'|'+rid);
+  return !!(tk&&tk.done);
+}
+/* tick / untick a part: the table cell and the linked task move together */
+function kaSetDone(t,x,on){
+  var ck=kaRid(x.k)+'_'+x.di,c=t.cells[ck],tk=kaTask(x.k),was=kaCellDone(t,kaRid(x.k),x.di),tch=false,clean=!!ttEl&&ttSnap()===ttBase;
+  if(c&&typeof c==='object')c.dn=on?x.d:'';
+  kaSync(t,ck,c&&c.dn||'');
+  if(clean)ttBase=ttSnap();
+  if(tk){
+    if(on&&!tk.done){tk.done=true;tk.doneAt=Date.now();(tk.st||[]).forEach(function(s){s.d=true});hBump(todayKey(),'n',1);tch=true}
+    else if(!on&&tk.done){hBump(key(new Date(tk.doneAt||Date.now())),'n',-1);tk.done=false;tk.doneAt=0;tch=true}
+  }
+  persist();try{nativeSync()}catch(e){}
+  return {was:was,task:tch};
+}
+/* the tick is also written into the saved plan this table was opened from (and that week's history), so it is still there when the plan is opened again */
+function kaSync(t,ck,val){
+  var cur=state.profile.ttCur,p=cur?ttPlans().find(function(z){return z.id===cur}):null;if(!p)return;
+  var ws=ttIso(ttWs(t)),ds=[p.data].concat((p.h||[]).filter(function(h){return h.ws===ws}).map(function(h){return h.data}));
+  ds.forEach(function(d){var c=d&&d.cells&&d.cells[ck];if(c&&typeof c==='object')c.dn=val});
+}
+function kaToggleCell(rid,d){
+  var t=ttGet(),x=kaItem(t,kaDk(t,d)+'|'+rid);
+  if(!x)return;
+  var on=!kaCellDone(t,rid,d);kaSetDone(t,x,on);
+  toast(on?'در جدول تیک خورد ✅':'تیک برداشته شد',null,null,on?'ok':'info');
+}
+function kaEnd(x){
+  var hm=x.te||'';
+  if(!hm&&x.tm){var q=x.tm.split(':').map(Number),m=q[0]*60+q[1]+60;if(m>=1440)return 0;hm=pad(Math.floor(m/60))+':'+pad(m%60)}
+  if(!hm)return 0;
+  var p=hm.split(':').map(Number),d=parse(x.d);d.setHours(p[0],p[1],0,0);return d.getTime();
+}
+function kaAk(t){
+  if(!t.ak||typeof t.ak!=='object')t.ak={};
+  var lim=addDays(todayKey(),-30);
+  Object.keys(t.ak).forEach(function(k){if(k.slice(0,10)<lim)delete t.ak[k]});
+  return t.ak;
+}
+function kaBubble(m){
+  var s=m.q.s,h='<div class="kcx-m a kcx-qa" data-qk="'+esc(m.q.k)+'"><p>'+esc(m.t).replace(/\n/g,'<br>')+'</p>';
+  if(s==='y')h+='<div class="kcx-qs ok">✅ انجام شد و در جدول تیک خورد</div>';
+  else h+='<div class="kcx-qb">'+(s==='n'?'<span class="kcx-qs no">❌ هنوز نه</span>':'')+'<button type="button" class="kcx-qy" data-aq="y">'+(s==='n'?'الان انجام دادم ✅':'بله، انجام دادم ✅')+'</button>'+(s==='n'?'':'<button type="button" class="kcx-qn" data-aq="n">نه، هنوز</button>')+'</div>';
+  return h+'<time>'+kcxTime(m.ts)+'</time></div>';
+}
+function kaIntro(){
+  return '<div class="kcx-m a"><p>اینجا بعد از تمام شدن زمان هر پارت جدولت می‌پرسم: «آیا جلسه را دیدی و یا پارت را کامل انجام دادی؟» اگر بگویی «بله»، همان خانه در جدول تیک می‌خورد ✅ (کار مربوط به آن هم اگر هنوز تیک نخورده باشد انجام‌شده می‌شود).</p></div>';
+}
+function kaRefreshRow(m){
+  try{
+    var th=document.getElementById('kcxTh');if(!th||!m)return;
+    var el=th.querySelector('.kcx-qa[data-qk="'+m.q.k+'"]'),row=el&&el.closest('.kcx-row');
+    if(!row)return;
+    var tmp=document.createElement('div');tmp.innerHTML=kcxMsg(m);
+    var nr=tmp.firstChild;if(nr){nr.querySelectorAll('.kcx-m').forEach(function(z){z.style.animation='none'});row.replaceWith(nr)}
+  }catch(e){}
+}
+/* the answer: ticks the part and returns Ario's reply text */
+function kaResolve(key,yes){
+  var c=kcD().ch.act||[],m=null,i;
+  for(i=c.length-1;i>=0;i--)if(c[i].q&&c[i].q.k===key){m=c[i];break}
+  var t=ttGet(),x=kaItem(t,key);
+  if(m)m.q.s=yes?'y':'n';
+  var out;
+  if(!x){persist();kaRefreshRow(m);return 'این خانه دیگر در جدول نیست؛ اگر برنامه را عوض کرده‌ای مشکلی نیست 🌱'}
+  var nm='«'+x.name+'» ('+x.part+')';
+  if(yes){
+    var r=kaSetDone(t,x,true);
+    out=r.was?'آفرین 🎉 '+nm+' از قبل تیک خورده بود ✅'
+      :'آفرین، دمت گرم 🎉 '+nm+' در جدول تیک خورد ✅'+(r.task?' و در کارهایت هم انجام‌شده شد.':'');
+    try{if(ui.tab==='kk'||ui.tab==='today'||ui.tab==='week')render()}catch(e){}
+  }else{
+    persist();
+    out='اشکالی ندارد 🌱 '+nm+' هنوز باز است. وقتی انجامش دادی همین‌جا بنویس «انجام دادم» تا تیکش را بزنم.';
+  }
+  kaRefreshRow(m);
+  return out;
+}
+/* typed answer in the group: yes / no to the latest open question */
+function kaText(t){
+  var c=kcD().ch.act||[],m=null,i;
+  for(i=c.length-1;i>=0;i--)if(c[i].q&&c[i].q.s!=='y'){m=c[i];break}
+  if(!m)return null;
+  var q=String(t).replace(/[‌ً-ٟ]/g,'').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[!؟?.،,]/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+  var neg=/(^| )(نه|نخیر|ن|no|nope)( |$)|نکردم|ندیدم|نشد|نتونستم|نتوانستم|هنوز|نرسیدم|نخوندم|نخواندم|کامل نشد|تموم نشد|تمام نشد/.test(q);
+  var pos=/(^| )(بله|بلی|آره|اره|آری|ای|yes|yep|yeah|ok|اوکی|باشه|درسته)( |$)|انجام دادم|انجامش دادم|دیدم|دیدمش|دیدمش|کامل (کردم|شد|انجام)|تموم شد|تمام شد|تمومش کردم|خوندم|خواندم|زدم/.test(q);
+  if(neg)return kaResolve(m.q.k,false);
+  if(pos)return kaResolve(m.q.k,true);
+  return null;
+}
+function kaAsk(x){
+  var d=kcD(),c=d.ch.act||(d.ch.act=[]);
+  var m={r:'a',t:'⏰ زمان «'+x.name+'» ('+x.part+') تمام شد.\nآیا جلسه را دیدی و یا پارت را کامل انجام دادی؟',ts:Date.now(),q:{k:x.k,s:''}};
+  c.push(m);if(c.length>150)c.splice(0,c.length-150);
+  try{
+    var th=document.getElementById('kcxTh'),root=document.querySelector('.kcx');
+    if(th&&root&&root.dataset.sec==='act'&&document.body.contains(th)){
+      var tp=th.querySelector('.kcx-typing'),tmp=document.createElement('div');tmp.innerHTML=kcxMsg(m);
+      while(tmp.firstChild)th.insertBefore(tmp.firstChild,tp||null);
+      var L=document.getElementById('kcxL');if(L)L.scrollTo({top:L.scrollHeight,behavior:'smooth'});
+      var N=document.getElementById('kcxN');if(N)N.textContent=fa(c.length)+' پیام';
+    }
+    msgNew('act','⏰ «'+x.name+'» '+__('تمام شد','is over'),__('آیا جلسه را دیدی یا پارت را کامل انجام دادی؟','Did you watch the session or finish the part?'),{native:false});
+  }catch(e){}
+}
+function kaCheck(){
+  try{
+    var t0=state.profile.tt;if(!t0||!Array.isArray(t0.rows)||!t0.cells)return;
+    var t=ttGet(),now=Date.now(),td=todayKey(),ak=kaAk(t),n=0;
+    ttPlanItems(t).filter(function(x){return x.d===td}).forEach(function(x){
+      if(n>=3||ak[x.k])return;
+      var end=kaEnd(x);if(!end||end>now||now-end>14*36e5)return;
+      if(kaCellDone(t,kaRid(x.k),x.di))return;
+      ak[x.k]=1;n++;kaAsk(x);
+    });
+    if(n)persist();
+  }catch(e){}
+}
+/* a notification at the end of every part (today and tomorrow) so the question also reaches you while the app is closed */
+function kaNotifs(){
+  var out=[],t0=state.profile.tt;if(!t0||!Array.isArray(t0.rows)||!t0.cells||kcMuted('act'))return out;
+  var t=ttGet(),now=Date.now(),td=todayKey(),lim=addDays(td,2),ak=kaAk(t),i=0;
+  ttPlanItems(t).forEach(function(x){
+    if(x.d<td||x.d>lim||ak[x.k]||i>=40)return;
+    var end=kaEnd(x);if(!end||end<=now+2000)return;
+    if(kaCellDone(t,kaRid(x.k),x.di))return;
+    var body=__('آیا جلسه را دیدی و یا پارت را کامل انجام دادی؟','Did you watch the session or finish the part?');
+    var big=x.name+' · '+x.part+'\n\n'+body;
+    out.push(nsTag(Object.assign({id:2100000400+i,title:'⏰ «'+x.name+'» '+__('تمام شد','is over'),body:body,schedule:{at:new Date(end),allowWhileIdle:true},extra:{kind:'act',k:x.k}},nsLook('sum',big)),'part'));
+    i++;
+  });
+  return out;
+}
+function kaStart(){
+  setTimeout(msgCatchUp,3000);setInterval(function(){if(!document.hidden)msgCatchUp()},60000);
+  setTimeout(kaCheck,2500);
+  setInterval(function(){if(!document.hidden)kaCheck()},30000);
+}
 function kcStrip(t,n){t=String(t||'').replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim();return t.length>n?t.slice(0,n)+'…':t}
 function kcAsk(sec){return '<div class="kc-ad"><img class="kc-av kc-img" src="img/app-icon.webp" alt="" width="28" height="28" draggable="false"><b>Ario</b></div>'}
 function kcPrev(sec,a){
   var lm=kcLast(sec);if(lm)return (lm.r==='u'?'شما: ':'')+kcStrip(lm.t,80);
   var adv=kcPg.adv||[],isR=function(x){return /^(test|flag|edit)$/.test(x.ic)||/^(غلط|نزده)/.test(x.h||'')},x;
-  if(sec==='plan'){x=adv.filter(function(y){return !y.hide&&!isR(y)})[0];return x?x.h+': '+kcStrip(x.t,70):'برنامه‌ات را با هم بررسی کنیم'}
-  if(sec==='rep'){var f=kcD().fr;if(f&&f.it[0])return f.it[0].h+': '+kcStrip(f.it[0].t,70);x=adv.filter(function(y){return !y.hide&&isR(y)})[0];return x?x.h+': '+kcStrip(x.t,70):'گزارش امشبت را بنویس تا تحلیل کنم'}
-  return kcStrip(KC_Q[Math.floor(Date.now()/864e5)%KC_Q.length],80);
+  if(sec==='plan'){x=adv.filter(function(y){return !y.hide&&!isR(y)})[0];return x?x.h+': '+kcStrip(x.t,70):(advTone()==='blunt'?'برنامه‌ت رو نشون بده ببینم چی داری 🧐':advTone()==='friendly'?'بیا برنامه‌ت رو با هم ببینیم 😄':'برنامه‌ات را با هم بررسی کنیم')}
+  if(sec==='rep'){var f=kcD().fr;if(f&&f.it[0])return f.it[0].h+': '+kcStrip(f.it[0].t,70);x=adv.filter(function(y){return !y.hide&&isR(y)})[0];return x?x.h+': '+kcStrip(x.t,70):(advTone()==='formal'?'گزارش امشبت را بنویس تا تحلیل کنم':kcStrip(kcRepMsg(Date.now()/864e5),80))}
+  if(sec==='act')return advTone()==='blunt'?'بعد از هر پارت می‌پرسم؛ دروغ هم نگی 😏':advTone()==='friendly'?'بعد از هر پارت می‌پرسم انجامش دادی یا نه 😉':'بعد از هر پارت می‌پرسم انجامش دادی یا نه';
+  return kcStrip(kcQs()[Math.floor(Date.now()/864e5)%kcQs().length],80);
 }
 function kcLast(sec){var c=kcD().ch[sec];return c&&c.length?c[c.length-1]:null}
 function kcxTime(ts){try{return new Date(ts).toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
@@ -6821,7 +8467,7 @@ function kcxRepCard(m){
 }
 function kcxRow(h){return '<div class="kcx-row"><span class="kcx-ck"></span>'+h+'</div>'}
 function kcxChip(h,m){return m.re?h.replace('class="kcx-m ','class="kcx-m hre ').replace(/<\/div>$/,'<span class="kcx-re">'+m.re+'</span></div>'):h}
-function kcxMsg(m){if(m.k)return kcxRow(kcxChip(kcxRepCard(m),m));if(m.vn)return kcxRow(kcxChip(vnBubble(m),m));return kcxRow(kcxChip('<div class="kcx-m '+(m.r==='u'?'u':'a')+'"><p>'+esc(m.t).replace(/\n/g,'<br>')+'</p><time>'+kcxTime(m.ts)+'</time></div>',m))}
+function kcxMsg(m){if(m.q)return kcxRow(kcxChip(kaBubble(m),m));if(m.ph)return kcxRow(kcxChip(spBubble(m),m));if(m.k)return kcxRow(kcxChip(kcxRepCard(m),m));if(m.vn)return kcxRow(kcxChip(vnBubble(m),m));return kcxRow(kcxChip('<div class="kcx-m '+(m.r==='u'?'u':'a')+'"><p>'+esc(m.t).replace(/\n/g,'<br>')+'</p><time>'+kcxTime(m.ts)+'</time></div>',m))}
 /* the report tray: one small box per saved report, showing only its date */
 function kcxTray(){
   var D=rpD(),ks=Object.keys(D).sort().reverse().slice(0,60);
@@ -6920,7 +8566,8 @@ function kcRepAnalysis(k,a){
 }
 /* the advisor's answers: rules over the student's own numbers */
 function kcReply(sec,t,a){
-  try{KTE.fa=fa;KTE.fmt=kkFmt;KTE.kcD=kcD;KTE.persist=persist;KTE.lesson=kcLesson;KTE.q=function(){return KC_Q};var kr=kcThink(sec,t,a);if(kr)return kr}catch(e){}
+  if(sec==='act'){try{var ka=kaText(t);if(ka)return ka}catch(e){}}
+  try{KTE.fa=fa;KTE.fmt=kkFmt;KTE.kcD=kcD;KTE.persist=persist;KTE.lesson=kcLesson;KTE.q=function(){return kcQs()};KTE.tone=advTone;var kr=kcThink(sec,t,a);if(kr)return kr}catch(e){}
   var q=t.replace(/\u200c/g,'').replace(/ي/g,'ی').replace(/ك/g,'ک'),has=function(r){return r.test(q)};
   var sub=Object.keys(a.mins||{}).filter(function(n){return n&&n!=='آزمون'&&a.mins[n]>0}).sort(function(x,y){return a.mins[x]-a.mins[y]});
   var none=a.act<3&&a.teDays<2;
@@ -6929,7 +8576,7 @@ function kcReply(sec,t,a){
     if(has(/خسته|نمیتونم|بی‌?حال|بیحال|حوصله|کلافه|دلسرد|ناامید/))return 'خستگی یعنی تلاش کرده‌ای. امروز هدف را کوچک کن: فقط یک جلسه‌ی ۲۵ دقیقه‌ای، بعد ۵ دقیقه استراحت. بعد از آن خودت می‌فهمی ادامه بدهی یا نه. 💪';
     if(has(/استرس|ترس|نگران|اضطراب/))return 'استرس کمی طبیعی است و نشان می‌دهد برایت مهم است. نفس عمیق بکش و فقط به کار همین ساعت فکر کن؛ برنامه‌ی کوچک و پیوسته از نگرانی بزرگ جلوتر است. 🌿';
     if(has(/خواب|بیخواب/))return 'خواب کافی بخشی از درس خواندن است. سعی کن ساعت خواب و بیداری ثابت باشد؛ مرورِ شب‌های قبل از خواب هم بهتر در ذهن می‌ماند.';
-    var i=Math.floor(Math.random()*KC_Q.length);return '«'+KC_Q[i]+'»';
+    var QZ=kcQs(),i=Math.floor(Math.random()*QZ.length);return '«'+QZ[i]+'»';
   }
   if(none)return 'هنوز داده‌ی کافی ندارم. چند روز ساعت مطالعه را ثبت کن و بعد از هر روز «گزارش کار روزانه» بساز؛ آن‌وقت می‌توانم دقیق جواب بدهم. 📊';
   if(has(/ساعت|چقدر|زمان|مدت/))return 'میانگین مطالعه‌ات در '+fa(a.N)+' روز اخیر روزی '+kkFmt(a.avg)+' بوده'+(a.w2>0?(a.w1>a.w2*1.05?' و این هفته بیشتر شده است 👏':(a.w1<a.w2*.9?' و این هفته کمی کمتر شده است.':'.')):'.')+' پیشنهادم افزایش تدریجی حدود ۱۵٪ است، نه جهش ناگهانی.';
@@ -7005,12 +8652,13 @@ function vnHydrate(root){
   });
 }
 function vnDrop(m){
+  if(m&&m.ph&&m.ph.own){spDropFiles(m.ph.id);return}
   if(!m||!m.vn)return;var id=m.vn.id;
   ['vn_'+id,'vnp_'+id].forEach(function(k){try{fdbDel(k)}catch(e){}if(VN.mem[k]){try{URL.revokeObjectURL(VN.mem[k])}catch(e){}delete VN.mem[k]}});
 }
 /* a deleted message keeps its file only while "undo" can still bring it back; then the file goes too */
 function vnInUse(id){var D=(kcD()&&kcD().ch)||{},k,i,c;for(k in D){c=D[k];if(c)for(i=0;i<c.length;i++)if(c[i]&&c[i].vn&&c[i].vn.id===id)return true}return false}
-function vnSweep(list){setTimeout(function(){(list||[]).forEach(function(m){if(m&&m.vn&&!vnInUse(m.vn.id))vnDrop(m)})},9000)}
+function vnSweep(list){setTimeout(function(){(list||[]).forEach(function(m){if(m&&m.vn&&!vnInUse(m.vn.id))vnDrop(m);else if(m&&m.ph&&m.ph.own&&!spInUse(m.ph.id))spDropFiles(m.ph.id)})},9000)}
 function vnOrphans(){
   if(VN.swept)return;VN.swept=1;
   fdbReq('readonly',function(st){return st.getAllKeys()}).then(function(ks){
@@ -7021,6 +8669,327 @@ function vnPutMem(id,blob,poster){
   VN.mem['vn_'+id]=URL.createObjectURL(blob);if(typeof AO!=='undefined'&&AO.urls)AO.urls.push(VN.mem['vn_'+id]);
   if(poster){VN.mem['vnp_'+id]=URL.createObjectURL(poster);if(typeof AO!=='undefined'&&AO.urls)AO.urls.push(VN.mem['vnp_'+id])}
 }
+/* ===================================================================
+   Study proof (مدرک مطالعه) — while a task is running, a photo or video sent to the advisor groups or to Ario is saved on that task.
+   · the file lives in IndexedDB: sp_<id> (photo shrunk to 1280px, or the video) + spt_<id> (small thumbnail)
+   · the task keeps only t.pf = [{id,k:'p'|'v',ts,d}] (so tasks stay small and sync as before)
+   · it shows as a small camera mark on the tick + a chip on the task row, and on the timetable cell (on screen only:
+     the exported table picture is drawn from data in ttMakeImage, so these marks are never in it)
+   · Ario / the advisor does NOT read the picture: it answers from the task, the time and a light check (too dark / blank)
+   =================================================================== */
+var SP={mem:{},max:80*1048576,keep:12,swept:0};
+var SP_ICON='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 8.6A2.6 2.6 0 0 1 6.6 6h1.2l1.1-1.6A1.6 1.6 0 0 1 10.2 3.7h3.6a1.6 1.6 0 0 1 1.3.7L16.2 6h1.2A2.6 2.6 0 0 1 20 8.6v7.8a2.6 2.6 0 0 1-2.6 2.6H6.6A2.6 2.6 0 0 1 4 16.4z"/><circle cx="12" cy="12.4" r="3.4"/></svg>';
+var SP_MINI='<svg viewBox="0 0 24 24" class="sp-mi" aria-hidden="true"><path d="M4 8.6A2.6 2.6 0 0 1 6.6 6h1.2l1.1-1.6A1.6 1.6 0 0 1 10.2 3.7h3.6a1.6 1.6 0 0 1 1.3.7L16.2 6h1.2A2.6 2.6 0 0 1 20 8.6v7.8a2.6 2.6 0 0 1-2.6 2.6H6.6A2.6 2.6 0 0 1 4 16.4z"/><circle cx="12" cy="12.4" r="3.4"/></svg>';
+var SP_VID='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="3.5" y="6.5" width="12" height="11" rx="3"/><path d="M15.5 10.8l5-2.8v8l-5-2.8z"/></svg>';
+var SP_PLAY='<svg viewBox="0 0 24 24" class="sp-pli" aria-hidden="true"><path d="M8 5.2v13.6a.6.6 0 0 0 .9.5l10.6-6.8a.6.6 0 0 0 0-1L8.9 4.7a.6.6 0 0 0-.9.5z"/></svg>';
+
+function spNew(){return 'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+function spIsVid(f){return /^video\//i.test(f&&f.type||'')||/\.(mp4|webm|mov|3gp|m4v|mkv)$/i.test(f&&f.name||'')}
+function spMsgT(k,tn){return (k==='v'?'🎥 ':'📷 ')+(k==='v'?__('ویدیوی مطالعه','Study video'):__('عکس مطالعه','Study photo'))+(tn?' · '+tn:'')}
+function spList(t){return t&&Array.isArray(t.pf)?t.pf.filter(function(p){return p&&typeof p.id==='string'}):[]}
+function spErr(e){return String(e&&e.message||e)==='big'?__('این فایل خیلی بزرگ است؛ کمتر از ۸۰ مگابایت بفرست.','This file is too big; send one under 80 MB.'):__('ذخیرهٔ فایل ممکن نشد؛ دوباره امتحان کن.','Could not save the file; try again.')}
+
+/* the task that is "being studied" right now: today, its time window (10 minutes of grace each side; no end time = one hour).
+   Unfinished tasks win. If nothing fits, the latest unfinished task that started in the last 3 hours. */
+function spNow(){
+  var now=Date.now(),td=todayKey(),best=null,bs=-1e18,fb=null,fs=-1e18;
+  state.tasks.forEach(function(t){
+    if(!t||!t.tm||t.d!==td)return;
+    var st=targetOf(td,t.tm),en=t.te?targetOf(td,t.te):st+3600000;
+    if(now>=st-600000&&now<=en+600000){var s=st-(t.done?1e12:0);if(s>bs){bs=s;best=t}}
+    else if(!t.done&&st<=now&&now-st<10800000&&st>fs){fs=st;fb=t}
+  });
+  return best||fb;
+}
+function spUrl(key){
+  if(SP.mem[key])return Promise.resolve(SP.mem[key]);
+  return fdbGet(key).then(function(b){if(!b)return '';return (SP.mem[key]=URL.createObjectURL(b))}).catch(function(){return ''});
+}
+function spDropFiles(id){
+  ['sp_'+id,'spt_'+id].forEach(function(k){try{fdbDel(k).catch(function(){})}catch(e){}if(SP.mem[k]){try{URL.revokeObjectURL(SP.mem[k])}catch(e){}delete SP.mem[k]}});
+}
+function spInUse(id){
+  var i,k,c;
+  for(i=0;i<state.tasks.length;i++){var l=state.tasks[i]&&state.tasks[i].pf;if(l&&l.some(function(p){return p&&p.id===id}))return true}
+  var D=(kcD()&&kcD().ch)||{};
+  for(k in D){c=D[k];if(c)for(i=0;i<c.length;i++)if(c[i]&&c[i].ph&&c[i].ph.id===id)return true}
+  return false;
+}
+/* once per launch: files whose task / message is gone (a deleted task, a cleared chat) are removed */
+function spSweep(){
+  if(SP.swept)return;SP.swept=1;
+  fdbReq('readonly',function(st){return st.getAllKeys()}).then(function(ks){
+    (ks||[]).forEach(function(k){var m=/^spt?_(.+)$/.exec(String(k));if(m&&!spInUse(m[1]))fdbDel(k).catch(function(){})});
+  }).catch(function(){});
+}
+
+/* ---------- preparing the file ---------- */
+function spLoadImg(file){return new Promise(function(res,rej){var u=URL.createObjectURL(file),im=new Image();im.onload=function(){URL.revokeObjectURL(u);res(im)};im.onerror=function(){URL.revokeObjectURL(u);rej(new Error('img'))};im.src=u})}
+function spDraw(src,w,h,M,q){
+  var k=Math.min(1,M/Math.max(w,h)),cv=document.createElement('canvas');
+  cv.width=Math.max(1,Math.round(w*k));cv.height=Math.max(1,Math.round(h*k));
+  cv.getContext('2d').drawImage(src,0,0,cv.width,cv.height);
+  return new Promise(function(res,rej){cv.toBlob(function(b){b?res({blob:b,cv:cv}):rej(new Error('img'))},'image/jpeg',q)});
+}
+/* a light check, not recognition: is the picture very dark, or nearly one flat colour (covered lens)? */
+function spQuality(cv){
+  try{
+    var s=48,c=document.createElement('canvas');c.width=s;c.height=s;var x=c.getContext('2d');x.drawImage(cv,0,0,s,s);
+    var d=x.getImageData(0,0,s,s).data,n=s*s,sum=0,sq=0,i,g;
+    for(i=0;i<d.length;i+=4){g=.299*d[i]+.587*d[i+1]+.114*d[i+2];sum+=g;sq+=g*g}
+    var m=sum/n,sd=Math.sqrt(Math.max(0,sq/n-m*m));
+    return {dark:m<50,flat:m>=50&&sd<13};
+  }catch(e){return null}
+}
+function spVideoInfo(file){
+  return new Promise(function(res){
+    var v=document.createElement('video'),u=URL.createObjectURL(file),done=false;
+    v.muted=true;v.playsInline=true;v.preload='metadata';
+    function fin(th,d){if(done)return;done=true;clearTimeout(tm);try{v.removeAttribute('src');v.load()}catch(e){}URL.revokeObjectURL(u);res({thumb:th,d:isFinite(d)?d:0})}
+    var tm=setTimeout(function(){fin(null,v.duration)},7000);
+    v.onloadedmetadata=function(){try{v.currentTime=Math.min(.6,(v.duration||1)/2)}catch(e){fin(null,v.duration)}};
+    v.onseeked=function(){
+      try{
+        var w=v.videoWidth||320,h=v.videoHeight||240,k=Math.min(1,260/Math.max(w,h)),cv=document.createElement('canvas');
+        cv.width=Math.max(1,Math.round(w*k));cv.height=Math.max(1,Math.round(h*k));cv.getContext('2d').drawImage(v,0,0,cv.width,cv.height);
+        var d=v.duration;cv.toBlob(function(b){fin(b,d)},'image/jpeg',.78);
+      }catch(e){fin(null,v.duration)}
+    };
+    v.onerror=function(){fin(null,0)};
+    v.src=u;
+  });
+}
+async function spPrepare(file){
+  if(file.size>SP.max)throw new Error('big');
+  if(spIsVid(file)){var vi=await spVideoInfo(file);return {k:'v',blob:file,thumb:vi.thumb,d:Math.round(vi.d*10)/10,q:null}}
+  var im=await spLoadImg(file),w=im.naturalWidth,h=im.naturalHeight;
+  if(!w||!h)throw new Error('img');
+  var out=await spDraw(im,w,h,1280,.84),th=await spDraw(im,w,h,260,.78);
+  return {k:'p',blob:out.blob,thumb:th.blob,d:0,q:spQuality(th.cv)};
+}
+/* save the file and, if a task is running, record it on that task */
+async function spIngest(file,task){
+  var P=await spPrepare(file),id=spNew();
+  await fdbPut('sp_'+id,P.blob);
+  if(P.thumb)await fdbPut('spt_'+id,P.thumb);
+  var p={id:id,k:P.k,ts:Date.now(),d:P.d};
+  SP.mem['sp_'+id]=URL.createObjectURL(P.blob);if(P.thumb)SP.mem['spt_'+id]=URL.createObjectURL(P.thumb);
+  if(task){
+    if(!Array.isArray(task.pf))task.pf=[];
+    task.pf.push(p);
+    while(task.pf.length>SP.keep)spDropFiles(task.pf.shift().id);
+    persist();
+  }
+  return {p:p,q:P.q,blob:P.blob,thumb:P.thumb,task:task||null};
+}
+/* tick marks / table marks / the open task list refresh (the advisor page is left alone so its chat does not rebuild) */
+function spRefresh(){
+  try{if(ui.tab!=='kcm')render('swap')}catch(e){}
+  try{if(ttEl)ttRedraw()}catch(e){}
+}
+
+/* ---------- Ario's / the advisor's answer ---------- */
+function spStats(){
+  var days={},n=0,td=todayKey(),st=0,d=new Date();
+  state.tasks.forEach(function(t){spList(t).forEach(function(p){var k=ttIso(new Date(p.ts));days[k]=1;if(k===td)n++})});
+  d.setHours(12,0,0,0);if(!days[ttIso(d)])d.setDate(d.getDate()-1);
+  while(days[ttIso(d)]&&st<400){st++;d.setDate(d.getDate()-1)}
+  return {today:n,streak:st};
+}
+function spReply(c){
+  var T=c.task,S=spStats(),v=c.k==='v',out=[],extra=[],sec=c.sec||'';
+  out.push(aoPick(v?[
+    __('ویدیوت رسید، آفرین! 🎥👏','Got your video, well done! 🎥👏'),
+    __('عالیه، هم درس می‌خوانی هم مدرکش را می‌فرستی 🎬💪','Great, you study and send the proof too 🎬💪'),
+    __('دمت گرم، ویدیو را دیدم! 🌟','Nice one, got the video! 🌟')
+  ]:[
+    __('آفرین! 👏 عکست رسید.','Well done! 👏 Got your photo.'),
+    __('عالیه، همین‌جوری ادامه بده 💪','Great, keep going like this 💪'),
+    __('دمت گرم، مشغول درسی 📚🌟','Nice, you are busy studying 📚🌟'),
+    __('چه خوب! همین تمرکز را نگه دار 🎯','Good! Keep this focus 🎯')
+  ],'spo'+(v?'v':'p')));
+  out.push(T?__('روی «'+T.t+'» ثبت شد ✅','Saved on “'+T.t+'” ✅'):__('الان کاری در حال انجام نیست؛ برای همین فقط در همین گفتگو می‌ماند.','No task is running right now, so it stays in this chat only.'));
+  if(T&&T.tm&&T.d===todayKey()){
+    var mn=Math.round((Date.now()-targetOf(T.d,T.tm))/60000);
+    if(mn>=5)extra.push(__('حدود '+fa(mn)+' دقیقه از شروعش گذشته','About '+mn+' minutes since it started'));
+    else if(mn>=-10)extra.push(__('تازه شروع کرده‌ای؛ خوب شروع کردی','You just started; good start'));
+  }
+  if(S.today>=2)extra.push(__('این '+fa(S.today)+'مین مدرک امروزت است','This is your '+S.today+'th proof today'));
+  if(S.streak>=2)extra.push(__(fa(S.streak)+' روز پشت‌سرهم مدرک ثبت کرده‌ای 🔥',S.streak+' days in a row with a proof 🔥'));
+  if(extra.length)out.push(extra.slice(0,2).join(__(' · ',' · ')));
+  if(c.q&&c.q.dark)out.push(__('عکس کمی تاریک است؛ دفعهٔ بعد نور بیشتری بده 💡','The photo is quite dark; give it more light next time 💡'));
+  else if(c.q&&c.q.flat)out.push(__('عکس تقریباً یک‌رنگ شد؛ شاید دوربین پوشیده بوده؟','The photo is nearly one flat colour; maybe the lens was covered?'));
+  if(sec==='plan')out.push(__('طبق برنامه جلو برو و بعد از این پارت چند دقیقه استراحت کن.','Follow the plan, and rest a few minutes after this part.'));
+  else if(sec==='rep')out.push(__('امشب هم همین را در گزارش‌کارت بنویس تا با هم تحلیلش کنیم.','Write it in tonight’s report too, so we can look at it together.'));
+  else if(sec==='mot')out.push(aoPick([__('هر جلسهٔ کوچک، یک قدم به هدف بزرگ‌تر است 🌱','Every small session is a step to the bigger goal 🌱'),__('ثبات از استعداد مهم‌تر است؛ تو داری ثباتت را می‌سازی 💚','Consistency beats talent; you are building yours 💚')],'spm'));
+  var first=false;try{first=!localStorage.getItem('ario.sp1');if(first)localStorage.setItem('ario.sp1','1')}catch(e){}
+  if(first)out.push(__('یادآوری: من محتوای تصویر را نمی‌خوانم؛ عکس یا ویدیو فقط به‌عنوان مدرک مطالعه کنار کارت ثبت می‌شود.','Note: I do not read what is in the picture; it is kept as a study proof next to your task.'));
+  return out.join(c.surf==='ao'?' ':'\n');
+}
+
+/* ---------- scan animation on a sent picture ----------
+   a light line sweeps the picture (like the table scan) while a counter under it runs 1 -> 100 with three dots beside it;
+   the promise resolves when it reaches 100, and only then does the advisor / Ario answer */
+function spScanFx(el,ms){
+  return new Promise(function(res){
+    if(!el||!el.isConnected){res();return}
+    var host=el;
+    if(el.tagName==='IMG'){
+      host=document.createElement('div');host.className='sp-scw';
+      el.parentNode.insertBefore(host,el);host.appendChild(el);
+    }
+    host.classList.add('scanning');
+    var line=document.createElement('i');line.className='sp-scl';host.appendChild(line);
+    var row=document.createElement('div');row.className='sp-pct';row.setAttribute('aria-live','off');
+    row.innerHTML='<b>'+fa(1)+(EN?'%':'٪')+'</b><span class="sp-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+    host.insertAdjacentElement('afterend',row);
+    var b=row.querySelector('b'),t0=Date.now(),last=0,iv=0;
+    function end(){
+      clearInterval(iv);
+      try{line.remove();host.classList.remove('scanning');row.classList.add('out')}catch(e){}
+      setTimeout(function(){try{row.remove()}catch(e){}res()},260);
+    }
+    iv=setInterval(function(){
+      if(!host.isConnected){clearInterval(iv);res();return}
+      var p=Math.min(1,(Date.now()-t0)/ms),e=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2,n=Math.max(1,Math.min(100,Math.round(e*100)));
+      if(n!==last){last=n;b.textContent=fa(n)+(EN?'%':'٪')}
+      if(p>=1){b.textContent=fa(100)+(EN?'%':'٪');setTimeout(end,280);clearInterval(iv)}
+    },40);
+  });
+}
+
+/* ---------- picking a file: take a photo / record a video / gallery ---------- */
+function spSheet(inner,label){
+  var w=document.createElement('div');w.className='sheet-wrap sp-top';
+  w.innerHTML='<div class="dim"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="'+esc(label)+'"><div class="grab"></div>'+inner+'</div>';
+  document.body.appendChild(w);
+  var done=false;
+  function close(){if(done)return;done=true;w.classList.remove('open');setTimeout(function(){w.remove()},350)}
+  w.querySelector('.dim').addEventListener('click',close);
+  requestAnimationFrame(function(){requestAnimationFrame(function(){w.classList.add('open')})});
+  return {w:w,close:close};
+}
+function spChoose(cb){
+  var tk=spNow(),lab=__('ارسال عکس یا فیلم مطالعه','Send a study photo or video');
+  var hint=tk?__('الان «'+esc(tk.t)+'» در حال انجام است؛ مدرک روی همین کار ثبت می‌شود.','Right now “'+esc(tk.t)+'” is running; the proof is saved on it.'):__('الان کاری در حال انجام نیست؛ مدرک فقط در گفتگو می‌ماند.','No task is running right now; the proof stays in the chat only.');
+  var sw=spSheet('<div class="sheet-top"><span></span><h2>'+lab+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div>'+
+    '<p class="hint sp-hint">'+hint+'</p>'+
+    '<div class="sp-opts">'+
+    '<label class="sp-o">'+SP_ICON+'<span>'+__('گرفتن عکس','Take a photo')+'</span><input type="file" accept="image/*" capture="environment" data-f></label>'+
+    '<label class="sp-o">'+SP_VID+'<span>'+__('ضبط فیلم','Record a video')+'</span><input type="file" accept="video/*" capture="environment" data-f></label>'+
+    '<label class="sp-o">'+icon('img')+'<span>'+__('انتخاب از گالری','Choose from gallery')+'</span><input type="file" accept="image/*,video/*" data-f></label>'+
+    '</div>',lab);
+  sw.w.addEventListener('change',function(e){
+    var i=e.target;if(!i||!i.matches||!i.matches('[data-f]'))return;
+    var f=i.files&&i.files[0];if(!f)return;
+    setTimeout(sw.close,60);
+    try{cb(f)}catch(er){}
+  });
+  sw.w.addEventListener('click',function(e){if(e.target.closest('[data-e="close"]'))sw.close()});
+}
+
+/* ---------- bubble in the advisor chat ---------- */
+function spBubble(m){
+  var p=m.ph,v=p.k==='v';
+  return '<div class="kcx-m u sp-m" data-spid="'+esc(p.id)+'" data-spk="'+p.k+'" data-spd="'+(+p.d||0)+'"><button type="button" class="sp-pv" data-spo="'+esc(p.id)+'" aria-label="'+(v?__('پخش ویدیو','Play video'):__('دیدن عکس','View photo'))+'"><img alt="" data-spimg="'+esc(p.id)+'" draggable="false">'+(v?'<span class="sp-pl">'+SP_PLAY+'</span><span class="sp-du">'+vnFmt(p.d)+'</span>':'')+'</button>'+
+    '<div class="sp-cap'+(p.tn?'':' off')+'">'+(p.tn?SP_MINI+'<span>'+__('ثبت شد روی','Saved on')+' «'+esc(p.tn)+'»</span>':'<span>'+__('بدون کار فعال','No active task')+'</span>')+'</div><time>'+kcxTime(m.ts)+'</time></div>';
+}
+function spHydrate(root){
+  [].forEach.call(root.querySelectorAll('img[data-spimg]:not([data-h])'),function(im){
+    im.dataset.h='1';var id=im.dataset.spimg,bub=im.closest('[data-spid]');
+    spUrl('spt_'+id).then(function(u){return u||(bub&&bub.dataset.spk==='p'?spUrl('sp_'+id):'')}).then(function(u){
+      if(u)im.src=u;else if(bub)bub.classList.add('gone');
+    });
+  });
+}
+function spWire(root){
+  root.addEventListener('click',function(e){
+    var b=e.target.closest('[data-spo]');if(!b)return;
+    if(e.currentTarget.closest&&e.currentTarget.closest('.kcx-sel'))return;
+    var bub=b.closest('[data-spid]');if(!bub||bub.classList.contains('gone'))return;
+    e.stopPropagation();
+    spView([{id:bub.dataset.spid,k:bub.dataset.spk,d:+bub.dataset.spd||0,tid:''}],0);
+  });
+}
+
+/* ---------- the viewer (also deletes a proof from its task) ---------- */
+function spView(list,i){
+  if(!list||!list.length)return;
+  var old=document.querySelector('.sp-vw');if(old)old.remove();
+  var w=document.createElement('div');w.className='sp-vw';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');
+  w.innerHTML='<div class="sp-vt"><button type="button" class="sp-x" data-v="x" aria-label="'+__('بستن','Close')+'">'+icon('close')+'</button><b class="sp-n"></b><span class="sp-sp"></span><button type="button" class="sp-x del" data-v="del" aria-label="'+__('حذف','Delete')+'">'+icon('trash')+'</button></div>'+
+    '<div class="sp-st"></div><div class="sp-nv"><button type="button" data-v="p" aria-label="'+__('قبلی','Previous')+'">'+icon('chev')+'</button><button type="button" data-v="n" aria-label="'+__('بعدی','Next')+'">'+icon('chev')+'</button></div>';
+  document.body.appendChild(w);
+  var st=w.querySelector('.sp-st'),nn=w.querySelector('.sp-n'),dl=w.querySelector('[data-v="del"]'),tok=0;
+  i=Math.max(0,Math.min(list.length-1,i||0));
+  function stopVid(){var v=st.querySelector('video');if(v){try{v.pause()}catch(e){}}}
+  function show(){
+    var it=list[i],my=++tok;stopVid();
+    var dt='';try{dt=it.ts?new Intl.DateTimeFormat(EN?'en':ARB?'ar-EG-u-ca-gregory':'fa-IR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(it.ts)):''}catch(e){}
+    nn.textContent=fa(i+1)+' / '+fa(list.length)+(dt?' · '+dt:'');
+    dl.hidden=!it.tid;
+    w.classList.toggle('one',list.length<2);
+    st.innerHTML='<div class="sp-ld"><i></i><i></i><i></i></div>';
+    spUrl('sp_'+it.id).then(function(u){
+      if(my!==tok)return;
+      if(!u){st.innerHTML='<p class="sp-no">'+__('فایل این مدرک روی این گوشی نیست.','This file is not on this phone.')+'</p>';return}
+      if(it.k==='v')st.innerHTML='<video src="'+u+'" controls playsinline autoplay></video>';
+      else st.innerHTML='<img src="'+u+'" alt="" draggable="false">';
+    });
+  }
+  function shut(){stopVid();w.classList.add('out');setTimeout(function(){w.remove()},200)}
+  function del(){
+    var it=list[i];if(!it||!it.tid)return;
+    askConfirm({title:__('حذف مدرک','Delete proof'),msg:__('این عکس یا ویدیو از کار حذف می‌شود.','This photo or video will be removed from the task.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:function(){
+      var t=find(it.tid);if(t&&Array.isArray(t.pf)){t.pf=t.pf.filter(function(p){return p.id!==it.id});if(!t.pf.length)delete t.pf}
+      if(!spInUse(it.id))spDropFiles(it.id);
+      persist();list.splice(i,1);
+      if(!list.length){shut();spRefresh();return}
+      i=Math.min(i,list.length-1);show();spRefresh();
+    }}]});
+  }
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-v]');
+    if(!b){if(e.target===w||e.target===st)shut();return}
+    var a=b.dataset.v;
+    if(a==='x')shut();
+    else if(a==='del')del();
+    else if(a==='p'){i=(i-1+list.length)%list.length;show()}
+    else if(a==='n'){i=(i+1)%list.length;show()}
+  });
+  show();
+}
+/* a task's proofs, newest last; opened from the chip on its row */
+function spOpenTask(tid){
+  var t=find(tid),l=spList(t);if(!l.length)return;
+  spView(l.map(function(p){return {id:p.id,k:p.k,d:p.d,ts:p.ts,tid:tid}}),l.length-1);
+}
+
+/* ---------- marks on the timetable ---------- */
+function spCellKey(t,rid,d){var s0=ttWs(t);return ttIso(new Date(s0.getFullYear(),s0.getMonth(),s0.getDate()+d,12))+'|'+rid}
+function spTTCounts(){
+  var m=null;
+  state.tasks.forEach(function(x){if(x&&x.ttk&&x.pf&&x.pf.length){m=m||{};m[x.ttk]=(m[x.ttk]||0)+spList(x).length}});
+  return m;
+}
+/* thumbnails inside the cell's "info" sheet (view mode) */
+function spCellThumbs(wrap,key){
+  var items=[];
+  state.tasks.forEach(function(x){if(x&&x.ttk===key)spList(x).forEach(function(p){items.push({id:p.id,k:p.k,d:p.d,ts:p.ts,tid:x.id})})});
+  if(!items.length)return;
+  var box=wrap.querySelector('.sp-ts'),th=wrap.querySelector('.sp-th');if(!box||!th)return;
+  box.hidden=false;
+  th.innerHTML=items.map(function(p,j){return '<button type="button" class="sp-t" data-j="'+j+'" aria-label="'+(p.k==='v'?__('ویدیو','Video'):__('عکس','Photo'))+'"><img alt="" data-spimg="'+esc(p.id)+'" data-k="'+p.k+'" draggable="false">'+(p.k==='v'?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button>'}).join('');
+  [].forEach.call(th.querySelectorAll('img'),function(im){
+    var id=im.dataset.spimg;spUrl('spt_'+id).then(function(u){return u||(im.dataset.k==='p'?spUrl('sp_'+id):'')}).then(function(u){if(u)im.src=u;else im.parentNode.classList.add('gone')});
+  });
+  th.addEventListener('click',function(e){var b=e.target.closest('.sp-t');if(b&&!b.classList.contains('gone'))spView(items,+b.dataset.j)});
+}
+function spChip(t){
+  var n=spList(t).length;if(!n)return '';
+  return '<button type="button" class="mt sp-chip" data-sp="'+esc(t.id)+'" aria-label="'+__('مدارک مطالعه','Study proofs')+'">'+SP_MINI+'<bdi>'+fa(n)+'</bdi></button>';
+}
+
 /* ---------- playback ---------- */
 function vnProg(bub,m){
   var d=+bub.dataset.d||(isFinite(m.duration)?m.duration:0)||1,p=Math.max(0,Math.min(1,m.currentTime/d));
@@ -7338,13 +9307,16 @@ function vnEnd(R,send){
 }
 document.addEventListener('visibilitychange',function(){if(document.visibilityState!=='visible'&&VN.rec&&!VN.rec.done)vnEnd(VN.rec,false);if(document.visibilityState!=='visible')vnStopCur()});
 
+var kcxPos={};
 function kcxInit(){
   var root=document.querySelector('.kcx');if(!root)return;
   var sec=root.dataset.sec,L=document.getElementById('kcxL'),th=document.getElementById('kcxTh'),F=document.getElementById('kcxF'),T=document.getElementById('kcxT'),N=document.getElementById('kcxN');
   function down(sm){try{L.scrollTo({top:L.scrollHeight,behavior:sm?'smooth':'auto'})}catch(e){L.scrollTop=L.scrollHeight}}
   function fit(){T.style.height='auto';T.style.height=Math.min(120,T.scrollHeight)+'px';F.classList.toggle('tx',!!T.value.trim())}
-  function add(r,t,k,vn){
-    var m={r:r,t:t,ts:Date.now()},c=kcD().ch[sec];if(k)m.k=k;if(vn)m.vn=vn;c.push(m);if(c.length>150)c.splice(0,c.length-150).forEach(vnDrop);persist();
+  function add(r,t,k,vn,ph){
+    var e0=th&&th.querySelector('.kcx-e0');if(e0)e0.remove();
+    var m={r:r,t:t,ts:Date.now()},c=kcD().ch[sec];if(k)m.k=k;if(vn)m.vn=vn;if(ph)m.ph=ph;c.push(m);if(c.length>150)c.splice(0,c.length-150).forEach(vnDrop);persist();
+    if(r==='a')msgNew(sec,nsSrc(sec).nm,kcStrip(t,140));
     if(!document.body.contains(th))return;
     var dk=new Date(m.ts).toDateString(),h='';
     var days=th.querySelectorAll('.kcx-day');if(!days.length||days[days.length-1].dataset.d!==dk)h+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(m.ts)+'</span></div>';
@@ -7352,6 +9324,7 @@ function kcxInit(){
     var tmp=document.createElement('div');tmp.innerHTML=h+kcxMsg(m);
     while(tmp.firstChild)th.insertBefore(tmp.firstChild,tp||null);
     if(vn)vnHydrate(th);
+    if(ph)spHydrate(th);
     if(N)N.textContent=(N.dataset.p||'')+fa(c.length)+' پیام';
     down(true);
   }
@@ -7368,7 +9341,8 @@ function kcxInit(){
   function send(){
     var t=T.value.trim();if(!t)return;
     var a=kcAnalyze(KC_N);
-    add('u',t);T.value='';fit();
+    hap('send');add('u',t);T.value='';fit();
+    if(sec==='plan'){var wr=kcWqTake(t);if(wr){reply(function(){return wr},900+Math.min(900,t.length*10));return}}
     reply(function(){return kcReply(sec,t,a)},1100+Math.min(900,t.length*14));
   }
   var E=document.getElementById('kcxE'),EM=document.getElementById('kcxEm');
@@ -7405,9 +9379,36 @@ function kcxInit(){
     }).catch(function(){toast(__('ذخیره پیام ممکن نشد','Could not save the message'),null,null,'warn')});
   }
   vnBind(F.querySelector('.kcx-vn'),function(){return F},sendVn,false);
+  /* study proof: a photo / video goes on the task that is running now, and the advisor answers */
+  function sendPh(file){
+    var tk=spNow();
+    spIngest(file,tk).then(function(R){
+      var ph={id:R.p.id,k:R.p.k,d:R.p.d,tid:tk?tk.id:'',tn:tk?tk.t:'',own:tk?0:1},tx=spMsgT(R.p.k,tk&&tk.t);
+      if(!document.body.contains(th)){var c1=kcD().ch[sec];c1.push({r:'u',t:tx,ts:Date.now(),ph:ph});persist();spRefresh();return}
+      add('u',tx,null,null,ph);
+      var ans=spReply({k:R.p.k,task:tk,q:R.q,sec:sec,surf:'kc'}),go=function(){reply(function(){return ans},1300)};
+      var bs=th.querySelectorAll('[data-spid="'+R.p.id+'"] .sp-pv'),pv=bs[bs.length-1];
+      if(R.p.k==='p'&&pv)spScanFx(pv,2800).then(go);else go();
+      spRefresh();
+    }).catch(function(e){toast(spErr(e),null,null,'warn')});
+  }
+  var SA=document.getElementById('kcxA');
+  if(SA)SA.addEventListener('click',function(){spChoose(sendPh)});
+  spWire(L);spHydrate(th);
   vnWire(L);vnHydrate(th);vnStopCur();vnOrphans();
   kcxSel(root,L,th);
-  requestAnimationFrame(function(){down(false)});
+  th.addEventListener('click',function(e){
+    var b=e.target.closest('[data-aq]');if(!b||root.classList.contains('kcx-sel'))return;
+    var q=b.closest('.kcx-qa');if(!q)return;var yes=b.dataset.aq==='y',key=q.dataset.qk;
+    add('u',yes?'بله، انجام دادم ✅':'نه، هنوز نه');
+    var ans=kaResolve(key,yes);
+    reply(function(){return ans},900);
+  });
+  /* opens exactly where the person left it (at the end if they were at the end or it is the first time), with no gliding from the top */
+  var sp=kcxPos[sec];
+  function place(){var sb=L.style.scrollBehavior;L.style.scrollBehavior='auto';if(sp&&!sp.b)L.scrollTop=sp.t;else L.scrollTop=L.scrollHeight;L.style.scrollBehavior=sb}
+  place();
+  requestAnimationFrame(function(){place();setTimeout(function(){L.addEventListener('scroll',function(){kcxPos[sec]={t:L.scrollTop,b:L.scrollHeight-L.scrollTop-L.clientHeight<40}},{passive:true})},80)});
 }
 var SVREPLY='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M9.5 7 4.5 12l5 5"/><path d="M4.5 12H14a5.5 5.5 0 0 1 5.5 5.5V19"/></svg>',SVFWD='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14.5 7l5 5-5 5"/><path d="M19.5 12H10A5.5 5.5 0 0 0 4.5 17.5V19"/></svg>';
 /* "undo" after deleting chat messages: they fade back into their old places. Nothing is rebuilt, so the scroll position stays
@@ -7607,14 +9608,40 @@ function kcxSel(root,L,th){
     requestAnimationFrame(function(){p.classList.add('in')});
   }
 }
+/* live countdown to the Konkur (days · hours · minutes · seconds), no box, big, at the top of "من و مشاور" */
+function kcdLeft(){
+  var yr=Number(rkD().cur.yr);if(!(yr>1300&&yr<1600))return null;
+  var ms=new Date(yr+621,6,6,8,0,0).getTime()-Date.now();
+  if(!(ms>0))return null;
+  var s=Math.floor(ms/1000);
+  return {yr:yr,d:Math.floor(s/86400),h:Math.floor(s%86400/3600),m:Math.floor(s%3600/60),s:s%60};
+}
+function kcdHTML(){
+  var L=kcdLeft();if(!L)return '';
+  var u=[['d',__('روز','Days')],['h',__('ساعت','Hours')],['m',__('دقیقه','Min')],['s',__('ثانیه','Sec')]];
+  return '<div class="kcd" role="timer" aria-label="'+__('شمارش معکوس کنکور','Countdown to the Konkur')+'"><div class="kcd-t">'+__('مانده تا کنکور','Until the Konkur')+' '+fa(L.yr)+'</div><div class="kcd-r">'+
+    u.map(function(x,i){return (i?'<span class="kcd-c">:</span>':'')+'<div class="kcd-u"><b data-u="'+x[0]+'">'+fa(x[0]==='d'?L.d:pad(L[x[0]]))+'</b><small>'+x[1]+'</small></div>'}).join('')+'</div></div>';
+}
+function kcdTick(){
+  var els=document.querySelectorAll('.kcd');if(!els.length)return;
+  var L=kcdLeft();
+  [].forEach.call(els,function(el){
+    if(!L){el.remove();return}
+    ['d','h','m','s'].forEach(function(k){var b=el.querySelector('[data-u="'+k+'"]'),t=fa(k==='d'?L.d:pad(L[k]));if(b&&b.textContent!==t)b.textContent=t});
+  });
+}
+setInterval(function(){if(!document.hidden)kcdTick()},1000);
+function kcPinned(sec){return (kcD().pn||[]).indexOf(sec)>=0}
+function kcTopSorted(){var pn=kcD().pn||[];return KC_TOP.slice().sort(function(x,y){var a=pn.indexOf(x[0]),b=pn.indexOf(y[0]);if(a<0&&b<0)return 0;if(a<0)return 1;if(b<0)return -1;return a-b})}
 function viewKcm(){
   var b2=kcBuild(),b=b2,sec=ui.kcsec||'',a=kcPg.a;
   if(!sec){
-    return head('مربی هوشمند','من و مشاور',{back:1,backAct:'kcmBack',backTxt:'مربی هوشمند'})+'<div class="kc-topics glass">'+KC_TOP.map(function(t){
-      return '<button type="button" class="kc-topic" data-act="kcsec" data-v="'+t[0]+'"><span class="kc-tt"><b><i class="kc-ph" style="background:'+t[4]+'">'+t[3]+'</i>'+t[2]+'</b><small>'+kcxTime((kcLast(t[0])||{ts:Date.now()}).ts)+'</small></span><span class="kc-tpv">'+esc(kcPrev(t[0],a))+'</span></button>';
+    return head('مربی هوشمند','من و مشاور',{back:1,backAct:'kcmBack',backTxt:'مربی هوشمند'})+kcdHTML()+'<div class="kc-topics glass">'+kcTopSorted().map(function(t){
+      return '<button type="button" class="kc-topic" data-act="kcsec" data-v="'+t[0]+'"><span class="kc-tt"><b><i class="kc-ph" style="background:'+t[4]+'">'+t[3]+'</i>'+t[2]+(kcPinned(t[0])?'<i class="kc-pnm">📌</i>':'')+'</b><small>'+kcxTime((kcLast(t[0])||{ts:Date.now()}).ts)+'</small></span><span class="kc-tpv">'+esc(kcPrev(t[0],a))+'</span></button>';
     }).join('')+'</div>';
   }
   var tp=KC_TOP.filter(function(t){return t[0]===sec})[0],th=kcD().ch[sec]||[],lh='',ld='';
+  if(!th.length)lh='<div class="kcx-e0">'+emptyArtHTML('chat',__("هنوز پیامی نیست","No messages yet"),__("اولین پیام را بنویس؛ مشاور جواب می‌دهد.","Write the first message; your advisor will answer."),[icon('edit')+__("نوشتن پیام","Write a message"),'data-act="kcFocus"'],'sm')+'</div>';
   th.forEach(function(m){var dk=new Date(m.ts).toDateString();if(dk!==ld){lh+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(m.ts)+'</span></div>';ld=dk}lh+=kcxMsg(m)});
   var smile='<svg viewBox="0 0 24 24" class="ic clip" aria-hidden="true"><path d="M20.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a1.8 1.8 0 0 1-2.5-2.5l8-8"/></svg>',dots='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor" stroke="none"/></svg>';
   return '<div class="kcx'+(kcMuted(sec)?' muted':'')+(kcWpGet(sec)?' haswp':'')+'" data-sec="'+sec+'"'+(kcWpGet(sec)?' data-wp="'+kcWpGet(sec)+'"':'')+'>'+kcWpHTML(sec)+'<div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="kcmBack" aria-label="برگشت">'+icon('chev')+'</button>'+
@@ -7622,16 +9649,80 @@ function viewKcm(){
     '<button type="button" class="kcx-rb glass" data-act="kcMenu" aria-haspopup="menu" aria-expanded="false" aria-label="'+__("بیشتر","More")+'">'+dots+'</button>'+
     '<div class="kcx-st"><button type="button" class="kcx-rb glass" data-sel="x" aria-label="لغو انتخاب">'+icon('close')+'</button><div class="kcx-pill glass"><b id="kcxSc"></b></div><div class="kcx-duo glass"><button type="button" data-sel="copy" aria-label="کپی">'+icon('copy')+'</button><button type="button" class="del" data-sel="del" aria-label="حذف">'+icon('trash')+'</button></div></div></div>'+
     '<div class="kcx-pn glass" id="kcxPn" hidden></div>'+
-    '<div class="kcx-l" id="kcxL"><div class="kc-chat" style="--kt:\''+kcxTime(Date.now())+'\'">'+kcAsk(sec)+(sec==='rep'?b2.rep:sec==='mot'?kcMotHTML(a):b2.plan)+'</div><div class="kcx-th" id="kcxTh">'+lh+'</div></div>'+
+    '<div class="kcx-l" id="kcxL"><div class="kc-chat" style="--kt:\''+kcxTime(Date.now())+'\'">'+kcAsk(sec)+(sec==='act'?kaIntro():sec==='rep'?b2.rep:sec==='mot'?kcMotHTML(a):b2.plan)+'</div><div class="kcx-th" id="kcxTh">'+lh+'</div></div>'+
     '<div class="kcx-em glass" id="kcxEm" aria-hidden="true"></div>'+
     '<div class="kcx-sb"><button type="button" class="kcx-sbb glass" data-sel="reply">'+SVREPLY+'<span>پاسخ</span></button><button type="button" class="kcx-sbb glass" data-sel="fwd">'+SVFWD+'<span>هدایت</span></button></div>'+
-    '<form class="kcx-in" id="kcxF" autocomplete="off"><div class="kcx-box glass"><textarea id="kcxT" rows="1" maxlength="500" enterkeyhint="send" placeholder="پیام" aria-label="پیام"></textarea><button type="button" class="kcx-ib" id="kcxE" aria-label="انتخاب گزارش‌کار" aria-expanded="false">'+smile+'</button></div><button type="submit" class="kcx-s" aria-label="ارسال"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 19V5"/><path d="M5.5 11.5 12 5l6.5 6.5"/></svg></button>'+vnBtnHTML('kcx-s kcx-vn')+'</form></div>';
+    '<form class="kcx-in" id="kcxF" autocomplete="off"><div class="kcx-box glass"><textarea id="kcxT" rows="1" maxlength="500" enterkeyhint="send" placeholder="پیام" aria-label="پیام"></textarea><button type="button" class="kcx-ib" id="kcxE" aria-label="انتخاب گزارش‌کار" aria-expanded="false">'+smile+'</button><button type="button" class="kcx-ib kcx-at" id="kcxA" aria-label="'+__('ارسال عکس یا فیلم مطالعه','Send a study photo or video')+'">'+SP_ICON+'</button></div><button type="submit" class="kcx-s" aria-label="ارسال"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 19V5"/><path d="M5.5 11.5 12 5l6.5 6.5"/></svg></button>'+vnBtnHTML('kcx-s kcx-vn')+'</form></div>';
 }
 function kcBackA(){subBack()}
 function kcmBackA(){if(history.state&&history.state.sub){history.back();return}if(ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}ui.tab='coach';render('enter');window.scrollTo(0,0)}
 actions.kcAdv=function(){subPush();ui.tab='kcm';ui.kcsec='';render('enter');window.scrollTo(0,0)};
+actions.kcFocus=function(){var t=document.getElementById('kcxT');if(t)t.focus()};
 actions.kcsec=function(d){subPush();ui.kcsec=d.v;ui.kcq=null;render('enter');window.scrollTo(0,0)};
 actions.kcmBack=kcmBackA;
+/* ---- small preview of an advisor group (Telegram style): press and hold the round picture of a group in "من و مشاور".
+   It only LOOKS at the chat: nothing is marked as read (the red number stays) until the person really opens the group.
+   Tapping anywhere (or the back button) makes it fade away. ---- */
+function kcpvClose(){
+  var o=document.getElementById('kcpv');if(!o||o.classList.contains('out'))return false;
+  o.classList.remove('in');o.classList.add('out');
+  setTimeout(function(){if(o.parentNode)o.remove()},260);
+  return true;
+}
+function kcpvOpen(sec){
+  var tp=KC_TOP.filter(function(t){return t[0]===sec})[0];if(!tp)return;
+  var old=document.getElementById('kcpv');if(old)old.remove();
+  var th=kcD().ch[sec]||[],last=th.slice(-40),h='',ld='';
+  last.forEach(function(m){
+    try{var dk=new Date(m.ts).toDateString();if(dk!==ld){h+='<div class="kcx-day"><span>'+kcxDay(m.ts)+'</span></div>';ld=dk}h+=kcxMsg(m)}catch(e){}
+  });
+  if(!h)h='<div class="kcx-row"><div class="kcx-m a"><p>'+esc(kcPrev(sec,kcPg&&kcPg.a))+'</p><time>'+kcxTime(Date.now())+'</time></div></div>';
+  var o=document.createElement('div');o.id='kcpv';o.className='kcpv';o.setAttribute('role','dialog');o.setAttribute('aria-label',tp[2]);
+  o.innerHTML='<div class="kcpv-bd"></div><div class="kcpv-card'+(kcWpGet(sec)?' haswp':'')+'">'+kcWpHTML(sec)+
+    '<div class="kcpv-top glass"><div class="kcx-av" style="background:'+tp[4]+'">'+tp[3]+'</div><div class="kcx-ti"><b>'+tp[2]+'</b><small>'+fa(th.length)+' '+__('پیام','messages')+'</small></div></div>'+
+    '<div class="kcpv-l"><div class="kcx-th">'+h+'</div></div></div>'+kcpvMenu(sec);
+  document.body.appendChild(o);
+  var l=o.querySelector('.kcpv-l');l.scrollTop=l.scrollHeight;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){o.classList.add('in')})});
+}
+function kcpvMenu(sec){
+  var sv=function(d){return '<svg viewBox="0 0 24 24" class="ic" aria-hidden="true">'+d+'</svg>'},un=unD()[sec]||0,pn=kcPinned(sec),mu=kcMuted(sec),r='';
+  if(un)r+='<button type="button" class="kcpv-r" data-pv="read">'+sv('<path d="M20.5 11.5a8 8 0 0 1-11.6 7.1L4 20l1.4-4.6A8 8 0 1 1 20.5 11.5z"/><path d="M8.5 11.7l2.4 2.4 4.6-4.8"/>')+'<span>'+__('علامت‌گذاری به‌عنوان خوانده','Mark as read')+'</span></button>';
+  r+='<button type="button" class="kcpv-r" data-pv="pin">'+sv('<path d="M9 4h6l-1 6 3.5 3.5h-11L11 10 9 4z"/><path d="M12 13.5V20"/>')+'<span>'+(pn?__('برداشتن سنجاق','Unpin'):__('سنجاق کردن','Pin'))+'</span></button>';
+  r+='<button type="button" class="kcpv-r" data-pv="mute">'+(mu?KCM_I.mute:KCM_I.off)+'<span>'+(mu?__('فعال کردن صدا','Unmute'):__('بی‌صدا کردن','Mute'))+'</span></button>';
+  return '<div class="kcpv-m glass" role="menu" data-sec="'+sec+'">'+r+'</div>';
+}
+function kcpvDo(k,sec){
+  if(k==='read')unClear(sec);
+  else if(k==='pin'){var D=kcD(),pn=D.pn||(D.pn=[]),i=pn.indexOf(sec);if(i>=0)pn.splice(i,1);else pn.unshift(sec);persist()}
+  else if(k==='mute')kcmSetMute(sec,{u:kcMuted(sec)?0:-1});
+  kcpvClose();
+  if(k!=='read'&&ui.tab==='kcm'&&!ui.kcsec)render('swap');
+}
+/* a short tap on the picture opens the group as usual; keeping the finger on it a little opens the preview */
+var kcpvT=0,kcpvX=0,kcpvY=0,kcpvIgn=0,kcpvLP=0;
+function kcpvCancel(){clearTimeout(kcpvT);kcpvT=0}
+document.addEventListener('pointerdown',function(e){
+  kcpvCancel();
+  var ph=e.target.closest&&e.target.closest('.kc-topic .kc-ph');if(!ph||document.getElementById('kcpv'))return;
+  var row=ph.closest('.kc-topic[data-v]');if(!row)return;
+  kcpvX=e.clientX;kcpvY=e.clientY;
+  kcpvT=setTimeout(function(){kcpvT=0;kcpvLP=1;kcpvIgn=Date.now()+1500;try{if(navigator.vibrate)navigator.vibrate(12)}catch(x){}kcpvOpen(row.dataset.v)},380);
+},true);
+document.addEventListener('pointermove',function(e){if(kcpvT&&(Math.abs(e.clientX-kcpvX)>10||Math.abs(e.clientY-kcpvY)>10))kcpvCancel()},true);
+['pointerup','pointercancel'].forEach(function(n){document.addEventListener(n,function(){kcpvCancel();if(kcpvLP){kcpvLP=0;kcpvIgn=Date.now()+350}},true)});
+document.addEventListener('contextmenu',function(e){if(e.target.closest&&e.target.closest('.kc-topic .kc-ph'))e.preventDefault()},true);
+/* capture phase: while the preview is open any tap only closes it (the tap that ends the long press is ignored) */
+document.addEventListener('click',function(e){
+  if(document.getElementById('kcpv')){
+    e.preventDefault();e.stopPropagation();
+    var mb=e.target.closest&&e.target.closest('.kcpv-r');if(mb){kcpvDo(mb.dataset.pv,mb.closest('.kcpv-m').dataset.sec);return}
+    if(Date.now()>kcpvIgn)kcpvClose();
+    return;
+  }
+  if(Date.now()<kcpvIgn&&e.target.closest&&e.target.closest('.kc-topic')){e.preventDefault();e.stopPropagation()}
+},true);
+document.addEventListener('keydown',function(e){if(e.key==='Escape')kcpvClose()});
 /* ---- three-dot menu of the advisor chat (Telegram style): list -> Mute list -> durations / customize.
    The card grows softly from the button, panels cross-fade inside it and its height glides to each panel's height. ---- */
 var KCM_SVG=function(d,c){return '<svg viewBox="0 0 24 24" class="ic'+(c?' '+c:'')+'" aria-hidden="true">'+d+'</svg>'};
@@ -10151,6 +12242,21 @@ async function inkInsertFromLib(id,off){
 }
 /* ---------- toolbar actions, panels ---------- */
 var PV_TOOLS=['hand','pen','hl','er','lasso','text'];
+/* quick switch for the two erasers: two round buttons float at the left while the eraser tool is active
+   (checkerboard = area eraser: only the part you drag over disappears, as if painted with the page colour; eraser = whole-stroke eraser) */
+function pvEqs(on){
+  var el=pdfv.el;if(!el)return;
+  var g=el.querySelector('.ink-eqs');
+  if(!g){
+    g=document.createElement('div');g.className='ink-eqs';g.setAttribute('role','group');g.setAttribute('aria-label',__('نوع پاک‌کن','Eraser type'));
+    g.innerHTML='<button type="button" class="ink-eq" data-pv="em" data-v="area" aria-label="'+__('پاک‌کن ناحیه (فقط جایی که می‌کشی)','Area eraser (only where you drag)')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="currentColor" stroke="none"><rect x="3" y="3" width="4" height="4"/><rect x="11" y="3" width="4" height="4"/><rect x="19" y="3" width="2" height="4"/><rect x="7" y="7" width="4" height="4"/><rect x="15" y="7" width="4" height="4"/><rect x="3" y="11" width="4" height="4"/><rect x="11" y="11" width="4" height="4"/><rect x="19" y="11" width="2" height="4"/><rect x="7" y="15" width="4" height="4"/><rect x="15" y="15" width="4" height="4"/><rect x="3" y="19" width="4" height="2"/><rect x="11" y="19" width="4" height="2"/><rect x="19" y="19" width="2" height="2"/></g></svg></button>'+
+      '<button type="button" class="ink-eq" data-pv="em" data-v="stroke" aria-label="'+__('پاک‌کن خط (کل خط)','Stroke eraser (whole stroke)')+'">'+icon('eraser')+'</button>';
+    el.appendChild(g);
+  }
+  if(on!==undefined)g.classList.toggle('on',!!on);
+  [].forEach.call(g.querySelectorAll('.ink-eq'),function(b){b.setAttribute('aria-pressed',String(b.dataset.v===pdfv.em))});
+  g.style.setProperty('--ei',pdfv.em==='area'?0:1);
+}
 function pvTool(t){
   if(PV_TOOLS.indexOf(t)<0||!pdfv.el)return;
   if(t!=='lasso')inkSelClear();
@@ -10158,6 +12264,7 @@ function pvTool(t){
   if(t!=='hand')pdfv.last=t;
   pdfv.tool=t;
   pdfv.el.classList.toggle('dr',t!=='hand');
+  pvEqs(t==='er');
   pdfv.el.querySelectorAll('[data-pv^="t-"]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.pv==='t-'+t)});
   pvWPaint();
   if(pdfv.pop==='tools')pvPopRender();
@@ -10186,7 +12293,7 @@ function pvPopHTML(n){
     return pvHead(__("هایلایت هوشمند آریو","Ario smart highlight"))+'<button type="button" class="ink-row ink-tg2" role="switch" data-pv="arsw" aria-pressed="'+shOn()+'"><span>'+__("هایلایت هوشمند","Smart highlight")+'<small class="ink-hint">'+__("با یک بار زدن روی آریو، نکته‌ها و جمله‌های مهم این صفحه با رنگ‌های مختلف هایلایت می‌شوند و مواردی که معمولاً در سؤال‌های امتحانی می‌آیند زیرشان خط هم کشیده می‌شود.","Tap Ario once and the key words and sentences on this page are highlighted in different colors; the ones that usually turn up in exam questions are underlined too.")+'</small></span><i class="ink-sw2"></i></button>'+exHTML();
   }
   if(n==='tabs')return pvtPickHTML();
-  if(n==='voice')return vnHTML();
+  if(n==='voice')return pvvHTML();
   if(n==='hls')return hlHTML();
   if(n==='night')return pvnHTML();
   if(n==='menu'){
@@ -10355,7 +12462,7 @@ function pvAct(a,el){
   else if(a==='ocrpage')ocrPage();
   else if(a==='ocrall')ocrAllNote();
   else if(a==='pk'&&el){var kk0=el.dataset.k;if(inkPkOk(kk0)){pdfv.pk=kk0;try{localStorage.setItem('ario_pdfpk',kk0)}catch(e){}if(pdfv.tool!=='pen')pvTool('pen');pvPopRender()}}
-  else if(a==='em'&&el){pdfv.em=el.dataset.v==='area'?'area':'stroke';try{localStorage.setItem('ario_pdfem',pdfv.em)}catch(e){}pvPopRender()}
+  else if(a==='em'&&el){pdfv.em=el.dataset.v==='area'?'area':'stroke';try{localStorage.setItem('ario_pdfem',pdfv.em)}catch(e){}pvEqs();pvPopRender()}
   else if(a==='eh'){pdfv.eh=pdfv.eh?0:1;try{localStorage.setItem('ario_pdfeh',String(pdfv.eh))}catch(e){}pvPopRender()}
   else if(a==='erall'){pvPopSet('');anEraseAll()}
   else if(a==='popx')pvPopSet('');
@@ -10379,7 +12486,7 @@ function pvAct(a,el){
   else if(a==='undo')anUndo();
   else if(a==='redo')anRedo();
   else if(a==='menu')pvPopSet('menu');
-  else if(a.indexOf('pop-')===0){pdfv.pop='';pdfv.libN=0;pvPopSet(a.slice(4));if(a==='pop-voice')vnLoad()}
+  else if(a.indexOf('pop-')===0){pdfv.pop='';pdfv.libN=0;pvPopSet(a.slice(4));if(a==='pop-voice')pvvLoad()}
   else if(a==='tpl'){
     var id=el.dataset.t;
     if(pdfv.kind==='pdf'){pvTplSet(id);pvPopRender();return}
@@ -10467,9 +12574,9 @@ function pvAct(a,el){
   else if(a==='tabx'&&el)pvtClose(+el.dataset.i);
   else if(a==='tabadd')pvPopSet('tabs');
   else if(a==='tabopen'&&el){if(PVT.l.length<8){PVT.l.push({k:el.dataset.k,id:el.dataset.id});pvPopSet('');pvtOpen(PVT.l[PVT.l.length-1])}}
-  else if(a==='vnrec'){if(VN.rec)vnStop();else vnStart()}
-  else if(a==='vnplay'&&el)vnPlay(el.dataset.g);
-  else if(a==='vndel'&&el)vnDel(el.dataset.g);
+  else if(a==='vnrec'){if(PVV.rec)pvvStop();else pvvStart()}
+  else if(a==='vnplay'&&el)pvvPlay(el.dataset.g);
+  else if(a==='vndel'&&el)pvvDel(el.dataset.g);
   else if(a==='vnpg'&&el){pvPopSet('');pvGoTo(+el.dataset.p)}
   else if(a==='fcpage')fcFromNote(false);
   else if(a==='fcall')fcFromNote(true);
@@ -10514,7 +12621,7 @@ function pvClose(){
 }
 function pvDoClose(){
   if(!pdfv.on)return;
-  vnClose();
+  pvvClose();
   FD.on=0;FD.hits=[];FD.cur=-1;PTX.stop=1;pdfv.ts=null;tsCancelP();
   pdfv.rl=null;
   clearTimeout(pdfv.svT);
@@ -12580,82 +14687,82 @@ function xpOpen(){
 }
 
 /* ---------- voice notes: record sound next to a note or a book (kept in the file store as 'nv_<id>') ---------- */
-var VN={rec:null,st:null,ch:[],t0:0,tm:0,pg:1,id:'',pl:null,plId:'',urls:{},items:[],cid:''};
-function vnId(){return pdfv.rec&&pdfv.rec.id||''}
-async function vnLoad(){
-  var id=vnId();if(!id)return;
-  if(VN.cid!==id){vnFree();VN.items=[];VN.cid=id}
-  try{var r=await fdbGet('nv_'+id);if(vnId()===id&&!VN.rec)VN.items=(r&&Array.isArray(r.items))?r.items.filter(function(x){return x&&x.b}):[]}catch(e){}
+var PVV={rec:null,st:null,ch:[],t0:0,tm:0,pg:1,id:'',pl:null,plId:'',urls:{},items:[],cid:''};
+function pvvId(){return pdfv.rec&&pdfv.rec.id||''}
+async function pvvLoad(){
+  var id=pvvId();if(!id)return;
+  if(PVV.cid!==id){pvvFree();PVV.items=[];PVV.cid=id}
+  try{var r=await fdbGet('nv_'+id);if(pvvId()===id&&!PVV.rec)PVV.items=(r&&Array.isArray(r.items))?r.items.filter(function(x){return x&&x.b}):[]}catch(e){}
   if(pdfv.pop==='voice')pvPopRender();
 }
-function vnSave(id){fdbPut('nv_'+id,{items:VN.items}).catch(function(){toast(__("ذخیرهٔ صدا ممکن نشد","Could not save the recording"),null,null,'warn')})}
-function vnFree(){
-  if(VN.pl){try{VN.pl.pause()}catch(e){}VN.pl=null;VN.plId=''}
-  Object.keys(VN.urls).forEach(function(k){try{URL.revokeObjectURL(VN.urls[k])}catch(e){}});VN.urls={};
+function pvvSave(id){fdbPut('nv_'+id,{items:PVV.items}).catch(function(){toast(__("ذخیرهٔ صدا ممکن نشد","Could not save the recording"),null,null,'warn')})}
+function pvvFree(){
+  if(PVV.pl){try{PVV.pl.pause()}catch(e){}PVV.pl=null;PVV.plId=''}
+  Object.keys(PVV.urls).forEach(function(k){try{URL.revokeObjectURL(PVV.urls[k])}catch(e){}});PVV.urls={};
 }
-function vnClock(s){s=Math.max(0,Math.round(s));return fa(Math.floor(s/60))+':'+fa(String(s%60).padStart(2,'0'))}
-function vnHTML(){
-  var rec=!!VN.rec,h=pvHead(__("یادداشت صوتی","Voice notes"),1);
-  h+='<button type="button" class="vn-rec'+(rec?' on':'')+'" data-pv="vnrec" aria-pressed="'+rec+'"><i></i><span>'+(rec?__("توقف و ذخیره","Stop and save"):__("شروع ضبط","Start recording"))+'</span><b id="vnT">'+(rec?vnClock((Date.now()-VN.t0)/1000):'')+'</b></button>';
-  if(!VN.items.length)return h+'<p class="ink-note">'+__("هنوز صدایی ضبط نشده. ضبط به صفحه‌ای که الان روی آن هستی وصل می‌شود.","Nothing recorded yet. A recording is tied to the page you are on.")+'</p>';
+function pvvClock(s){s=Math.max(0,Math.round(s));return fa(Math.floor(s/60))+':'+fa(String(s%60).padStart(2,'0'))}
+function pvvHTML(){
+  var rec=!!PVV.rec,h=pvHead(__("یادداشت صوتی","Voice notes"),1);
+  h+='<button type="button" class="vn-rec'+(rec?' on':'')+'" data-pv="vnrec" aria-pressed="'+rec+'"><i></i><span>'+(rec?__("توقف و ذخیره","Stop and save"):__("شروع ضبط","Start recording"))+'</span><b id="vnT">'+(rec?pvvClock((Date.now()-PVV.t0)/1000):'')+'</b></button>';
+  if(!PVV.items.length)return h+'<p class="ink-note">'+__("هنوز صدایی ضبط نشده. ضبط به صفحه‌ای که الان روی آن هستی وصل می‌شود.","Nothing recorded yet. A recording is tied to the page you are on.")+'</p>';
   h+='<div class="hl-ls">';
-  VN.items.forEach(function(x){
-    var on=VN.plId===x.id;
-    h+='<div class="hl-it"><button type="button" class="ink-ib" data-pv="vnplay" data-g="'+x.id+'" aria-pressed="'+on+'" aria-label="'+__("پخش","Play")+'">'+icon(on?'pause':'play')+'</button><button type="button" class="hl-go" data-pv="vnpg" data-p="'+x.pg+'"><span><b>'+__("صفحهٔ","Page")+' '+fa(x.pg)+' · '+vnClock(x.d)+'</b>'+esc(new Date(x.t).toLocaleString(EN?'en-US':'fa-IR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}))+'</span></button><button type="button" class="ink-ib" data-pv="vndel" data-g="'+x.id+'" aria-label="'+__("حذف","Delete")+'">'+icon('trash')+'</button></div>';
+  PVV.items.forEach(function(x){
+    var on=PVV.plId===x.id;
+    h+='<div class="hl-it"><button type="button" class="ink-ib" data-pv="vnplay" data-g="'+x.id+'" aria-pressed="'+on+'" aria-label="'+__("پخش","Play")+'">'+icon(on?'pause':'play')+'</button><button type="button" class="hl-go" data-pv="vnpg" data-p="'+x.pg+'"><span><b>'+__("صفحهٔ","Page")+' '+fa(x.pg)+' · '+pvvClock(x.d)+'</b>'+esc(new Date(x.t).toLocaleString(EN?'en-US':'fa-IR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}))+'</span></button><button type="button" class="ink-ib" data-pv="vndel" data-g="'+x.id+'" aria-label="'+__("حذف","Delete")+'">'+icon('trash')+'</button></div>';
   });
   return h+'</div>';
 }
-async function vnStart(){
-  if(VN.rec)return;
+async function pvvStart(){
+  if(PVV.rec)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){toast(__("ضبط صدا روی این دستگاه ممکن نیست","Recording is not available on this device"),null,null,'warn');return}
   var st;
   try{st=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){toast(__("اجازهٔ میکروفون داده نشد؛ از تنظیمات گوشی برای Ario روشنش کن","Microphone permission was not granted; enable it for Ario in your phone settings"),null,null,'warn');return}
-  if(VN.pl){try{VN.pl.pause()}catch(e){}VN.pl=null;VN.plId=''}
+  if(PVV.pl){try{PVV.pl.pause()}catch(e){}PVV.pl=null;PVV.plId=''}
   var mt=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].filter(function(m){try{return MediaRecorder.isTypeSupported(m)}catch(e){return false}})[0],r;
   try{r=mt?new MediaRecorder(st,{mimeType:mt}):new MediaRecorder(st)}catch(e){st.getTracks().forEach(function(t){t.stop()});toast(__("ضبط صدا روی این دستگاه ممکن نیست","Recording is not available on this device"),null,null,'warn');return}
-  var id=vnId(),pg=pvCur(),t0=Date.now(),ch=[];
+  var id=pvvId(),pg=pvCur(),t0=Date.now(),ch=[];
   r.ondataavailable=function(e){if(e.data&&e.data.size)ch.push(e.data)};
   r.onstop=function(){
     st.getTracks().forEach(function(t){t.stop()});
-    clearInterval(VN.tm);VN.rec=null;VN.st=null;
+    clearInterval(PVV.tm);PVV.rec=null;PVV.st=null;
     var d=(Date.now()-t0)/1000;
     if(d>=1&&ch.length&&id){
       var it={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),t:t0,d:Math.round(d),pg:pg,b:new Blob(ch,{type:r.mimeType||mt||'audio/webm'})};
-      if(VN.cid!==id){VN.items=[];VN.cid=id}
-      VN.items.unshift(it);VN.items=VN.items.slice(0,40);vnSave(id);
+      if(PVV.cid!==id){PVV.items=[];PVV.cid=id}
+      PVV.items.unshift(it);PVV.items=PVV.items.slice(0,40);pvvSave(id);
       toast(__("صدا ذخیره شد","Recording saved"),null,null,'ok',true);
     }
     if(pdfv.on&&pdfv.pop==='voice')pvPopRender();
   };
-  VN.rec=r;VN.st=st;VN.t0=t0;VN.pg=pg;VN.cid=id||VN.cid;
+  PVV.rec=r;PVV.st=st;PVV.t0=t0;PVV.pg=pg;PVV.cid=id||PVV.cid;
   r.start(1000);
-  VN.tm=setInterval(function(){
-    var s=(Date.now()-VN.t0)/1000,e=pdfv.el&&pdfv.el.querySelector('#vnT');if(e)e.textContent=vnClock(s);
-    if(s>=600)vnStop();
+  PVV.tm=setInterval(function(){
+    var s=(Date.now()-PVV.t0)/1000,e=pdfv.el&&pdfv.el.querySelector('#vnT');if(e)e.textContent=pvvClock(s);
+    if(s>=600)pvvStop();
   },500);
   if(pdfv.pop==='voice')pvPopRender();
 }
-function vnStop(){if(VN.rec){try{VN.rec.stop()}catch(e){}}}
-function vnPlay(gid){
-  if(VN.rec)return;
-  var was=VN.plId===gid;
-  if(VN.pl){try{VN.pl.pause()}catch(e){}VN.pl=null;VN.plId=''}
+function pvvStop(){if(PVV.rec){try{PVV.rec.stop()}catch(e){}}}
+function pvvPlay(gid){
+  if(PVV.rec)return;
+  var was=PVV.plId===gid;
+  if(PVV.pl){try{PVV.pl.pause()}catch(e){}PVV.pl=null;PVV.plId=''}
   if(!was){
-    var it=VN.items.find(function(x){return x.id===gid});if(!it)return;
-    var u=VN.urls[gid]||(VN.urls[gid]=URL.createObjectURL(it.b)),a=new Audio(u);
-    a.onended=function(){if(VN.pl===a){VN.pl=null;VN.plId='';if(pdfv.pop==='voice')pvPopRender()}};
-    a.onerror=function(){if(VN.pl===a){VN.pl=null;VN.plId='';if(pdfv.pop==='voice')pvPopRender();toast(__("پخش نشد","Could not play"),null,null,'warn')}};
-    VN.pl=a;VN.plId=gid;a.play().catch(function(){});
+    var it=PVV.items.find(function(x){return x.id===gid});if(!it)return;
+    var u=PVV.urls[gid]||(PVV.urls[gid]=URL.createObjectURL(it.b)),a=new Audio(u);
+    a.onended=function(){if(PVV.pl===a){PVV.pl=null;PVV.plId='';if(pdfv.pop==='voice')pvPopRender()}};
+    a.onerror=function(){if(PVV.pl===a){PVV.pl=null;PVV.plId='';if(pdfv.pop==='voice')pvPopRender();toast(__("پخش نشد","Could not play"),null,null,'warn')}};
+    PVV.pl=a;PVV.plId=gid;a.play().catch(function(){});
   }
   pvPopRender();
 }
-function vnDel(gid){
-  var id=VN.cid,k=VN.items.findIndex(function(x){return x.id===gid});if(k<0)return;
-  if(VN.plId===gid){try{VN.pl.pause()}catch(e){}VN.pl=null;VN.plId=''}
-  var it=VN.items.splice(k,1)[0];vnSave(id);pvPopRender();
-  toast(__("صدا حذف شد","Recording deleted"),__("بازگردانی","Undo"),function(){if(VN.cid===id&&VN.items.indexOf(it)<0){VN.items.splice(Math.min(k,VN.items.length),0,it);vnSave(id);if(pdfv.on&&pdfv.pop==='voice')pvPopRender()}},'del',true);
+function pvvDel(gid){
+  var id=PVV.cid,k=PVV.items.findIndex(function(x){return x.id===gid});if(k<0)return;
+  if(PVV.plId===gid){try{PVV.pl.pause()}catch(e){}PVV.pl=null;PVV.plId=''}
+  var it=PVV.items.splice(k,1)[0];pvvSave(id);pvPopRender();
+  toast(__("صدا حذف شد","Recording deleted"),__("بازگردانی","Undo"),function(){if(PVV.cid===id&&PVV.items.indexOf(it)<0){PVV.items.splice(Math.min(k,PVV.items.length),0,it);pvvSave(id);if(pdfv.on&&pdfv.pop==='voice')pvPopRender()}},'del',true);
 }
-function vnClose(){vnStop();vnFree()}
+function pvvClose(){pvvStop();pvvFree()}
 
 /* ---------- flashcards from notes: Ario turns the important lines of a note into questions; spaced review ----------
    card = {id, q, a, src: note id, pg: page, ad: added, due: time to review, iv: days, ef: ease, rp: right answers in a row}   (kept in profile.tbk.fc) */
@@ -12903,7 +15010,7 @@ function aoStopSpeak(){AO.sp=0;try{if(AO.el)AO.el.classList.remove('speak')}catc
 function aoBeat(){
   try{
     if(!AO.g||!AO.el||!AO.el.classList.contains('speak'))return;
-    var n=Date.now();if(n-(AO.beatT||0)<230)return;AO.beatT=n;
+    var n=Date.now();if(n-(AO.beatT||0)<230)return;AO.beatT=n;aoNodChar();
     if(AO.g.querySelectorAll('.ao-wp').length>3)return;
     var w=document.createElement('i');w.className='ao-w ao-wp';
     w.addEventListener('animationend',function(){w.remove()});
@@ -12925,7 +15032,7 @@ async function aoSpeakRaw(t,onStart){
   if(TTSN){
     try{
       aoTtsHook();AO.ttsOnStart=onStart||null;
-      var r=await Promise.race([TTSN.speak({text:t,lang:EN?'en-US':ARB?'ar-SA':'fa-IR',rate:1}),aoSleep(20000).then(function(){return {ok:false}})]);
+      var r=await Promise.race([TTSN.speak({text:t,lang:EN?'en-US':ARB?'ar-SA':'fa-IR',rate:aoRate()}),aoSleep(20000).then(function(){return {ok:false}})]);
       AO.ttsOnStart=null;
       if(r&&r.ok)return;
       if(r&&r.reason==='lang'&&!AO.ttsWarned){AO.ttsWarned=true;aoNote(aoT('صدای فارسی روی گوشی نصب نیست. تنظیمات گوشی > متن به گفتار (Text-to-speech) را باز کن، موتور Google را انتخاب کن و صدای فارسی را دانلود کن.','No voice for this language is installed. Open phone Settings > Text-to-speech, pick the Google engine and download the voice.'))}
@@ -12935,7 +15042,7 @@ async function aoSpeakRaw(t,onStart){
   try{
     if(!window.speechSynthesis||!window.SpeechSynthesisUtterance)return;
     speechSynthesis.cancel();
-    await new Promise(function(r){var u=new SpeechSynthesisUtterance(t);u.lang=EN?'en-US':ARB?'ar-SA':'fa-IR';u.onstart=function(){if(onStart)onStart()};u.onboundary=function(){aoBeat()};u.onend=u.onerror=function(){r()};setTimeout(r,6000);speechSynthesis.speak(u)});
+    await new Promise(function(r){var u=new SpeechSynthesisUtterance(t);u.lang=EN?'en-US':ARB?'ar-SA':'fa-IR';u.rate=aoRate();u.onstart=function(){if(onStart)onStart()};u.onboundary=function(){aoBeat()};u.onend=u.onerror=function(){r()};setTimeout(r,6000);speechSynthesis.speak(u)});
   }catch(e){}
 }
 function aoWakeGet(){try{return localStorage.getItem('ario.wake')!=='0'}catch(e){return true}}
@@ -12961,8 +15068,66 @@ function aoUserSays(t){
   var m=document.createElement('div');m.className='ao-m u';m.innerHTML='<p>'+esc(t).replace(/\n/g,'<br>')+'</p>';
   AO.chat.appendChild(m);aoTrim();aoDown();
 }
+/* ---------- each character talks in its own way ----------
+   ghost : the normal Ario
+   k1 Kafshak (white, laughing)   : cheerful joker, light jokes, a little faster
+   k2 Captain (red, basketball)   : energetic coach, pushes the user to action, faster
+   k3 Shadow  (black, cap)        : cool and calm, short and quiet, no shouting
+   k4 Sarbaz  (orange camo)       : disciplined soldier, reports like a mission
+   k5 Hakim   (cream, serious)    : wise and slow, soft closing lines, a slower voice
+   calm:true = no exclamation marks / emojis (the text is softened). Everything Ario says goes through aoSay,
+   so the style is added in one place (text on screen and the spoken text). */
+var ARC_TALK={
+  k1:{rate:1.05,
+    pre:{fa:['هههه،','خب خب،','اوه اوه،','بخند دیگه،'],en:['Haha,','Okay okay,','Oh oh,','Smile,']},
+    adr:{fa:['رفیق!','خوش‌خنده!','قهرمان!'],en:['buddy!','smiley!','champ!']},
+    post:{fa:['لبخند یادت نره 😄','زندگی با خنده قشنگ‌تره 😂','یه خنده هم بزن، خرجی نداره 😁','خوبه شوخ‌طبعی‌م مالیات نداره 😄'],
+          en:['Don’t forget to smile 😄','Life is nicer with a laugh 😂','Smile, it’s free 😁']}},
+  k2:{rate:1.1,
+    pre:{fa:['بزن بریم،','آماده‌ای؟','قهرمان،','تیم ما بردنیه،'],en:['Let’s go,','Ready?','Champ,','Our team wins,']},
+    adr:{fa:['کاپیتان!','قهرمان!','بزن بریم!'],en:['captain!','champ!','let’s go!']},
+    post:{fa:['توپ توی زمین توئه 🏀','با هم می‌بریم، تیم ما بردنیه 💪','تا آخرش بازی می‌کنیم 🔥','حالا نوبت توئه، بزن!'],
+          en:['The ball is in your court 🏀','We win together 💪','We play until the end 🔥']}},
+  k3:{rate:.92,calm:true,
+    post:{fa:['آروم و بی‌سروصدا انجامش می‌دیم.','بدون عجله، من هستم.','کار خودش رو بی‌صدا می‌کنه.','همین‌طور خونسرد ادامه بده.'],
+          en:['Quietly, we get it done.','No rush, I’m here.','Stay cool and keep going.']}},
+  k4:{rate:1.0,
+    pre:{fa:['گزارش:','دستور رسید،','مأموریت:','فرمانده،'],en:['Report:','Order received,','Mission:','Commander,']},
+    adr:{fa:['فرمانده!','مأموریت انجام شد!','آماده‌باش!'],en:['commander!','mission complete!','standing by!']},
+    post:{fa:['مأموریت در حال انجامه.','منتظر دستور بعدی‌ام.','همه‌چیز تحت کنترله 🫡','آماده‌باش هستم.'],
+          en:['The mission is underway.','Awaiting your next order.','Everything is under control 🫡']}},
+  k5:{rate:.84,calm:true,
+    post:{fa:['عجله‌ای نیست، من کنارتم 🌿','با آرامش و قدم‌به‌قدم پیش می‌ریم.','یک نفس عمیق بکش؛ همه‌چیز درست می‌شود.','آهسته و مطمئن، بدون هیچ فشاری.','خیالت راحت، با هم درستش می‌کنیم.'],
+          en:['No rush, I’m right here 🌿','Nice and slow, one step at a time.','Take a deep breath; it will all be fine.','Calmly and without any pressure.']}}
+};
+function arcTalk(){var c=ARC[arcCur()];return ARC_TALK[c&&c.id]||null}
+function aoVoice(txt,opt){
+  var P=arcTalk();if(!P||ARB||!txt)return {t:txt,o:opt};
+  opt=opt||{};if(opt.raw)return {t:txt,o:opt};
+  var L=EN?'en':'fa',pick=function(a){return a&&a.length?a[Math.floor(Math.random()*a.length)]:''};
+  var pre='',post='',adr='',calm=!!P.calm;
+  var greet=EN?/^(hi|hello|hey|good (morning|evening|night))\b/i.test(txt):/^(سلام|صبح|عصر|شب|جانم|درود)/.test(txt);
+  if(!calm){
+    if(greet)adr=pick(P.adr&&P.adr[L]);else if(Math.random()<.8)pre=pick(P.pre&&P.pre[L]);
+    if(Math.random()<.55)post=pick(P.post&&P.post[L]);
+  }else if(txt.length<220&&!/[؟?]\s*$/.test(txt)&&Math.random()<.55)post=pick(P.post&&P.post[L]);
+  function dress(x){
+    if(!x)return x;x=String(x);
+    if(calm){x=x.replace(/!+/g,'.').replace(/[😂😏🔥🎉👏🌟🚀💪]/gu,'')}
+    if(pre){var t=x;if(EN&&/^[A-Z][a-z]/.test(t)&&!/^I[ ’']/.test(t))t=t.charAt(0).toLowerCase()+t.slice(1);x=pre+' '+t}
+    if(adr)x=x.replace(/([.!؟?])?\s*$/,function(m,p){return (p&&p!=='.'?p:'')+' '+adr});
+    if(post)x+=(/\n/.test(x)?'\n':' ')+post;
+    return x;
+  }
+  var o={};for(var k in opt)o[k]=opt[k];
+  if(o.speakText)o.speakText=dress(o.speakText);
+  if(o.capText)o.capText=dress(o.capText);
+  return {t:dress(txt),o:o};
+}
+function aoRate(){var P=arcTalk();return P?P.rate:1}
 /* Ario answers: three dots glide in, wait a little, fade away and the message blooms in the same spot. Calls are queued so the order is never mixed. */
 function aoSay(txt,speak,opt){
+  var vq=aoVoice(txt,opt);txt=vq.t;opt=vq.o;
   var p=AO.chain.then(function(){return aoSayRaw(txt,speak,opt)});
   AO.chain=p.catch(function(){});return p;
 }
@@ -13127,6 +15292,176 @@ function aoHistBind(d){
     if(op)aoHistView(op.dataset.id);
   });
 }
+
+/* ---------- Ario look: hold the ghost for 1 second -> everything else blurs, swipe left/right on a looping 360° ring of characters.
+   The one in front becomes the assistant (floating button + voice page) and the wave takes the colour of the character. ---------- */
+var ARC=[
+  {id:'ghost',img:'img/ario-ghost.webp',th:'img/ario-ghost.webp',n:['روح','Ghost'],c:[150,100,255],l:[200,170,255]},
+  {id:'k1',img:'img/ario-k1.webp',th:'img/ario-k1-t.webp',n:['کفشک','Kafshak'],c:[190,195,215],l:[240,242,255]},
+  {id:'k2',img:'img/ario-k2.webp',th:'img/ario-k2-t.webp',n:['کاپیتان','Captain'],c:[235,50,60],l:[255,135,140]},
+  {id:'k3',img:'img/ario-k3.webp',th:'img/ario-k3-t.webp',n:['سایه','Shadow'],c:[235,105,160],l:[255,170,205]},
+  {id:'k4',img:'img/ario-k4.webp',th:'img/ario-k4-t.webp',n:['سرباز','Sarbaz'],c:[255,125,30],l:[255,190,110]},
+  {id:'k5',img:'img/ario-k5.webp',th:'img/ario-k5-t.webp',n:['حکیم','Hakim'],c:[70,110,225],l:[150,180,255]}
+];
+var ARC_HOLD=1000,ARC_STEP=110,ARC_R=150,ARC_SIZE=156;
+function arcCur(){var id='ghost';try{id=localStorage.getItem('ario.char')||'ghost'}catch(e){}for(var i=0;i<ARC.length;i++)if(ARC[i].id===id)return i;return 0}
+/* puts character i on the floating button and the voice page, and gives both its wave colour */
+function arcApply(i,save){
+  var c=ARC[i]||ARC[0],gh=ARC.indexOf(c)===0;
+  if(save){try{localStorage.setItem('ario.char',c.id)}catch(e){}}
+  var f=document.getElementById('aoFab');
+  [AO.el,f].forEach(function(e){if(!e)return;e.classList.toggle('chx',!gh);e.dataset.ch=c.id;e.style.setProperty('--ac',c.c.join(','));e.style.setProperty('--al',c.l.join(','))});
+  var fi=f&&f.querySelector('img');if(fi&&fi.getAttribute('src')!==c.th)fi.src=c.th;
+  var gi=AO.g&&AO.g.querySelector('img');if(gi&&gi.getAttribute('src')!==c.img)gi.src=c.img;
+}
+function arcLoopD(i,p){var n=ARC.length,d=i-p;return ((d+n/2)%n+n)%n-n/2}
+function arcDraw(){
+  var K=AO.pk;if(!K)return;var n=ARC.length;
+  for(var i=0;i<n;i++){
+    var a=arcLoopD(i,K.p)*Math.PI*2/n,dp=(Math.cos(a)+1)/2;
+    var e=K.items[i];
+    e.style.transform='translate(-50%,-50%) translate3d('+(Math.sin(a)*ARC_R).toFixed(1)+'px,'+(-(1-dp)*18).toFixed(1)+'px,0) scale('+(.5+.5*dp).toFixed(3)+')';
+    e.style.opacity=(.3+.7*dp).toFixed(3);e.style.zIndex=String(Math.round(dp*100));
+  }
+  var cur=((Math.round(K.p)%n)+n)%n;
+  if(cur!==K.cur){
+    K.cur=cur;var c=ARC[cur];
+    K.root.dataset.ch=c.id;K.root.style.setProperty('--ac',c.c.join(','));K.root.style.setProperty('--al',c.l.join(','));
+    K.nm.textContent=aoT(c.n[0],c.n[1]);
+    for(var j=0;j<n;j++)K.dots[j].classList.toggle('on',j===cur);
+    try{if(navigator.vibrate)navigator.vibrate(8)}catch(e){}
+  }
+}
+function arcGo(target){
+  var K=AO.pk;if(!K)return;cancelAnimationFrame(K.raf);
+  var from=K.p,t0=performance.now(),dur=380;
+  (function step(t){
+    if(!AO.pk)return;var k=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-k,3);
+    K.p=from+(target-from)*e;arcDraw();
+    if(k<1)K.raf=requestAnimationFrame(step);
+  })(t0);
+}
+
+/* a small nod with every spoken word while a character is the assistant */
+function aoNodChar(){
+  try{
+    if(!AO.el||!AO.el.classList.contains('chx')||!AO.el.classList.contains('speak'))return;
+    var n=Date.now();if(n-(AO.nodT||0)<300)return;AO.nodT=n;
+    var gw=AO.el.querySelector('.ao-gw');if(!gw||!gw.animate)return;
+    gw.animate([{transform:'translateY(0) scale(1)'},{transform:'translateY(-5px) scale(1.025)',offset:.4},{transform:'translateY(0) scale(1)'}],{duration:300,easing:'ease-out'});
+  }catch(e){}
+}
+function aoPickStart(){
+  if(!AO.open||AO.pk||AO.pkAnim||!AO.el)return;
+  clearTimeout(AO.idleT);
+  var n=ARC.length,root=document.createElement('div');root.className='arc';
+  var it='';for(var i=0;i<n;i++)it+='<div class="arc-i" style="--ac:'+ARC[i].c.join(',')+'"><img src="'+ARC[i].img+'" alt="" draggable="false"></div>';
+  root.innerHTML='<i class="arc-w"></i><i class="arc-w"></i><div class="arc-r">'+it+'</div><div class="arc-nm"></div><div class="arc-dots">'+ARC.map(function(){return '<i></i>'}).join('')+'</div><div class="arc-h">'+aoT('بکش تا کاراکتر عوض شود · برای تأیید یک‌بار بزن','Swipe to change · tap to confirm')+'</div>';
+  var gw=AO.el.querySelector('.ao-gw');gw.appendChild(root);
+  var pv=document.createElement('div');pv.className='ao-pk';AO.el.appendChild(pv);
+  var cur=arcCur();
+  AO.pk={root:root,pv:pv,items:[].slice.call(root.querySelectorAll('.arc-i')),nm:root.querySelector('.arc-nm'),dots:[].slice.call(root.querySelectorAll('.arc-dots i')),p:cur,cur:-1,raf:0,drag:null};
+  AO.pkHold=1;AO.pkNoTap=1;
+  arcDraw();
+  requestAnimationFrame(function(){requestAnimationFrame(function(){if(AO.pk){AO.el.classList.add('pick');root.classList.add('on')}})});
+}
+/* confirming a character: the chosen one glides from the ring onto the ghost's place while the other characters, the names and the blur
+   fade away, then the ghost is swapped for it without any jump (same picture, same size, same place). Without Web Animations (or with
+   "reduce motion", or when the page is closing) it falls back to a short fade. */
+var ARC_GLIDE=480;
+function aoPickEnd(save,instant){
+  var K=AO.pk;if(!K)return;cancelAnimationFrame(K.raf);
+  var n=ARC.length,idx=((Math.round(K.p)%n)+n)%n;
+  AO.pk=null;AO.pkHold=0;AO.pkT=Date.now();
+  if(save!==false)arcApply(idx,true);
+  var sel=K.items[idx],gi=AO.g&&AO.g.querySelector('img'),reduce=false;
+  try{reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  if(instant||reduce||save===false||!sel||!gi||!sel.animate){
+    AO.el.classList.remove('pick');K.root.classList.remove('on');
+    setTimeout(function(){try{K.root.remove();K.pv.remove()}catch(e){}},320);
+    if(AO.open&&!AO.busy)aoIdle(AO.sid,60000);
+    return;
+  }
+  AO.pkAnim=1;
+  var a=arcLoopD(idx,K.p)*Math.PI*2/n,dp=(Math.cos(a)+1)/2,X=Math.sin(a)*ARC_R,Y=-(1-dp)*18;
+  var r1=sel.getBoundingClientRect(),r2=gi.getBoundingClientRect();
+  var dx=(r2.left+r2.width/2)-(r1.left+r1.width/2),dy=(r2.top+r2.height/2)-(r1.top+r1.height/2);
+  var S=r2.width>0?r2.width/ARC_SIZE:1;
+  var ease='cubic-bezier(.22,1,.36,1)';
+  function fade(el,ms,to){try{el.animate([{opacity:getComputedStyle(el).opacity},{opacity:to}],{duration:ms,easing:'ease-out',fill:'forwards'})}catch(e){}}
+  K.items.forEach(function(e,j){
+    if(j===idx)return;
+    fade(e,ARC_GLIDE*.55,0);
+  });
+  [K.nm,K.dots[0]&&K.dots[0].parentNode,K.root.querySelector('.arc-h')].forEach(function(e){if(e)fade(e,ARC_GLIDE*.4,0)});
+  [].forEach.call(K.root.querySelectorAll('.arc-w'),function(e){fade(e,ARC_GLIDE*.4,0)});
+  fade(K.pv,ARC_GLIDE+120,0);
+  sel.style.zIndex='200';
+  var op=getComputedStyle(sel).opacity;
+  var anim=sel.animate([
+    {transform:sel.style.transform,opacity:op},
+    {transform:'translate(-50%,-50%) translate3d('+(X+dx).toFixed(1)+'px,'+(Y+dy).toFixed(1)+'px,0) scale('+S.toFixed(3)+')',opacity:1}
+  ],{duration:ARC_GLIDE,easing:ease,fill:'forwards'});
+  var done=0;
+  function fin(){
+    if(done)return;done=1;
+    /* the ghost (already showing the new picture) fades in under the glided copy, then the copy is removed */
+    AO.el.classList.remove('pick');
+    fade(sel,200,0);
+    setTimeout(function(){try{K.root.remove();K.pv.remove()}catch(e){}AO.pkAnim=0;AO.pkT=Date.now()},230);
+    if(AO.open&&!AO.busy)aoIdle(AO.sid,60000);
+  }
+  anim.onfinish=fin;anim.oncancel=fin;
+  setTimeout(fin,ARC_GLIDE+150);
+}
+/* one set of listeners on the voice page: hold the ghost 1 s to start, then drag anywhere to turn the ring, tap to confirm */
+function aoPickBind(d){
+  var hold=null;
+  function stopHold(){if(hold){clearTimeout(hold.t);hold=null}d.classList.remove('arc-hold')}
+  d.addEventListener('contextmenu',function(e){if(e.target.closest&&e.target.closest('.ao-g,.arc,.ao-pk'))e.preventDefault()});
+  d.addEventListener('pointerdown',function(e){
+    AO.pkNoTap=0;AO.pkMoved=0;
+    if(AO.pk){
+      var K=AO.pk;cancelAnimationFrame(K.raf);
+      K.drag={id:e.pointerId,x:e.clientX,p0:K.p,t:performance.now(),lx:e.clientX,lt:performance.now(),v:0};return;
+    }
+    if(e.target.closest&&e.target.closest('.ao-g')&&(e.pointerType!=='mouse'||e.button===0)){
+      stopHold();
+      hold={x:e.clientX,y:e.clientY,id:e.pointerId,t:setTimeout(function(){hold=null;d.classList.remove('arc-hold');AO.pkTrig=e.pointerId;aoPickStart();try{if(navigator.vibrate)navigator.vibrate(25)}catch(x){}},ARC_HOLD)};
+      d.classList.add('arc-hold');
+    }
+  });
+  d.addEventListener('pointermove',function(e){
+    if(hold&&e.pointerId===hold.id&&Math.abs(e.clientX-hold.x)+Math.abs(e.clientY-hold.y)>14)stopHold();
+    var K=AO.pk;if(!K)return;
+    if(!K.drag&&AO.pkTrig===e.pointerId&&AO.pkHold){K.drag={id:e.pointerId,x:e.clientX,p0:K.p,t:performance.now(),lx:e.clientX,lt:performance.now(),v:0}}
+    var g=K.drag;if(!g||g.id!==e.pointerId)return;
+    var dx=e.clientX-g.x;if(Math.abs(dx)>8)AO.pkMoved=1;
+    var now=performance.now(),dt=now-g.lt;if(dt>0){g.v=.6*g.v+.4*((e.clientX-g.lx)/dt);g.lx=e.clientX;g.lt=now}
+    K.p=g.p0-dx/ARC_STEP;arcDraw();
+  });
+  function up(e){
+    stopHold();
+    var K=AO.pk;if(!K)return;
+    if(AO.pkHold&&AO.pkTrig===e.pointerId){AO.pkHold=0;AO.pkNoTap=1;if(!K.drag||!AO.pkMoved){K.drag=null;return}}
+    var g=K.drag;K.drag=null;if(!g||g.id!==e.pointerId)return;
+    if(AO.pkMoved){AO.pkNoTap=1;arcGo(Math.round(K.p-g.v*180/ARC_STEP))}
+  }
+  d.addEventListener('pointerup',up);d.addEventListener('pointercancel',up);
+  /* taps: swallow the click that follows a long press or a swipe; a clean tap while the ring is open confirms */
+  d.addEventListener('click',function(e){
+    if(AO.pk||AO.pkNoTap||Date.now()-(AO.pkT||0)<450){
+      e.stopPropagation();e.preventDefault();
+      if(AO.pk&&!AO.pkNoTap&&!AO.pkMoved)aoPickEnd(true);
+      AO.pkNoTap=0;
+    }
+  },true);
+}
+/* keeps the ghost exactly at the screen centre while the chat is hidden */
+function aoCenter(){
+  try{var d=AO.el;if(!d||d.hidden)return;var st=d.querySelector('.ao-stage'),r=st.getBoundingClientRect(),a=d.getBoundingClientRect();
+    d.style.setProperty('--gy',Math.round(a.top+a.height/2-(r.top+r.height/2))+'px')}catch(e){}
+}
 function aoBuild(){
   if(AO.el)return;
   setTimeout(aoTtsWarm,600);
@@ -13146,15 +15481,18 @@ function aoBuild(){
     '<div class="ao-bot"><form class="ao-f" autocomplete="off"><input class="ao-in" type="text" maxlength="400" placeholder="'+aoT('بنویس یا میکروفون را بزن…','Type, or tap the mic…')+'"><button type="submit" class="ao-send" aria-label="'+aoT('ارسال','Send')+'">'+icon('send')+'</button>'+vnBtnHTML('ao-mic ao-vn')+'</form></div>';
   document.body.appendChild(d);
   AO.el=d;AO.g=d.querySelector('.ao-g');AO.cap=d.querySelector('.ao-cap');AO.chat=d.querySelector('.ao-chat');AO.ch=d.querySelector('.ao-ch');AO.mic=d.querySelector('.ao-mic');AO.inp=d.querySelector('.ao-in');
+  try{new ResizeObserver(aoCenter).observe(d.querySelector('.ao-stage'))}catch(e){}
+  window.addEventListener('resize',aoCenter);
   d.querySelector('.ao-x').addEventListener('click',aoClose);
   d.querySelector('.ao-clr').addEventListener('click',aoClear);
   d.querySelector('.ao-hb').addEventListener('click',aoHistOpen);
   aoHistBind(d);
   var eb=d.querySelector('.ao-eye');
-  eb.addEventListener('click',function(){var h=d.classList.toggle('hidechat');eb.setAttribute('aria-pressed',h?'true':'false');try{localStorage.setItem('ario.chatHide',h?'1':'0')}catch(e){}if(!h)setTimeout(aoDown,300)});
+  eb.addEventListener('click',function(){aoCenter();var h=d.classList.toggle('hidechat');eb.setAttribute('aria-pressed',h?'true':'false');try{localStorage.setItem('ario.chatHide',h?'1':'0')}catch(e){}if(!h)setTimeout(aoDown,300)});
   /* tapping the ghost = speak */
   AO.g.setAttribute('role','button');AO.g.setAttribute('tabindex','0');AO.g.setAttribute('aria-label',aoT('با صدا بگو','Speak'));
   AO.g.addEventListener('click',aoRetry);
+  aoPickBind(d);arcApply(arcCur(),false);
   AO.g.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();aoRetry()}});
   /* voice / round-video messages in the chat with Ario */
   var aoF=d.querySelector('.ao-f');
@@ -13175,13 +15513,15 @@ async function aoOpen(){
   AO.open=true;AO.wk=false;AO.sid++;AO.busy=false;AO.flow=0;AO.onText=null;AO.cancelAsk=null;AO.chain=Promise.resolve();var sid=AO.sid;
   AO.ch.innerHTML='';AO.inp.value='';
   aoSession();
+  try{var ud=unD();if(ud.aoq.length){ud.aoq.forEach(function(m){AO.chat.appendChild(aoBubble('a',m.t));aoLog('a',m.t)});aoDown()}unClear('ao')}catch(e){}
   var hid=false;try{hid=localStorage.getItem('ario.chatHide')==='1'}catch(e){}
   AO.el.classList.toggle('hidechat',hid);AO.el.querySelector('.ao-eye').setAttribute('aria-pressed',hid?'true':'false');
-  AO.el.hidden=false;requestAnimationFrame(function(){requestAnimationFrame(function(){AO.el.classList.add('on');aoDown()})});
+  AO.el.hidden=false;aoCenter();requestAnimationFrame(function(){requestAnimationFrame(function(){AO.el.classList.add('on');aoCenter();aoDown()})});
   await aoConverse(sid);
 }
 function aoClose(){
   try{vnStopCur()}catch(e){}
+  try{aoPickEnd(true,true)}catch(e){}
   clearTimeout(AO.idleT);AO.sid++;AO.open=false;AO.busy=false;AO.onText=null;AO.flow=0;AO.listening=false;
   try{if(SRN&&AO.hearing){var sp0=SRN.stop();if(sp0&&sp0.catch)sp0.catch(function(){})}}catch(e){}AO.hearing=0;
   try{if(AO.cancelAsk)AO.cancelAsk()}catch(e){}AO.cancelAsk=null;AO.chain=Promise.resolve();
@@ -14634,13 +16974,15 @@ boot('route',function(){charRoute()});
 boot('render',function(){render('enter')});
 window.__arioReady=true;
 boot('welcome',function(){maybeWelcome()});
+boot('proofSweep',function(){setTimeout(spSweep,15000)});
 boot('loop',function(){(function loop(){try{tick()}catch(e){try{if(window.__arioErr)window.__arioErr('tick',e)}catch(x){}}setTimeout(loop,1000-(Date.now()%1000)+10)})()});
 document.addEventListener('visibilitychange',function(){
   try{
-  if(document.visibilityState==='visible'){if(ui.day<todayKey()&&ui.tab!=='week')ui.day=todayKey();if(sh.wrap.hidden)render();if(ui.tab==='account')reloadAccount();tick();nativeSync();nsTakeActs();if(nsCfg().th==='banner')nsPushStyle()}
+  if(document.visibilityState==='visible'){if(ui.day<todayKey()&&ui.tab!=='week')ui.day=todayKey();if(sh.wrap.hidden)render();if(ui.tab==='account')reloadAccount();tick();nativeSync();nsTakeActs();nsTakeGo();kaCheck();if(nsCfg().th==='banner')nsPushStyle()}
   }catch(e){try{if(window.__arioErr)window.__arioErr('visible',e)}catch(x){}}
 });
 boot('native',function(){nativeInit()});
+boot('activityAsk',function(){kaStart()});
 boot('lock',function(){alCheck();if(lkGet()){alSecure(true);showLock()}});
 boot('gm',function(){gmCheck(true)});
 boot('assistant',function(){
@@ -14695,10 +17037,10 @@ function aoqInit(){
   if(!AO.el||AO.el.querySelector('.ao-att'))return;
   var f=AO.el.querySelector('.ao-f');if(!f)return;
   var b=document.createElement('button');b.type='button';b.className='ao-att';
-  b.setAttribute('aria-label',aoT('ارسال عکس به Ario','Send a picture to Ario'));b.innerHTML=icon('img');
-  var i=document.createElement('input');i.type='file';i.accept='image/*';i.hidden=true;i.className='ao-file';
+  b.setAttribute('aria-label',aoT('ارسال عکس یا فیلم به Ario','Send a picture or video to Ario'));b.innerHTML=icon('img');
+  var i=document.createElement('input');i.type='file';i.accept='image/*,video/*';i.hidden=true;i.className='ao-file';
   b.addEventListener('click',function(){if(!AO.open)return;i.value='';i.click()});
-  i.addEventListener('change',function(){var fl=i.files&&i.files[0];if(fl)aoqGot(fl)});
+  i.addEventListener('change',function(){var fl=i.files&&i.files[0];if(fl)aoPhGot(fl)});
   f.insertBefore(b,f.firstChild);f.appendChild(i);
   /* tapping a picture bubble shows it big */
   AO.chat.addEventListener('click',function(e){var im=e.target&&e.target.closest?e.target.closest('.ao-ph'):null;if(im)aoLightbox(im.src)});
@@ -14708,7 +17050,39 @@ function aoqNudge(){
   b.classList.add('nudge');setTimeout(function(){b.classList.remove('nudge')},5200);
 }
 
-/* ---- a picture arrives ---- */
+/* ---- a picture or video arrives: with a task running it is a study proof; otherwise a picture goes to the quality flow ---- */
+function aoPhGot(file){
+  if(!AO.open||!file)return;
+  var tk=spNow(),v=spIsVid(file);
+  if(!tk&&v){aoNote(aoT('الان کاری در حال انجام نیست؛ ویدیوی مطالعه را وقتی بفرست که یک کار فعال داشته باشی.','No task is running right now; send a study video while a task is active.'));return}
+  if(tk)aoProof(file,tk);else aoqGot(file);
+}
+async function aoProof(file,tk){
+  var sid=AO.sid;
+  if(AO.busy){aoNote(aoT('یک لحظه صبر کن تا کار قبلی تمام شود، بعد دوباره بفرست.','Wait until the current task is finished, then send it again.'));return}
+  if(file.size>SP.max){aoNote(aoT('این فایل خیلی بزرگ است؛ کمتر از ۸۰ مگابایت بفرست.','This file is too big; send one under 80 MB.'));return}
+  AO.busy=true;clearTimeout(AO.idleT);
+  try{
+    aoState('think');AO.ch.innerHTML='';
+    var R=await spIngest(file,tk);
+    if(sid!==AO.sid)return;
+    var v=R.p.k==='v',url=URL.createObjectURL(R.blob),pst=R.thumb?URL.createObjectURL(R.thumb):'',m=document.createElement('div');
+    AO.urls.push(url);if(pst)AO.urls.push(pst);
+    m.className='ao-m u ao-pm';
+    m.innerHTML=v?'<video class="ao-pv" src="'+url+'"'+(pst?' poster="'+pst+'"':'')+' controls playsinline preload="metadata"></video>':'<img class="ao-ph" src="'+url+'" alt="'+aoT('عکس','Picture')+'" draggable="false">';
+    var im=m.querySelector('img');if(im)im.addEventListener('load',aoDown);
+    AO.chat.appendChild(m);aoTrim();aoDown();
+    if(!v)AO.pic={blob:R.blob,url:url};
+    aoLog('u',spMsgT(R.p.k,tk.t));
+    spRefresh();
+    if(!v)await spScanFx(im,2800);
+    if(sid!==AO.sid)return;
+    await aoSay(spReply({k:R.p.k,task:tk,q:R.q,surf:'ao'}),true);
+  }catch(e){
+    try{if(window.__arioErr)window.__arioErr('proof',e)}catch(x){}
+    aoNote(spErr(e));
+  }finally{aoqEnd(sid)}
+}
 async function aoqGot(file){
   if(!AO.open||!file)return;
   var sid=AO.sid;
@@ -14720,7 +17094,7 @@ async function aoqGot(file){
   m.innerHTML='<img class="ao-ph" src="'+url+'" alt="'+aoT('عکس','Picture')+'" draggable="false">';
   m.querySelector('img').addEventListener('load',aoDown);
   AO.chat.appendChild(m);aoTrim();aoDown();clearTimeout(AO.idleT);
-  aoqFlow(sid);
+  spScanFx(m.querySelector('img'),2800).then(function(){aoDown();if(sid===AO.sid)aoqFlow(sid)});
 }
 function aoqEnd(sid){
   if(sid!==AO.sid)return;

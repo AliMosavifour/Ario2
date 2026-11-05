@@ -11,7 +11,7 @@ fi
 APPID=$(python3 -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
 JDIR="android/app/src/main/java/$(echo "$APPID" | tr . /)"
 mkdir -p "$JDIR"
-for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin; do
+for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin ArioCounselorWorker; do
   sed "s/__APPID__/$APPID/g" "native/java/$f.java" > "$JDIR/$f.java"
 done
 cp -r native/res/. android/app/src/main/res/
@@ -54,5 +54,9 @@ fi
 GR="android/app/build.gradle"
 if [ -f "$GR" ] && ! grep -q "androidx.biometric" "$GR"; then
   sed -i '/^dependencies {/a\    implementation "androidx.biometric:biometric:1.1.0"' "$GR"
+fi
+# WorkManager: the advisor's background check for new reports (works while the app is closed)
+if [ -f "$GR" ] && ! grep -q "androidx.work:work-runtime" "$GR"; then
+  sed -i '/^dependencies {/a\    implementation "androidx.work:work-runtime:2.9.1"' "$GR"
 fi
 echo "Widget and app lock added."
