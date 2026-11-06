@@ -38,6 +38,7 @@ public class ArioNotifyReceiver extends BroadcastReceiver {
                 ArioNotifyCore.addAction(c, "done", i.getStringExtra("tid"), System.currentTimeMillis());
             } else if (Intent.ACTION_BOOT_COMPLETED.equals(a) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(a)) {
                 ArioNotifyCore.rescheduleAll(c);
+                FocusGuardService.ensure(c);
             }
         } catch (Throwable t) {
             // ignore

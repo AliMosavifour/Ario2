@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ImageSavePlugin.class);
         registerPlugin(PdfViewerPlugin.class);
         registerPlugin(FocusNotifyPlugin.class);
+        registerPlugin(FocusGuardPlugin.class);
         registerPlugin(ArioNotifyPlugin.class);
         registerPlugin(ArioTtsPlugin.class);
         super.onCreate(savedInstanceState);

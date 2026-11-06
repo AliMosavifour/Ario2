@@ -315,6 +315,7 @@
     <div class="fo-dur" id="foDur"></div>
     <div class="chips fo-tasks" id="foTasks"></div>
     <button type="button" class="linkbtn fo-fin" id="foFin" hidden>تیک زدن کار انتخاب‌شده</button>
+    <button type="button" class="linkbtn fo-guard" id="foGuard" hidden></button>
     <div class="tp-btns"><button type="button" class="pill3d primary" id="foGo">شروع</button><button type="button" class="pill3d" id="foReset">بازنشانی</button></div>
   </div>
 </div>
@@ -356,6 +357,11 @@
       <input class="field" id="wEmail" type="email" dir="ltr" maxlength="80" placeholder="you@example.com" aria-label="ایمیل" autocomplete="off" style="text-align:left">
     </div>
     <div class="wp" data-p="2">
+      <h2 id="wRoleH"></h2>
+      <p id="wRoleP"></p>
+      <div class="qsheet" id="wRole" role="radiogroup"></div>
+    </div>
+    <div class="wp" data-p="3">
       <h2>چیزهایی که در دسترس داری</h2>
       <div class="wf">
         <div><span class="h3d"><svg class="ic"><use href="#i-check"/></svg></span><span><b>کشیدن ردیف</b><small>به یک سمت برای انجام، به سمت دیگر برای حذف</small></span></div>
@@ -363,12 +369,12 @@
         <div><span class="h3d"><svg class="ic"><use href="#i-timer"/></svg></span><span><b>تمرکز و آمار</b><small>تایمر شیشه‌ای، حلقه‌های فعالیت و روزهای پیاپی</small></span></div>
       </div>
     </div>
-    <div class="wp" data-p="3">
+    <div class="wp" data-p="4">
       <h2>هدف روزانه‌ات چند کار است؟</h2>
       <p>بعداً از بخش حساب هم می‌توانی عوضش کنی.</p>
       <div class="chips" id="wGoal" style="justify-content:center"></div>
     </div>
-    <div class="wdots" id="wDots" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i></div>
+    <div class="wdots" id="wDots" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i></div>
     <div class="wnav" id="wNav" hidden><button type="button" class="pill3d" id="wBack">قبلی</button><button type="button" class="pill3d primary" id="wNext">بعدی</button></div>
   </div>
 </div>

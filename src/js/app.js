@@ -338,7 +338,7 @@ function cleanHabits(a){
 }
 function plainObj(x){return x&&typeof x==='object'&&!Array.isArray(x)?x:{}}
 function P(p){var o=Object.assign({},DEFP,p);o.habits=cleanHabits(o.habits);o.medals=plainObj(o.medals);o.bnGot=plainObj(o.bnGot);o.rp=rpClean(o.rp);if(!o.sndv){o.sndv=1;o.sound=true}o.ttp=ttpClean(o.ttp);if(typeof o.ttCur!=='string')o.ttCur=null;o.kk=kkClean(o.kk);o.ns=nsClean(o.ns);o.rpd=rpdClean(o.rpd);o.rk=rkClean(o.rk);o.tbk=tbClean(o.tbk);o.kc=kcClean(o.kc);o.pins=pnClean(o.pins);o.un=unClean(o.un);o.gr=grClean(o.gr);o.sr=srClean(o.sr);o.md=mdClean(o.md);o.mo=/^\d{4}-\d{2}-\d{2}$/.test(o.mo||'')?o.mo:'';return o}
-var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,tour:false,advTone:'formal',goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],un:null,gr:null,sr:{},md:{},mo:''};
+var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,tour:false,advTone:'formal',goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,chSeen:'',chRx:{},chMute:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],un:null,gr:null,sr:{},md:{},mo:''};
 var state={tasks:cached?cleanTasks(cached.tasks):sample(),profile:P(cached&&cached.profile),hist:(cached&&cached.hist&&typeof cached.hist==='object')?cleanHist(cached.hist):null,notifs:cleanNotifs(cached&&cached.notifs),nseen:Number(cached&&cached.nseen)||0};
 var ui={sel:null,pnOpen:{},pnAll:false,tab:'today',filter:'all',cat:null,day:todayKey(),loading:false,fcats:[],fpri:[],ftags:[],q:''};
 var acctName='',userId=null,storeReadyRes,storeReady=new Promise(function(r){storeReadyRes=r});
@@ -390,12 +390,15 @@ function persist(){
 async function flush(){
   if(!dbDoc||saving||!dirty)return;
   saving=true;dirty=false;
+  var sbm=!!dbDoc.sb;
   try{
-    await dbDoc.set({v:3,tasks:state.tasks,profile:state.profile,cats:CATS,hist:state.hist,updated:Date.now()});
+    if(sbm)await sbyPush();   /* v295: only the items that changed are sent; see "per-item sync" below */
+    else await dbDoc.set({v:3,tasks:state.tasks,profile:state.profile,cats:CATS,hist:state.hist,updated:Date.now()});
     failedOnce=false;
   }catch(e){
     if(!failedOnce){toast((__("ذخیره روی حساب انجام نشد؛ کارها روی همین دستگاه می‌مانند")),null,null,'warn');}
     failedOnce=true;
+    if(sbm){dirty=true;clearTimeout(saveTimer);saveTimer=setTimeout(flush,15000)}   /* nothing is lost: the next push re-reads what differs from the cloud */
   }
   saving=false;
   if(dirty){clearTimeout(saveTimer);saveTimer=setTimeout(flush,350)}
@@ -515,85 +518,223 @@ async function sbAuth(kind,email,pw){
 async function sbForgot(email){
   try{var r=await fetch(SB.url+'/auth/v1/recover',{method:'POST',headers:{apikey:SB.key,'Content-Type':'application/json'},body:JSON.stringify({email:email})});return r.ok}catch(e){return false}
 }
-/* the same small interface the app already uses for its store: get() / set() / onSnapshot() */
-function sbDoc(uid){
-  var lastUp=0,stopped=false,iv=0,vh=null,busy=false,rdy=null,ready=new Promise(function(r){rdy=r});
-  var doc={
-    get:async function(){
-      var r=await sbReq('/rest/v1/planner?user_id=eq.'+encodeURIComponent(uid)+'&select=data,updated_at');
-      if(!r.ok)throw new Error('read '+r.status);
-      var a=await r.json(),d=a&&a[0]?a[0].data:null;
-      if(a&&a[0])lastUp=Date.parse(a[0].updated_at)||0;
-      return {exists:d!=null,data:function(){return d},metadata:{hasPendingWrites:false}};
-    },
-    set:async function(obj){
-      /* never write before the first download has been looked at, or an old phone could overwrite newer data */
-      await Promise.race([ready,new Promise(function(r){setTimeout(r,6000)})]);
-      var now=new Date();
-      var r=await sbReq('/rest/v1/planner?on_conflict=user_id','POST',{user_id:uid,data:obj,updated_at:now.toISOString()},{Prefer:'resolution=merge-duplicates,return=minimal'});
-      if(!r.ok)throw new Error('write '+r.status);
-      lastUp=now.getTime();
-    },
-    onSnapshot:function(cb){
-      /* looks at the small "updated_at" first; the whole planner is downloaded only when another device changed it */
-      async function pull(first){
-        if(stopped||busy||(document.hidden&&!first))return;
-        busy=true;
-        try{
-          if(!first){
-            var r=await sbReq('/rest/v1/planner?user_id=eq.'+encodeURIComponent(uid)+'&select=updated_at');
-            if(!r.ok)return;
-            var a=await r.json();
-            if(a&&a[0]&&(Date.parse(a[0].updated_at)||0)<=lastUp)return;
-          }
-          var snap=await doc.get();if(!stopped)cb(snap);
-        }catch(e){}
-        finally{busy=false;if(first)rdy()}
-      }
-      pull(true);
-      iv=setInterval(pull,40000);
-      vh=function(){if(document.visibilityState==='visible')pull()};
-      document.addEventListener('visibilitychange',vh);
-      doc.stop=function(){stopped=true;clearInterval(iv);if(vh)document.removeEventListener('visibilitychange',vh)};
-    }
-  };
-  return doc;
+/* ---------- per-item sync (v295) ----------
+   Before: the whole planner was ONE row. Two phones working at once meant the last upload replaced everything the other had done.
+   Now every task is its own row ('t:<id>'), every profile setting is a row ('p:<key>'), each history day is a row ('h:<key>') and the
+   categories are one row ('c:cats'). A phone remembers (in "base") a fingerprint of each item as it last saw it in the cloud, so it can tell
+   exactly which items it changed and sends only those, each with the time of the change ("mt"). The cloud keeps an item only when its mt is newer
+   than the stored one, so the LAST CHANGE OF THE SAME ITEM WINS and changes to different items never collide. A deleted task stays in the cloud as a
+   "tombstone" (del) so the delete reaches the other phones. Table + functions: supabase/setup.sql (v295 block). */
+function sbCanon(v){   /* JSON with sorted keys: the same value always gives the same text, whatever order its keys were created in */
+  if(v===undefined||v===null)return 'null';
+  if(typeof v!=='object')return JSON.stringify(v);
+  if(Array.isArray(v))return '['+v.map(sbCanon).join(',')+']';
+  return '{'+Object.keys(v).sort().filter(function(k){return v[k]!==undefined}).map(function(k){return JSON.stringify(k)+':'+sbCanon(v[k])}).join(',')+'}';
 }
-function sbStart(){
+function sbHash(s){   /* cyrb53: a short fingerprint, so the phone does not have to keep a second copy of every task */
+  var h1=0xdeadbeef,h2=0x41c6ce57,c,i;
+  for(i=0;i<s.length;i++){c=s.charCodeAt(i);h1=Math.imul(h1^c,2654435761);h2=Math.imul(h2^c,1597334677)}
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);
+}
+var SBY=null,SBY_EPOCH='1970-01-01T00:00:00.000000Z',sbyOwn=Object.prototype.hasOwnProperty;
+function sbyMeta(uid){
+  var m=null;try{m=JSON.parse(localStorage.getItem('ario.sby.'+uid)||'null')}catch(e){}
+  if(!m||typeof m!=='object')m={};
+  return {cur:typeof m.cur==='string'?m.cur:'',base:plainObj(m.base),mt:plainObj(m.mt),skew:Number(m.skew)||0};
+}
+function sbySave(){var Y=SBY;if(!Y)return;try{localStorage.setItem('ario.sby.'+Y.uid,JSON.stringify(Y.m))}catch(e){}}
+function sbyClock(now){now=Number(now);if(now>0&&SBY)SBY.m.skew=now-Date.now()}   /* the phone's clock may be wrong; changes are dated with the server's time */
+/* every item as it is here right now: key -> value */
+function sbyLocal(){
+  var m={};
+  state.tasks.forEach(function(t){if(t&&t.id!=null&&t.id!==''&&!t.s)m['t:'+t.id]=t});   /* the sample tasks of a fresh install are not data */
+  var p=state.profile||{};Object.keys(p).forEach(function(k){m['p:'+k]=p[k]===undefined?null:p[k]});
+  var h=state.hist;if(h&&typeof h==='object')Object.keys(h).forEach(function(k){m['h:'+k]=h[k]});
+  m['c:cats']=CATS;
+  return m;
+}
+/* send what differs from the cloud copy we last saw */
+async function sbyPush(){
+  var Y=SBY;if(!Y||!Y.ready||Y.stopped)return;
+  var m=Y.m,loc=sbyLocal(),out=[],hs={},now=Date.now()+m.skew;
+  function stamp(k){return Math.max(now,(Number(m.mt[k])||0)+1)}
+  Object.keys(loc).forEach(function(k){
+    var h=sbHash(sbCanon(loc[k]));
+    if(m.base[k]!==h){hs[k]=h;out.push({k:k,data:loc[k],mt:stamp(k)})}
+  });
+  var hasH=!!state.hist&&typeof state.hist==='object';
+  Object.keys(m.base).forEach(function(k){
+    if(sbyOwn.call(loc,k))return;
+    var c=k.charAt(0);                                /* only tasks and history days can be deleted; settings never are */
+    if(c==='t'||(c==='h'&&hasH)){hs[k]=null;out.push({k:k,del:true,mt:stamp(k)})}
+  });
+  if(!out.length)return;
+  var i=0;
+  while(i<out.length){
+    var chunk=[],size=0;
+    while(i<out.length&&chunk.length<200&&(!chunk.length||size<700000)){size+=JSON.stringify(out[i]).length;chunk.push(out[i++])}
+    var r=await sbReq('/rest/v1/rpc/planner_push','POST',{p_items:chunk});
+    if(!r.ok)throw new Error('push '+r.status);
+    var j=await r.json();
+    if(Y!==SBY)return;                                /* signed out while sending */
+    sbyClock(j&&j.now);
+    var rej={},lost=Array.isArray(j&&j.rejected)?j.rejected:[];
+    lost.forEach(function(x){if(x&&x.k)rej[x.k]=1});
+    chunk.forEach(function(it){
+      if(rej[it.k])return;
+      m.mt[it.k]=it.mt;
+      if(it.del)delete m.base[it.k];else m.base[it.k]=hs[it.k];
+    });
+    /* an item that lost: another phone changed it later than this phone did, so its version is the one to keep */
+    if(lost.length&&sbyApply(lost,'rej',hs).changed)sbyRefresh();
+    sbySave();
+  }
+}
+/* put cloud rows into the local state. mode: 'pull' (normal), 'first' (first sign-in on this phone: the cloud wins), 'rej' (items our push lost) */
+function sbyApply(rows,mode,expect){
+  var Y=SBY,m=Y.m,loc=sbyLocal(),tIdx=null,tDel={},profNew=null,catsNew=null,changed=false,done=[],i;
+  for(i=0;i<rows.length;i++){
+    var r=rows[i],k=r&&r.k;
+    if(typeof k!=='string'||!/^[tphc]:./.test(k))continue;
+    var mt=Number(r.mt)||0,del=!!r.del,has=sbyOwn.call(loc,k),lh=has?sbHash(sbCanon(loc[k])):null;
+    if(mode==='pull'){
+      if(mt<=(Number(m.mt[k])||0))continue;                                    /* not newer than what we already have (our own echo) */
+      if(has?m.base[k]!==lh:m.base[k]!==undefined)continue;                    /* changed here a moment ago and not sent yet: that change is newer, it will be sent */
+    }else if(mode==='rej'&&expect&&lh!==(expect[k]===undefined?null:expect[k]))continue;   /* edited again while sending: keep the newer edit here */
+    var kind=k.charAt(0),id=k.slice(2);
+    if(!(has&&!del&&sbHash(sbCanon(r.data))===lh)&&!(!has&&del)){
+      if(kind==='t'){
+        if(!tIdx){tIdx=Object.create(null);state.tasks.forEach(function(t,n){tIdx[String(t.id)]=n})}
+        if(del){if(tIdx[id]!==undefined)tDel[tIdx[id]]=1}
+        else if(r.data&&typeof r.data==='object'&&!Array.isArray(r.data)){
+          var d=Object.assign({},r.data);if(d.id==null||d.id==='')d.id=id;
+          if(tIdx[id]!==undefined){state.tasks[tIdx[id]]=d;delete tDel[tIdx[id]]}else{tIdx[id]=state.tasks.length;state.tasks.push(d)}
+        }else continue;
+      }else if(kind==='p'){
+        if(del)continue;
+        profNew=profNew||{};profNew[id]=r.data;
+      }else if(kind==='h'){
+        if(!state.hist||typeof state.hist!=='object')state.hist={};
+        if(del)delete state.hist[id];
+        else if(r.data&&typeof r.data==='object'&&!Array.isArray(r.data))state.hist[id]=r.data;
+        else continue;
+      }else if(kind==='c'){
+        if(!Array.isArray(r.data))continue;
+        catsNew=r.data;
+      }
+      changed=true;
+    }
+    done.push([k,mt]);
+  }
+  if(Object.keys(tDel).length)state.tasks=state.tasks.filter(function(t,n){return !tDel[n]});
+  if(profNew)state.profile=P(Object.assign({},state.profile,profNew));
+  if(catsNew)setCats(catsNew);
+  /* what we now hold is, by definition, what the cloud holds: remember it (after local clean-up, so clean-up alone never looks like an edit) */
+  var l2=sbyLocal();
+  done.forEach(function(a){
+    var k=a[0];m.mt[k]=a[1];
+    if(sbyOwn.call(l2,k))m.base[k]=sbHash(sbCanon(l2[k]));else delete m.base[k];
+  });
+  return {changed:changed};
+}
+async function sbyFetch(since,back){
+  var rows=[],k0='',guard=0;
+  for(;;){
+    var r=await sbReq('/rest/v1/rpc/planner_pull','POST',{p_since:since,p_k:k0,p_limit:1000,p_back:back});
+    if(!r.ok)throw new Error('pull '+r.status);
+    var j=await r.json();
+    sbyClock(j&&j.now);
+    var it=j&&Array.isArray(j.items)?j.items:[];
+    rows=rows.concat(it);
+    if(!j||!j.more||!it.length||++guard>300)break;
+    var l=it[it.length-1];since=l.srv;k0=l.k;back=0;
+  }
+  return rows;
+}
+/* first time this phone talks to this account: copy the old one-row planner into items (once, on the server), then take the cloud as it is.
+   Anything that exists only here (new tasks, settings the cloud never had) is sent by the push that follows. */
+async function sbyFirst(){
+  var Y=SBY,m=Y.m;
+  var r=await sbReq('/rest/v1/rpc/planner_migrate','POST',{});
+  if(!r.ok)throw new Error('migrate '+r.status);
+  var rows=await sbyFetch(SBY_EPOCH,0);
+  if(Y!==SBY)return {};
+  if(rows.some(function(x){return x&&typeof x.k==='string'&&x.k.charAt(0)==='t'&&!x.del}))state.tasks=state.tasks.filter(function(t){return !t.s});
+  /* a name typed on this phone is kept when the account has none */
+  var mine=String(state.profile.name||'').trim();
+  rows=rows.filter(function(x){return !(x&&x.k==='p:name'&&!x.del&&mine&&!String(x.data==null?'':x.data).trim())});
+  var res=sbyApply(rows,'first');
+  m.cur=rows.length?rows[rows.length-1].srv:SBY_EPOCH;
+  Y.ready=true;sbySave();
+  res.first=true;res.changed=true;
+  return res;
+}
+function sbyRefresh(){
+  if(String(state.profile.name||'').trim()&&typeof wl!=='undefined'&&wl.el&&!wl.el.hidden)closeWelcome();
+  applyTheme();writeCache();
+  if(typeof nativeSync==='function')nativeSync();
+  if(typeof widgetSync==='function')widgetSync();
+  render();
+}
+/* ask the cloud what is new. explicit=true (the person asked, or just signed in): errors are passed on and the page is redrawn by the caller. */
+async function sbyPull(explicit){
+  var Y=SBY;if(!Y||Y.stopped)return;
+  if(Y.busy||(document.hidden&&!explicit&&Y.ready))return;
+  Y.busy=true;
+  try{
+    var m=Y.m,res;
+    if(!Y.ready)res=await sbyFirst();
+    else{
+      var rows=await sbyFetch(m.cur,10);                /* 10 s back: a row committed a moment late is still seen */
+      if(Y!==SBY)return;
+      res=sbyApply(rows,'pull');
+      if(rows.length){var l=rows[rows.length-1].srv;if(l>m.cur)m.cur=l}
+      sbySave();
+    }
+    if(Y!==SBY)return;
+    syncOK=true;
+    if(res.changed&&!(explicit&&ui.tab==='account'))sbyRefresh();
+    if(res.first){dirty=true;flush()}                    /* now send what exists only on this phone */
+  }catch(e){if(explicit)throw e}
+  finally{Y.busy=false}
+}
+function sbyStop(){
+  var Y=SBY;if(!Y)return;
+  Y.stopped=true;clearInterval(Y.iv);
+  if(Y.vh)document.removeEventListener('visibilitychange',Y.vh);
+}
+function sbyStart(uid,explicit){
+  sbyStop();
+  var Y=SBY={uid:uid,m:sbyMeta(uid),ready:false,busy:false,stopped:false,iv:0,vh:null,first:null};
+  Y.ready=!!Y.m.cur;                                    /* this phone has already done its first sync with this account */
+  Y.iv=setInterval(function(){sbyPull(false)},40000);
+  Y.vh=function(){if(document.visibilityState==='visible')sbyPull(false)};
+  document.addEventListener('visibilitychange',Y.vh);
+  Y.first=sbyPull(!!explicit);
+  return Y;
+}
+function sbStart(explicit){
   var s=sbSess();if(!s)return false;
-  if(dbDoc&&dbDoc.stop)dbDoc.stop();
   userId=s.uid;acctName=String(s.em||'').split('@')[0];
-  dbDoc=sbDoc(s.uid);
-  dbDoc.onSnapshot(onRemote);
+  sbyStart(s.uid,explicit);
+  dbDoc={sb:true,stop:sbyStop};
   return true;
 }
-/* first sign-in on a phone that already has tasks: keep them, add the ones from the account, then upload the result */
+/* signed in: take the account's items; whatever exists only on this phone is added to the account */
 async function sbJoin(){
-  var s=sbSess();if(!s)return;
-  var d=sbDoc(s.uid),snap;
-  try{snap=await d.get()}catch(e){snap=null}
-  if(snap&&snap.exists){
-    var rem=snap.data()||{};
-    if(Array.isArray(rem.tasks)){
-      var have={};rem.tasks.forEach(function(t){if(t&&t.id)have[t.id]=1});
-      var extra=state.tasks.filter(function(t){return !t.s&&!have[t.id]});
-      state.tasks=cleanTasks(rem.tasks.concat(extra));
-    }
-    if(rem.profile){var keep={name:state.profile.name};state.profile=P(rem.profile);if(!state.profile.name&&keep.name)state.profile.name=keep.name}
-    if(Array.isArray(rem.cats))setCats(rem.cats);
-    if(rem.hist&&typeof rem.hist==='object')state.hist=cleanHist(Object.assign({},state.hist,rem.hist));
-    dirty=true;
-  }
-  sbStart();
+  if(!sbSess())return;
+  sbStart(true);
+  try{await SBY.first}catch(e){toast((__("بارگذاری از حساب انجام نشد")),null,null,'warn')}
   applyTheme();writeCache();render();
-  if(dirty)flush();
 }
 async function sbSignOut(){
   var s=sbSess();
   try{if(s)await fetch(SB.url+'/auth/v1/logout',{method:'POST',headers:{apikey:SB.key,Authorization:'Bearer '+s.at}})}catch(e){}
   sbKeep(null);
   if(dbDoc&&dbDoc.stop)dbDoc.stop();
-  dbDoc=null;userId=null;acctName='';syncOK=false;
+  SBY=null;dbDoc=null;userId=null;acctName='';syncOK=false;
   if(ui.tab==='account')render();
 }
 var sbEl=null;
@@ -742,7 +883,7 @@ var CHARS=[
   {id:'masked',btn:['#a50f33','#ff3b5c','#ffffff'],glow:['#b3123a','#ff4d6d','#ffffff'],name:'RAVEN',img:'ch-mask-f',back:'ch-mask-b',paid:true,price:100000,salePrice:99000,cur:(__("تومان"))}
 ];
 /* banners in display order; `to` is a character id, or 'all' for the group banner (opens the list of characters) */
-var ADS=[{img:'ad1',to:'all',n:(__("همه‌ی کاراکترهای جدید"))},{img:'ad2',to:'cow'},{img:'ad3',to:'black-bunny'},{img:'ad4',to:'pink-bear'},{img:'ad5',to:'masked'}];
+var ADS=[{img:'ad-channel',to:'channel',n:(__("کانال Ario","Ario Channel"))},{img:'ad1',to:'all',n:(__("همه‌ی کاراکترهای جدید"))},{img:'ad2',to:'cow'},{img:'ad3',to:'black-bunny'},{img:'ad4',to:'pink-bear'},{img:'ad5',to:'masked'}];
 function charById(id){for(var i=0;i<CHARS.length;i++)if(CHARS[i].id===id)return CHARS[i];return null}
 function adLabel(a){var c=charById(a.to);return c?(__("کاراکتر")+" ")+c.name:(a.n||(__("کاراکترها")))}
 
@@ -752,6 +893,8 @@ function adCarousel(){
   var h='';
   for(var i=0;i<ADS.length;i++)h+='<button type="button" class="adslide'+(i===adIdx?' on':'')+'" data-act="openChar" data-id="'+ADS[i].to+'" aria-label="'+esc(adLabel(ADS[i]))+'"><img src="img/'+ADS[i].img+'.webp" alt="" draggable="false" decoding="async"'+(i===adIdx?'':' loading="lazy"')+'></button>';
   var ar='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var un=chanUnread();
+  if(un>0)h+='<span class="chdot" aria-label="'+un+' '+__("پست تازه در کانال Ario","new posts in Ario Channel")+'">'+fa(un>9?'9+':un)+'</span>';
   return ("<div class=\"adcar\" id=\"adCar\" role=\"group\" aria-label=\""+__("کاراکترهای جدید Ario")+"\">")+h+
     ("<button type=\"button\" class=\"adnav prev\" data-act=\"adPrev\" aria-label=\""+__("بنر قبلی")+"\">")+ar+'</button>'+
     ("<button type=\"button\" class=\"adnav next\" data-act=\"adNext\" aria-label=\""+__("بنر بعدی")+"\">")+ar+'</button></div>';
@@ -768,14 +911,113 @@ adStart();
 function adPrevA(){adStep(-1);adStart()}
 function adNextA(){adStep(1);adStart()}
 
+/* ---------- کانال Ario · Ario Channel ----------
+   A read-only channel inside the app, drawn like a Telegram channel: dark wallpaper, header with the round picture and name,
+   one message bubble per change or new feature (picture on top, bold title, text, time), date separators, a heart under each
+   post and a "Mute" bar at the bottom. Oldest post at the top, newest at the bottom; it opens scrolled to the bottom.
+   The posts are CHAN_POSTS in channel-posts.js (newest first; add one with scripts/add-channel-post.mjs).
+   It is an overlay above the app (#/channel), opened from the first banner of the Today screen.
+   profile.chSeen = id of the newest post seen (unread = the posts above it), profile.chRx = {postId:1} hearts, profile.chMute = quiet. */
+function chanPosts(){return typeof CHAN_POSTS!=='undefined'&&Array.isArray(CHAN_POSTS)?CHAN_POSTS:[]}
+function chanUnread(){
+  var L=chanPosts(),s=state.profile.chSeen||'',i;
+  if(!L.length)return 0;
+  for(i=0;i<L.length;i++)if(L[i].id===s)return i;
+  return L.length;
+}
+function chanTx(p,f){var o=(ARB&&p.ar)||(EN&&p.en)||p;return o[f]!=null?o[f]:p[f]}
+var CHAN_K={new:['✨','ویژگی تازه','New'],imp:['⚡','بهبود','Improved'],fix:['🔧','رفع اشکال','Fix'],info:['📣','اطلاعیه','News']};
+var chanEl=null,chanTouched=false;
+function chanFmt(o,d){try{return new Intl.DateTimeFormat(EN?'en-US':ARB?'ar-SA':'fa-IR',o).format(d)}catch(e){return ''}}
+function chanBubble(p){
+  var k=CHAN_K[p.k]||CHAN_K.info,rx=(state.profile.chRx||{})[p.id]?1:0,meta=[p.v].filter(Boolean).join(' · ');
+  return '<div class="tgr"><article class="tgb" id="cn-'+esc(p.id)+'">'+
+    (p.img?'<img class="tgi" src="img/'+esc(p.img)+'" alt="" draggable="false" decoding="async">':'')+
+    '<div class="tgx"><span class="tgk k-'+esc(p.k||'info')+'">'+k[0]+' '+__(k[1],k[2])+'</span>'+
+    '<h3 dir="auto">'+esc(chanTx(p,'t'))+'</h3><p dir="auto">'+esc(chanTx(p,'x'))+'</p>'+
+    '<div class="tgf"><button type="button" class="tgh'+(rx?' on':'')+'" data-cn="like" data-id="'+esc(p.id)+'" aria-pressed="'+(rx?'true':'false')+'" aria-label="'+__("پسندیدن","Like")+'">❤️'+(rx?'<b>'+fa(1)+'</b>':'')+'</button><span class="tgm">'+esc(meta)+'</span></div></div></article>'+
+    '<button type="button" class="tgs2" data-cn="share" data-id="'+esc(p.id)+'" aria-label="'+__("ارسال","Share")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7-7 7v-4c-6 0-9.5 1.6-12 5 1-6 4.5-10 12-11z" fill="currentColor"/></svg></button></div>';
+}
+function chanFeedHTML(un){
+  var L=chanPosts().slice().reverse(),n=L.length,h='',last='',i,p,dk;
+  for(i=0;i<n;i++){
+    p=L[i];
+    if(un>0&&i===n-un)h+='<div class="tgd"><span>'+__("پست‌های تازه","New posts")+'</span></div>';
+    dk=p.d||'';
+    if(dk&&dk!==last){last=dk;h+='<div class="tgd"><span>'+esc(chanFmt({day:'numeric',month:'long',year:'numeric'},new Date(dk+'T12:00:00')))+'</span></div>'}
+    h+=chanBubble(p);
+  }
+  return h;
+}
+function chanMuteTxt(){return state.profile.chMute?__("صدا را باز کن","Unmute"):__("بی‌صدا","Mute")}
+function chanOpenOv(fromRoute){
+  if(chanEl)return;
+  var L=chanPosts(),p=state.profile,un=chanUnread(),el=document.createElement('div');
+  el.id='chanOv';el.className='tg';el.setAttribute('role','dialog');el.setAttribute('aria-label',__("کانال Ario","Ario Channel"));
+  el.innerHTML=
+    '<div class="tgs" id="tgScroll"><div class="tgpad">'+(L.length?chanFeedHTML(un):'<div class="tgd"><span>'+__("هنوز پستی نیست","No posts yet")+'</span></div>')+'</div></div>'+
+    '<header class="tgh1"><button type="button" class="tgc" data-cn="back" aria-label="'+__("برگشت","Back")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'+
+    '<div class="tgp"><i class="tga"><img src="img/ario-ghost.webp" alt="" draggable="false"></i><div class="tgn"><b>'+__("کانال Ario","Ario Channel")+'</b><span>'+fa(L.length)+' '+__("پست","posts")+' · '+__("فقط خواندنی","Read only")+'</span></div></div></header>'+
+    '<footer class="tgb1"><button type="button" class="tgmu" data-cn="mute">'+chanMuteTxt()+'</button></footer>';
+  document.body.appendChild(el);chanEl=el;chanTouched=false;
+  el.addEventListener('click',chanClick);
+  var sc=el.querySelector('#tgScroll');
+  sc.addEventListener('touchstart',function(){chanTouched=true},{passive:true});sc.addEventListener('wheel',function(){chanTouched=true},{passive:true});
+  /* open at the bottom (newest); pictures change the height when they load, so keep it at the bottom until the person scrolls */
+  var down=function(){if(!chanTouched)sc.scrollTop=sc.scrollHeight};
+  down();requestAnimationFrame(down);
+  el.querySelectorAll('img.tgi').forEach(function(im){if(!im.complete)im.addEventListener('load',down)});
+  if(L.length&&p.chSeen!==L[0].id){p.chSeen=L[0].id;persist()}
+  if(!fromRoute){try{history.pushState({cn:1},'','#/channel')}catch(e){}}
+  if(ui.tab==='today')render();
+}
+function chanCloseOv(){
+  if(!chanEl)return;
+  chanEl.remove();chanEl=null;
+  if(ui.tab==='today')render();
+}
+function openChanA(){chanOpenOv(false)}
+function chanBackA(){
+  if(history.state&&history.state.cn){history.back();return}
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
+  chanCloseOv();
+}
+function chanShare(id){
+  var p=chanPosts().filter(function(x){return x.id===id})[0];if(!p)return;
+  var txt=chanTx(p,'t')+'\n\n'+chanTx(p,'x');
+  if(navigator.share){navigator.share({title:chanTx(p,'t'),text:txt}).catch(function(){});return}
+  try{navigator.clipboard.writeText(txt).then(function(){toast(__("متن پست کپی شد","Post text copied"),null,null,'ok')})}catch(e){}
+}
+function chanClick(e){
+  var b=e.target.closest('[data-cn]');if(!b)return;
+  var a=b.dataset.cn,p=state.profile;
+  if(a==='back')chanBackA();
+  else if(a==='like'){
+    var rx=p.chRx=(p.chRx&&typeof p.chRx==='object')?p.chRx:{};
+    if(rx[b.dataset.id])delete rx[b.dataset.id];else rx[b.dataset.id]=1;
+    var on=!!rx[b.dataset.id];b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');
+    b.innerHTML='❤️'+(on?'<b>'+fa(1)+'</b>':'');persist();
+  }
+  else if(a==='share')chanShare(b.dataset.id);
+  else if(a==='mute'){p.chMute=!p.chMute;b.textContent=chanMuteTxt();persist()}
+}
+/* a few seconds after start: tell the person about posts they have not seen yet (not when the channel is muted) */
+function chanAnnounce(){
+  var n=chanUnread();
+  if(!n||!state.profile.welcomed||chanEl||state.profile.chMute)return;
+  toast('📣 '+fa(n)+' '+__("پست تازه در کانال Ario","new posts in Ario Channel"),__("ببین","View"),openChanA,'info');
+}
+
 /* character page: #/character/<id>. Entries we push carry history.state.ch so Back can pop them. */
 function charHash(id){return '#/character/'+encodeURIComponent(id)}
 function charRoute(){
+  if(/^#\/channel\/?$/.test(location.hash||'')){chanOpenOv(true);return false}
   var m=/^#\/character\/(.*)$/.exec(location.hash||'');
   if(m){var id='';try{id=decodeURIComponent(m[1])}catch(e){id=m[1]}ui.tab='char';ui.char=id;ui.charSide='f';chAutoBack();return true}
   return false;
 }
 function openCharA(d){
+  if(d.id==='channel'){openChanA();return}
   ui.tab='char';ui.char=d.id||'';ui.charSide='f';
   chAutoBack();
   try{history.pushState({ch:1},'',charHash(ui.char))}catch(e){}
@@ -792,6 +1034,9 @@ function subBack(){if(history.state&&history.state.sub){history.back();return}ui
 var accPopSkip=false;
 window.addEventListener('popstate',function(){
   if(accPopSkip){accPopSkip=false;return}
+  if(chanEl&&!/^#\/channel/.test(location.hash||'')){chanCloseOv();return}
+  if(!chanEl&&/^#\/channel/.test(location.hash||'')){chanOpenOv(true);return}
+  if(pph.on){pphDo();return}
   if(ied.on){iedDo();return}
   if(imv.on){imvDo();return}
   if(FCV.on){fcvDo();return}
@@ -799,6 +1044,7 @@ window.addEventListener('popstate',function(){
   if(typeof kcpvClose==='function'&&kcpvClose())return;
   if(typeof tourEnd==='function'&&tourEnd())return;
   if(ui.tab==='account'&&ui.accPage){ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;if(accDepth>0)accDepth--;render('enter');window.scrollTo(0,0);return}
+  if(ui.mcp){mcpKill();return}
   if(ui.tab==='kcm'&&ui.mcl){mcBackA();return}
   if(ui.tab==='kcm'&&ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='kcm'){ui.tab='coach';render('enter');window.scrollTo(0,0);return}
@@ -937,8 +1183,8 @@ function render(mode){
   qaPreview();
   if(ui.tab==='tb')tbFill();
   if(ui.tab==='kcm'&&ui.kcsec){kcxInit();unClear(ui.kcsec)}
-  else if(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*')mcInit();
-  else if(ui.tab==='coach'||ui.tab==='kcm'&&ui.mcl==='*')mcRefresh();
+  else if(ui.tab==='kcm'&&mcOpenNow())mcInit();
+  else if(ui.tab==='coach'||ui.tab==='kcm'&&(ui.mcl==='*'||ui.mcl==='#f'))mcRefresh();
   unPaint();
   if(pkFirst&&ui.tab==='today'&&document.querySelector('.hbpw')){pkFirst=false;clearTimeout(pkWaveT);pkWaveT=setTimeout(pkWaveA,1200)}
 }
@@ -1331,6 +1577,9 @@ function viewAccPage(id){
       row('pin',__("نوار ثابت و پیام‌ها","Pinned bar & messages"),L?'':(nsCfg().pin?__("روشن","On"):__("خاموش")),'openPinSheet')+
       row('spark',(__("هدف روزانه کارها")),L?'':fa(p.goal||5)+(" "+__("کار")),'cycleGoal')+
       row('timer',(__("هدف تمرکز روزانه")),L?'':fa(p.fgoal||60)+(" "+__("دقیقه")),'cycleFGoal')+
+      row('stats',__('گزارش هفتگی خودکار','Automatic weekly report'),L?'':(wkCfg().on?__('چهارشنبه ','Wed ')+fa(wkCfg().at):__('خاموش','Off')),'openWeekly')+
+      (FG?row('lock',__('قفل برنامه‌ها در تمرکز','App lock while focusing'),L?'':(fgCfg().on?__('روشن','On'):__('خاموش','Off')),'openFocusGuard'):'')+
+      row('user',__("نقش من","My role"),roleName(),'openRole')+
       row('book',(__("راهنمای شروع")),'','showWelcome')+
       row('check',(__("کارهای انجام‌شده")),L?'':fa(doneN),'goDone');
   else if(id==='prefs')rows=
@@ -1353,7 +1602,7 @@ function viewAccPage(id){
       row('search',__("دست‌خط به متن و جستجو (کتابخانه)","Handwriting to text & search (library)"),ocrOn()?(__("روشن")):(__("خاموش")),'toggleOcr');
   else if(id==='pData')rows=
       row('cloud',(__("پشتیبان‌گیری و بازیابی")),'','openBackup')+
-      row('user',__("اتصال مشاور و دانش‌آموز","Advisor and student link"),'','openCnx')+
+      (roleGet()==='normal'?'':row('user',__("اتصال مشاور و دانش‌آموز","Advisor and student link"),'','openCnx'))+
       row('trash',(__("پاک کردن انجام‌شده‌ها")),'','clearDone');
   else rows=
       row('book',__("مشاهده مجدد آموزش","Replay the tour"),'','replayTour')+
@@ -1404,7 +1653,11 @@ async function reloadAccount(skipRender){
   var t0=Date.now(),sig0=skipRender?accSig():'';
   try{
     await Promise.race([storeReady,new Promise(function(r){setTimeout(r,4000)})]);
-    if(dbDoc){
+    if(dbDoc&&dbDoc.sb){
+      if(dirty||saving){clearTimeout(saveTimer);await flush()}
+      await sbyPull(true);
+      syncOK=!!(SBY&&SBY.ready);
+    }else if(dbDoc){
       if(dirty||saving){clearTimeout(saveTimer);await flush()}
       var snap=await dbDoc.get();
       if(snap.exists){
@@ -1435,6 +1688,132 @@ function accSig(){try{return state.tasks.length+'|'+state.tasks.filter(function(
 /* ---------- profile sheet ---------- */
 var ps={wrap:$('#pSheet'),form:$('#pForm'),name:$('#pName'),handle:$('#pHandle'),email:$('#pEmail'),hues:$('#pHues')},pDraft=null,pCloseT=null;
 function drawHues(){ps.hues.innerHTML=HUES.map(function(h){return '<button type="button" class="hue" data-h="'+h+'" style="--h:'+h+("\" aria-label=\""+__("رنگ آواتار")+"\" aria-pressed=\"")+(pDraft.hue===h)+'"></button>'}).join('')}
+/* ---------- v283: pull the advisor's / friend's profile page down → their photo opens full screen (like Telegram) ---------- */
+var pph={on:false,el:null,src:null};
+function pphFrom(pic,r,rad){
+  var f=pic.getBoundingClientRect();if(!r||!f.width)return false;
+  var s=r.width/f.width,dx=(r.left+r.width/2)-(f.left+f.width/2),dy=(r.top+r.height/2)-(f.top+f.height/2);
+  pic.style.transform='translate('+dx+'px,'+dy+'px) scale('+s+')';pic.style.borderRadius=rad||'0';
+  return true;
+}
+function pphSrcRect(){
+  var e=document.querySelector('.mcp .mcp-ph');if(!e||!ui.mcp)return null;
+  var r=e.getBoundingClientRect();
+  return (r.width&&r.bottom>0&&r.top<window.innerHeight)?r:null;
+}
+function pphPicHTML(d){return d.p?'<span class="aimg '+d.p+'" role="img" aria-label="'+esc(d.name)+'"></span>':'<b>'+esc(d.n)+'</b>'}
+/* full-screen photo viewer */
+function pphOpen(d){
+  if(pph.on)return;
+  var r=pphSrcRect();
+  var el=document.createElement('div');
+  el.className='pph';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');
+  el.style.setProperty('--h',d.h);
+  el.innerHTML='<div class="pph-bg"></div><div class="pph-pic">'+pphPicHTML(d)+'</div>'+
+    '<div class="pph-top"><button type="button" class="pph-bk" data-pph="close" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button><div class="pph-tt"><b dir="auto">'+esc(d.name)+'</b>'+(d.when?'<small>'+esc(d.when)+'</small>':'')+'</div></div>';
+  var pic=el.querySelector('.pph-pic');
+  document.body.appendChild(el);
+  pph.on=true;pph.el=el;
+  pic.style.transition='none';
+  pphFrom(pic,r,'0');
+  void pic.offsetWidth;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){
+    pic.style.transition='';pic.style.transform='';pic.style.borderRadius='';
+    el.classList.add('open');
+  })});
+  try{history.pushState({pph:1},'',location.href)}catch(x){}
+  try{if(navigator.vibrate)navigator.vibrate(12)}catch(x){}
+  /* drag the photo up or down to close it; a tap closes it too */
+  var g=null;
+  el.addEventListener('touchstart',function(e){if(e.touches.length===1)g={y:e.touches[0].clientY,dy:0}},{passive:true});
+  el.addEventListener('touchmove',function(e){
+    if(!g||e.touches.length!==1)return;
+    g.dy=e.touches[0].clientY-g.y;
+    var k=Math.min(Math.abs(g.dy)/420,.6);
+    pic.style.transition='none';pic.style.transform='translateY('+g.dy+'px) scale('+(1-k*.35)+')';
+    el.querySelector('.pph-bg').style.opacity=String(1-k*1.4);
+    if(e.cancelable)e.preventDefault();
+  },{passive:false});
+  el.addEventListener('touchend',function(){
+    if(!g)return;var dy=g.dy;g=null;
+    if(Math.abs(dy)>110){pphClose();return}
+    pic.style.transition='';pic.style.transform='';el.querySelector('.pph-bg').style.opacity='';
+    if(Math.abs(dy)<8)pphClose();
+  },{passive:true});
+  el.addEventListener('click',function(e){if(e.target.closest('[data-pph="close"]'))pphClose()});
+}
+function pphClose(){
+  if(!pph.on)return;
+  if(history.state&&history.state.pph){history.back();return}
+  pphDo();
+}
+function pphDo(){
+  if(!pph.on)return;
+  var el=pph.el,r=pphSrcRect();
+  pph.on=false;pph.el=null;
+  if(!el)return;
+  var pic=el.querySelector('.pph-pic'),bg=el.querySelector('.pph-bg');
+  pic.style.transition='';bg.style.opacity='';
+  if(!pphFrom(pic,r,'0'))pic.style.transform='scale(.92)';
+  el.classList.remove('open');
+  setTimeout(function(){el.remove()},420);
+}
+/* the pull, on the other person's profile page (.mcp): only at its very top; the photo grows while you pull, and opens full screen on release */
+function pphData(){
+  var l=mcLink(ui.mcl);if(!l)return null;
+  var v=mcPeerAv(l),nm=mcPeer(l),A=MC.msgs[l.id]||[],i,av,first=null;
+  /* the picture's date: the first message of the latest run that carries this same picture */
+  for(i=A.length-1;i>=0;i--){
+    if(A[i].sender_id===CNX.uid||!(A[i].meta&&A[i].meta.av))continue;
+    av=A[i].meta.av;
+    if((okPhoto(av.p)&&!isVip(av.p)?av.p:'')===v.p&&String(av.h)===String(v.h)){first=A[i]}else break;
+  }
+  var when='';
+  try{if(first)when=cnxDate(first.created_at)+' · '+kcxTime(mcMs(first.created_at))}catch(e){}
+  return {name:nm,when:when,p:v.p,h:v.h,n:v.n};
+}
+(function(){
+  var g=null,TH=56;
+  function pg(){return document.querySelector('.mcp')}
+  function can(e){
+    var o=pg();if(e.touches.length!==1||pph.on||!o||!ui.mcp)return false;
+    return !!e.target.closest('.mcp')&&o.scrollTop<=0&&!e.target.closest('.mcp-tabs');
+  }
+  function reset(){
+    var o=pg(),h=o&&o.querySelector('.mcp-hero');
+    if(h){o.classList.remove('pull','rdy');h.style.height=''}
+    g=null;
+  }
+  document.addEventListener('touchstart',function(e){
+    g=null;if(!can(e))return;
+    g={x:e.touches[0].clientX,y:e.touches[0].clientY,on:false,d:0,h0:0};
+  },{passive:true});
+  document.addEventListener('touchmove',function(e){
+    if(!g)return;
+    var o=pg(),h=o&&o.querySelector('.mcp-hero');
+    if(e.touches.length!==1||pph.on||!h){reset();return}
+    var dx=e.touches[0].clientX-g.x,dy=e.touches[0].clientY-g.y;
+    if(!g.on){
+      if(dy<-6||(Math.abs(dx)>10&&Math.abs(dx)>Math.abs(dy))){g=null;return}
+      if(dy<12||o.scrollTop>0)return;
+      g.on=true;g.y0=g.y+12;g.h0=h.offsetHeight;o.classList.add('pull');
+    }
+    g.d=Math.max(0,e.touches[0].clientY-g.y0);
+    var k=Math.min(g.d*.5,140);
+    if(e.cancelable)e.preventDefault();
+    h.style.height=(g.h0+k)+'px';
+    var rd=k>=TH;
+    if(rd!==o.classList.contains('rdy')){o.classList.toggle('rdy',rd);if(rd){try{if(navigator.vibrate)navigator.vibrate(8)}catch(x){}}}
+  },{passive:false});
+  function end(open){
+    var go=open&&g&&g.on&&Math.min(g.d*.5,140)>=TH;
+    var d=go?pphData():null,o=pg(),ph=o&&o.querySelector('.mcp-ph');
+    if(d)pphOpen(d);
+    reset();
+  }
+  document.addEventListener('touchend',function(){end(true)},{passive:true});
+  document.addEventListener('touchcancel',function(){end(false)},{passive:true});
+})();
 function openProfile(){
   var vNew=checkVip(),vFade=!!state.profile.vip&&!state.profile.vipSeen;
   if(vFade)state.profile.vipSeen=true;
@@ -1693,7 +2072,7 @@ var fired={};
 function tick(){
   tlNow();
   var now=Date.now();
-  remCheck();foTick();grCheck();
+  remCheck();foTick();grCheck();wkCheck();
   document.querySelectorAll('.cd').forEach(function(el){
     var tg=Number(el.dataset.tg);if(!tg)return;
     var ms=tg-now,late=ms<0,v=el.querySelector('.cdv'),l=el.querySelector('.cdl');
@@ -2634,6 +3013,7 @@ function nsSmart(){
     }
   }
   try{out=out.concat(kaAdvNotifs())}catch(e){}
+  try{out=out.concat(wkNotifs(now,td))}catch(e){}
   var NC=nsCfg();
   out.forEach(function(o){if(!(o.extra&&o.extra.src))nsTag(o,'asst',o.extra&&o.extra.kind==='wr'?'wr':'')});
   return out.filter(function(o){var q=o.extra.src;return q==='part'?NC.sp:q==='asst'?NC.sa:NC.sm});
@@ -4197,7 +4577,7 @@ function foDrawTasks(){
   $('#foTaskLbl').textContent=tk?tk.t:(__("یک کار را انتخاب کن یا بدون کار شروع کن"));
 }
 function openFocus(){
-  foDrawDur();foDrawTasks();
+  foDrawDur();foDrawTasks();fgBtn();
   clearTimeout(foCloseT);FW.hidden=false;foDraw();
   requestAnimationFrame(function(){requestAnimationFrame(function(){FW.classList.add('open')})});
 }
@@ -4209,6 +4589,7 @@ function closeFocus(){
 var FN=null;
 try{var CAP3=window.Capacitor;if(CAP3&&CAP3.isNativePlatform&&CAP3.isNativePlatform())FN=(CAP3.Plugins&&CAP3.Plugins.FocusNotify)||(CAP3.registerPlugin&&CAP3.registerPlugin('FocusNotify'))||null}catch(e){FN=null}
 function foNotif(){
+  fgSync();
   if(!FN&&!NL&&!AN)return;
   try{
     var tk=fo.task?find(fo.task):null,txt=tk?tk.t:(__("بدون حواس‌پرتی کار کن")),mins=Math.round(fo.dur/60);
@@ -4279,6 +4660,433 @@ $('#foTasks').addEventListener('click',function(e){var b=e.target.closest('[data
 $('#foFin').addEventListener('click',function(){if(fo.task)toggle(fo.task);foDrawTasks();foDraw()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!FW.hidden){e.preventDefault();closeFocus()}});
 actions.openFocus=openFocus;
+
+/* ---------- focus guard: warn about / block distracting apps while a study part or the focus timer is running ----------
+   state.profile.fg = {on, mode:'warn'|'block', pk:[package names] | null (not chosen yet), tm: during the focus timer, pt: during timetable parts, sn: 5-minute break button}
+   Native side: FocusGuardPlugin / FocusGuardService (needs Usage access; the block screen needs Display over other apps). */
+var FG=null;
+try{var CAP5=window.Capacitor;if(CAP5&&CAP5.isNativePlatform&&CAP5.isNativePlatform())FG=(CAP5.Plugins&&CAP5.Plugins.FocusGuard)||(CAP5.registerPlugin&&CAP5.registerPlugin('FocusGuard'))||null}catch(e){FG=null}
+var FG_DEF=['com.instagram.android','org.telegram.messenger','org.telegram.messenger.web','org.thunderdog.challegram','com.whatsapp','com.google.android.youtube','com.zhiliaoapp.musically','com.twitter.android','com.facebook.katana','com.snapchat.android','ir.resaneh1.iptv','ir.nasim'];
+function fgCfg(){
+  var x=state.profile.fg,o={on:false,mode:'warn',pk:null,tm:true,pt:true,sn:true};
+  if(x&&typeof x==='object'){
+    if(x.on===true)o.on=true;
+    if(x.mode==='block')o.mode='block';
+    if(Array.isArray(x.pk))o.pk=x.pk.filter(function(k){return typeof k==='string'&&/^[A-Za-z0-9_.]{3,200}$/.test(k)}).slice(0,200);
+    if(x.tm===false)o.tm=false;
+    if(x.pt===false)o.pt=false;
+    if(x.sn===false)o.sn=false;
+  }
+  return o;
+}
+/* the timetable parts of the shown week that have a lesson and a start AND end time -> [[startMs,endMs],...] */
+function fgWins(){
+  var out=[],now=Date.now(),lim=now+8*864e5;
+  try{
+    ttPlanItems(ttGet()).forEach(function(it){
+      if(!it.tm||!it.te)return;
+      var d=/^(\d{4})-(\d{2})-(\d{2})$/.exec(it.d),a=/^(\d{2}):(\d{2})$/.exec(it.tm),b=/^(\d{2}):(\d{2})$/.exec(it.te);
+      if(!d||!a||!b)return;
+      var s=new Date(+d[1],+d[2]-1,+d[3],+a[1],+a[2]).getTime(),e=new Date(+d[1],+d[2]-1,+d[3],+b[1],+b[2]).getTime();
+      if(e>now&&s<lim&&e>s)out.push([s,e]);
+    });
+  }catch(err){}
+  return out.slice(0,80);
+}
+/* tells the native service what to guard and when; called after every change and every minute */
+function fgSync(){
+  if(!FG)return;
+  var c=fgCfg();
+  try{
+    if(!c.on||!c.pk||!c.pk.length){FG.config({on:false}).catch(function(){});return}
+    FG.config({on:true,mode:c.mode,pk:c.pk,sn:c.sn,wins:c.pt?fgWins():[],te:(c.tm&&fo.run)?fo.end:0,
+      title:__('الان وقت مطالعه است 📚','It’s study time 📚'),
+      msg:__('این برنامه تا پایان تمرکز بسته است.','This app is locked until focus time ends.'),
+      back:__('برگرد به Ario','Back to Ario'),
+      rest:__('۵ دقیقه استراحت','5-minute break'),
+      warn:__('الان وقت تمرکز است؛ برگرد سر درس 📚','It’s focus time. Back to study 📚')}).catch(function(){});
+  }catch(e){}
+}
+function fgBtn(){
+  var b=$('#foGuard');if(!b)return;
+  b.hidden=!FG;
+  b.textContent='🔒 '+__('قفل برنامه‌ها','App lock')+' · '+(fgCfg().on?__('روشن','On'):__('خاموش','Off'));
+}
+function openFocusGuard(){
+  var ttl=__('قفل برنامه‌ها در تمرکز','App lock while focusing');
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div><div class="ns-body fg-body"></div>',ttl);
+  var w=sw.w,body=w.querySelector('.fg-body'),perm={usage:false,overlay:false},apps=null;
+  function tg(k,ic,t,sb){return '<button type="button" class="qrow" role="switch" aria-checked="'+!!fgCfg()[k]+'" data-fg="'+k+'"><span class="h3d">'+icon(ic)+'</span><span class="qt"><b>'+t+'</b><small>'+sb+'</small></span><span class="sw"></span></button>'}
+  function pr(e,ic,t,ok,no){return '<button type="button" class="qrow" data-e="'+e+'"><span class="h3d">'+icon(ic)+'</span><span class="qt"><b>'+t+'</b><small>'+(ok?__('داده شد ✓','Granted ✓'):no)+'</small></span></button>'}
+  function sec(h,inner,hint){return '<div class="sec"><div class="sec-h"><b>'+h+'</b></div>'+inner+(hint?'<p class="hint">'+hint+'</p>':'')+'</div>'}
+  function appRow(a,on){return '<button type="button" class="qrow" role="switch" aria-checked="'+on+'" data-pk="'+esc(a.pk)+'"><span class="qt"><b>'+esc(a.label)+'</b></span><span class="sw"></span></button>'}
+  function paint(){
+    var c=fgCfg(),h='';
+    if(!FG){body.innerHTML='<p class="hint">'+__('قفل برنامه‌ها فقط روی برنامه‌ی اندروید کار می‌کند.','App lock only works in the Android app.')+'</p>';return}
+    h+=sec(__('دسترسی‌ها','Permissions'),'<div class="qsheet">'+
+      pr('usage','shield',__('دسترسی به آمار استفاده (Usage access)','Usage access'),perm.usage,__('لازم است تا بفهمم کدام برنامه روشن است. بزن و «Ario» را روشن کن.','Needed to know which app is open. Tap and turn “Ario” on.'))+
+      pr('overlay','lock',__('نمایش روی سایر برنامه‌ها','Display over other apps'),perm.overlay,__('فقط برای حالت «مسدود»؛ بدون آن فقط هشدار می‌دهم.','Only for “Block” mode; without it I can only warn.'))+'</div>');
+    h+=sec(__('قفل برنامه‌ها','App lock'),'<div class="qsheet">'+tg('on','lock',__('روشن','On'),__('در زمان تمرکز، برنامه‌های حواس‌پرتی را مسدود می‌کنم یا هشدار می‌دهم','During focus I block or warn about distracting apps'))+'</div>');
+    h+=sec(__('وقتی یکی از آن‌ها باز شد','When one of them opens'),'<div class="chips">'+[['warn',__('هشدار','Warn')],['block',__('مسدود','Block')]].map(function(o){return '<button type="button" class="chip" data-fm="'+o[0]+'" aria-pressed="'+(c.mode===o[0])+'">'+o[1]+'</button>'}).join('')+'</div>',
+      c.mode==='block'&&!perm.overlay?__('برای مسدود کردن، دسترسی «نمایش روی سایر برنامه‌ها» لازم است؛ تا آن موقع فقط هشدار می‌آید.','Blocking needs “Display over other apps”; until then you only get a warning.'):'');
+    h+=sec(__('چه زمانی فعال باشد','When it is active'),'<div class="qsheet">'+
+      tg('tm','timer',__('وقتی تایمر تمرکز روشن است','While the focus timer runs'),__('از شروع تا پایان یا توقف تایمر','From start to finish or pause'))+
+      tg('pt','clock',__('در پارت‌های جدول مطالعه','During timetable study parts'),__('پارت‌هایی که درس و ساعت شروع و پایان دارند','Parts that have a lesson and a start and end time'))+
+      tg('sn','pause',__('دکمه‌ی ۵ دقیقه استراحت','5-minute break button'),__('روی صفحه‌ی مسدود؛ برای سخت‌گیری بیشتر خاموشش کن','On the block screen; turn it off to be stricter'))+'</div>');
+    var sel=c.pk||[];
+    if(!apps)h+=sec(__('برنامه‌های حواس‌پرتی','Distracting apps'),'<p class="hint">'+__('در حال خواندن برنامه‌ها…','Loading apps…')+'</p>');
+    else{
+      var sug=apps.filter(function(a){return FG_DEF.indexOf(a.pk)>-1}),rest=apps.filter(function(a){return FG_DEF.indexOf(a.pk)<0});
+      h+=sec(__('پیشنهادی','Suggested'),sug.length?'<div class="qsheet">'+sug.map(function(a){return appRow(a,sel.indexOf(a.pk)>-1)}).join('')+'</div>':'<p class="hint">'+__('برنامه‌ی پرتکرار حواس‌پرتی پیدا نشد؛ از فهرست پایین انتخاب کن.','No common distracting apps found; pick from the list below.')+'</p>');
+      h+=sec(__('همه‌ی برنامه‌ها','All apps'),'<div class="qsheet">'+rest.map(function(a){return appRow(a,sel.indexOf(a.pk)>-1)}).join('')+'</div>',
+        __('برنامه‌ی تماس، تنظیمات و خود Ario را انتخاب نکن تا هیچ‌وقت قفل نشوی.','Don’t pick the phone app, Settings or Ario itself, so you never lock yourself out.'));
+    }
+    h+='<div class="tt-eb"><button type="button" class="tt-btn pri full" data-e="close">'+__('تمام','Done')+'</button></div>';
+    var y=body.scrollTop;body.innerHTML=h;body.scrollTop=y;
+  }
+  function refresh(){
+    if(!FG)return;
+    FG.status().then(function(r){perm={usage:!!(r&&r.usage),overlay:!!(r&&r.overlay)};if(w.isConnected)paint()}).catch(function(){});
+  }
+  function loadApps(){
+    if(!FG||!FG.apps)return;
+    FG.apps().then(function(r){
+      apps=(r&&r.apps)||[];
+      var c=fgCfg();
+      if(c.pk===null){
+        c.pk=apps.map(function(a){return a.pk}).filter(function(k){return FG_DEF.indexOf(k)>-1});
+        state.profile.fg=c;writeCache();persist();
+      }
+      if(w.isConnected)paint();
+    }).catch(function(){apps=[];if(w.isConnected)paint()});
+  }
+  paint();refresh();loadApps();
+  var vis=function(){if(!w.isConnected){document.removeEventListener('visibilitychange',vis);return}if(!document.hidden)refresh()};
+  document.addEventListener('visibilitychange',vis);
+  function done(){document.removeEventListener('visibilitychange',vis);fgSync();fgBtn();if(ui.tab==='account')render()}
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e],[data-fg],[data-fm],[data-pk]');if(!b||!FG)return;
+    if(b.dataset.e==='close'){sw.close();done();return}
+    if(b.dataset.e==='usage'){FG.openUsageSettings().catch(function(){});return}
+    if(b.dataset.e==='overlay'){FG.openOverlaySettings().catch(function(){});return}
+    var c=fgCfg();
+    if(b.dataset.fg){
+      var k=b.dataset.fg;
+      if(k==='on'&&!c.on){
+        if(!perm.usage){toast(__('اول «دسترسی به آمار استفاده» را بده','First give “Usage access”'),null,null,'warn');FG.openUsageSettings().catch(function(){});return}
+        if(!c.pk||!c.pk.length){toast(__('حداقل یک برنامه انتخاب کن','Pick at least one app'),null,null,'warn');return}
+        if(c.mode==='block'&&!perm.overlay){toast(__('برای مسدود کردن، «نمایش روی سایر برنامه‌ها» را هم روشن کن','To block, also turn on “Display over other apps”'),null,null,'warn');FG.openOverlaySettings().catch(function(){})}
+      }
+      c[k]=!c[k];
+    }else if(b.dataset.fm)c.mode=b.dataset.fm;
+    else if(b.dataset.pk){
+      var pk=b.dataset.pk,i=(c.pk||[]).indexOf(pk);
+      c.pk=c.pk||[];
+      if(i>-1)c.pk.splice(i,1);else c.pk.push(pk);
+    }
+    state.profile.fg=c;writeCache();persist();fgSync();
+    try{hap('tick')}catch(er){}
+    paint();
+  });
+  w.querySelector('.dim').addEventListener('click',done);
+}
+actions.openFocusGuard=openFocusGuard;
+$('#foGuard').addEventListener('click',openFocusGuard);
+setTimeout(function(){fgSync();fgBtn()},2500);
+setInterval(fgSync,60000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)fgSync()});
+
+/* ---------- automatic weekly report (every Wednesday): hours, strongest / weakest lesson, unwritten reports, a tip; image or PDF for the parents ----------
+   state.profile.wk = {on, at:'HH:MM', last:'YYYY-MM-DD' (Wednesday already announced to the student), lastA: same for the advisor}
+   The 7 days end on the report day. Lessons come from the daily report forms (name, study time, test percent) and the Konkooria hours. */
+function wkCfg(){
+  var x=state.profile.wk,o={on:true,at:'21:00',last:'',lastA:''};
+  if(x&&typeof x==='object'){
+    if(x.on===false)o.on=false;
+    if(/^([01]\d|2[0-3]):[0-5]\d$/.test(x.at||''))o.at=x.at;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(x.last||''))o.last=x.last;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(x.lastA||''))o.lastA=x.lastA;
+  }
+  return o;
+}
+function wkSave(c){state.profile.wk=c;writeCache();persist()}
+function wkNum(s){return String(s==null?'':s).replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}).replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace(/٫/g,'.')}
+function wkMin(s){var x=wkNum(s),h=/(\d+)\s*(?:ساعت|h)/.exec(x),m=/(\d+)\s*(?:دقیقه|min|m\b)/.exec(x);return (h?+h[1]*60:0)+(m?+m[1]:0)}
+function wkPct(s){var m=/(\d+(?:\.\d+)?)\s*[٪%]/.exec(wkNum(s));if(!m)return null;var n=parseFloat(m[1]);return isFinite(n)?Math.max(0,Math.min(100,n)):null}
+function wkLn(s){
+  s=String(s||'').replace(/\s+/g,' ').trim();if(!s)return '';
+  var a=KK_SUBS.concat(kkD().subs||[]),i;
+  for(i=0;i<a.length;i++)if(a[i]!=='آزمون'&&s.indexOf(a[i])>-1)return a[i];
+  if(/دین/.test(s))return 'دینی';
+  return s.split(/[\-–—،,:\/]/)[0].trim().slice(0,20);
+}
+/* the most recent Wednesday on or before today */
+function wkWed(){var td=todayKey(),i;for(i=0;i<7;i++){var k=addDays(td,-i);if(parse(k).getDay()===3)return k}return td}
+function wkAtMs(k,hm){var q=hm.split(':').map(Number),d=parse(k);d.setHours(q[0],q[1],0,0);return d.getTime()}
+/* recs: {'YYYY-MM-DD': {sp,te,tc,cr,body}} -> numbers of the 7 days that end on `end`; kkOn adds the Konkooria hours of this phone */
+function wkBuild(recs,end,kkOn){
+  var R={from:addDays(end,-6),to:end,days:[],min:0,te:0,tc:0,cr:0,rep:0,miss:[],les:[],strong:null,weak:null,basis:'',best:null,acc:null,sug:[]},map={},i;
+  function les(n){return map[n]||(map[n]={n:n,min:0,ps:[]})}
+  for(i=6;i>=0;i--){
+    var k=addDays(end,-i),r=recs[k]||null,kmin=0;
+    if(kkOn)kkList(k).forEach(function(x){kmin+=+x.m||0;var n=wkLn(x.s);if(n)les(n).min+=(+x.m||0)});
+    var sp=Math.max(r?r.sp:0,kmin);
+    R.days.push({k:k,has:!!r,sp:sp,te:r?r.te:0});
+    if(r){R.rep++;R.te+=r.te;R.tc+=r.tc;R.cr+=r.cr}else R.miss.push(k);
+    R.min+=sp;
+    if(sp>0&&(!R.best||sp>R.best.sp))R.best={k:k,sp:sp};
+    if(r&&r.body){
+      try{rpParse(r.body).parts.forEach(function(p){
+        var n=wkLn(p.n);if(!n)return;
+        var o=les(n),pc=wkPct(p.pc);
+        if(!kmin)o.min+=wkMin(p.st);
+        if(pc!=null)o.ps.push(pc);
+      })}catch(e){}
+    }
+  }
+  R.les=Object.keys(map).map(function(n){var o=map[n];return {n:n,min:o.min,pc:o.ps.length?Math.round(o.ps.reduce(function(a,b){return a+b},0)/o.ps.length):null}}).filter(function(l){return l.min>0||l.pc!=null}).sort(function(a,b){return b.min-a.min});
+  R.acc=R.tc>0?Math.round(R.cr/R.tc*100):null;
+  var wp=R.les.filter(function(l){return l.pc!=null}).sort(function(a,b){return b.pc-a.pc}),wm=R.les.filter(function(l){return l.min>0});
+  if(wp.length>=2){R.strong=wp[0];R.weak=wp[wp.length-1];R.basis='pct'}
+  else if(wm.length>=2){R.strong=wm[0];R.weak=wm[wm.length-1];R.basis='time'}
+  /* a tip for next week (at most two) */
+  if(R.miss.length>=3)R.sug.push(__('این هفته '+fa(R.miss.length)+' روز گزارش ننوشتی. حتی یک گزارش کوتاه هر شب کمک می‌کند ببینی وقتت کجا می‌رود.','You skipped '+R.miss.length+' daily reports this week. Even a short report each night shows where your time goes.'));
+  if(R.weak&&R.basis==='pct')R.sug.push(__('هفته‌ی بعد دست‌کم دو پارت بیشتر به «'+R.weak.n+'» بده (میانگین تست‌هایش '+fa(R.weak.pc)+'٪ بود) و غلط‌هایش را مرور کن.','Next week give “'+R.weak.n+'” at least two more parts (its test average was '+R.weak.pc+'%) and review its mistakes.'));
+  else if(R.weak&&R.basis==='time')R.sug.push(__('«'+R.weak.n+'» کمترین زمان را گرفت؛ هفته‌ی بعد برایش پارت مشخص بگذار.','“'+R.weak.n+'” got the least time; schedule fixed parts for it next week.'));
+  if(R.acc!=null&&R.tc>=20&&R.acc<50&&R.sug.length<2)R.sug.push(__('درصد تست‌ها پایین است ('+fa(R.acc)+'٪)؛ به‌جای تست بیشتر، زمان تحلیل غلط‌ها را بیشتر کن.','Your test accuracy is low ('+R.acc+'%); spend more time analysing mistakes instead of doing more tests.'));
+  if(!R.sug.length)R.sug.push(R.min>0?__('هفته‌ی خوبی بود؛ برای هفته‌ی بعد ساعت مطالعه را کمی بیشتر کن و ادامه بده.','A good week; aim for a little more study time next week and keep going.'):__('این هفته داده‌ای ثبت نشده؛ از امشب با یک گزارش کوتاه شروع کن.','No data this week; start tonight with a short report.'));
+  R.sug=R.sug.slice(0,2);
+  return R;
+}
+function wkStudent(end){
+  var rp=rpD(),recs={};
+  Object.keys(rp).forEach(function(k){if(k>=addDays(end,-6)&&k<=end){var x=rp[k];recs[k]={sp:x.sp,te:x.te,tc:x.tc,cr:x.cr,body:x.t}}});
+  return wkBuild(recs,end,true);
+}
+function wkRange(R){return F.short.format(parse(R.from))+' – '+F.short.format(parse(R.to))}
+function wkLessonVal(l,basis){return basis==='pct'?fa(l.pc)+'٪':kkShort(l.min)}
+function wkHTML(R,who){
+  var mx=Math.max.apply(null,R.les.map(function(l){return l.min}).concat([1])),h='';
+  h+='<div class="wk-h"><b>'+esc(who)+'</b><small>'+wkRange(R)+'</small></div>';
+  h+='<div class="cd-sum"><div><b>'+(R.min?kkShort(R.min):'—')+'</b><small>'+__('ساعت مطالعه','study time')+'</small></div><div><b>'+(R.acc!=null?fa(R.acc)+'٪':fa(R.te))+'</b><small>'+(R.acc!=null?__('درصد درست تست‌ها','test accuracy'):__('تعداد تست','tests'))+'</small></div><div class="'+(R.miss.length>=3?'bad':'')+'"><b>'+fa(R.miss.length)+'</b><small>'+__('گزارش ننوشته','reports missing')+'</small></div></div>';
+  if(R.strong){
+    var lb=R.basis==='pct'?[__('قوی‌ترین درس','Strongest lesson'),__('ضعیف‌ترین درس','Weakest lesson')]:[__('بیشترین زمان','Most time'),__('کمترین زمان','Least time')];
+    h+='<div class="cd-sum wk-sw"><div><b>'+esc(R.strong.n)+'</b><small>'+lb[0]+' · '+wkLessonVal(R.strong,R.basis)+'</small></div><div class="'+(R.basis==='pct'?'bad':'')+'"><b>'+esc(R.weak.n)+'</b><small>'+lb[1]+' · '+wkLessonVal(R.weak,R.basis)+'</small></div></div>';
+  }else h+='<p class="hint">'+__('برای دیدن قوی‌ترین و ضعیف‌ترین درس، حداقل دو درس با درصد تست (یا ساعت مطالعه) در گزارش‌ها لازم است.','To see the strongest and weakest lesson, the reports need at least two lessons with a test percent (or study time).')+'</p>';
+  if(R.les.length)h+='<section class="cd-ch"><h3>'+__('زمان هر درس','Time per lesson')+'</h3>'+R.les.slice(0,8).map(function(l){return '<div class="wk-ls"><span>'+esc(l.n)+'</span><i><u style="width:'+Math.max(4,Math.round(l.min/mx*100))+'%"></u></i><b>'+(l.min?kkShort(l.min):'—')+(l.pc!=null?' · '+fa(l.pc)+'٪':'')+'</b></div>'}).join('')+'</section>';
+  h+='<section class="cd-ch"><h3>'+__('گزارش‌های این هفته','Reports this week')+' · '+fa(R.rep)+'/'+fa(7)+'</h3><div class="wk-dots">'+R.days.map(function(d){return '<span class="'+(d.has?'on':'')+'"><i></i><small>'+WK_D[parse(d.k).getDay()]+'</small></span>'}).join('')+'</div></section>';
+  h+='<section class="wk-tip"><b>'+__('پیشنهاد برای هفته‌ی بعد','Suggestion for next week')+'</b>'+R.sug.map(function(s){return '<p>'+esc(s)+'</p>'}).join('')+'</section>';
+  return h;
+}
+var WK_D=['یک','دو','سه','چهار','پنج','جمعه','شنبه'];
+WK_D=EN?['Sun','Mon','Tue','Wed','Thu','Fri','Sat']:['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'];
+
+/* ----- picture (A4-like, 1080 wide) and PDF ----- */
+async function wkImage(R,who){
+  try{await Promise.all([document.fonts.load('800 24px Vazirmatn'),document.fonts.load('700 24px Vazirmatn'),document.fonts.load('400 24px Vazirmatn')])}catch(e){}
+  var S=2,W=1080,PAD=48,FF='Vazirmatn,Tahoma,system-ui,sans-serif',mc=document.createElement('canvas').getContext('2d');
+  mc.direction='rtl';
+  function wrap(font,t,w){mc.font=font;return ttWrap(mc,String(t),w)}
+  var les=R.les.slice(0,6),sugL=[];
+  R.sug.forEach(function(s){sugL=sugL.concat(wrap('500 28px '+FF,s,W-2*PAD-60)).concat([''])});
+  if(sugL.length)sugL.pop();
+  var H=230+40+190+40+(R.strong?200+40:0)+(les.length?(70+les.length*66+40):0)+170+40+(70+sugL.length*44+50)+40+70;
+  var cv=document.createElement('canvas');cv.width=W*S;cv.height=H*S;
+  var cx=cv.getContext('2d');cx.scale(S,S);cx.direction='rtl';cx.textBaseline='middle';
+  function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath()}
+  function T(t,x,y,font,col,al){cx.font=font;cx.fillStyle=col;cx.textAlign=al||'right';cx.fillText(String(t),x,y)}
+  cx.fillStyle='#f3f5fb';cx.fillRect(0,0,W,H);
+  var g=cx.createLinearGradient(0,0,W,230);g.addColorStop(0,'#3d63f0');g.addColorStop(1,'#7c4dff');
+  cx.fillStyle=g;cx.fillRect(0,0,W,230);
+  T(__('گزارش هفتگی','Weekly report'),W-PAD,82,'800 56px '+FF,'#fff');
+  T(who,W-PAD,148,'700 32px '+FF,'#fff');
+  T(wkRange(R),W-PAD,194,'500 26px '+FF,'rgba(255,255,255,.85)');
+  var y=270,cw=(W-2*PAD-48)/3;
+  function card(x,yy,w,h,val,lab,col){cx.fillStyle='#fff';rr(x,yy,w,h,26);cx.fill();T(val,x+w/2,yy+h*0.42,'800 '+(String(val).length>9?34:54)+'px '+FF,col||'#1b2440','center');T(lab,x+w/2,yy+h*0.78,'600 25px '+FF,'#6b7592','center')}
+  card(PAD+2*(cw+24),y,cw,190,R.min?kkShort(R.min):'—',__('ساعت مطالعه','study time'),'#3d63f0');
+  card(PAD+(cw+24),y,cw,190,R.acc!=null?fa(R.acc)+'٪':fa(R.te),R.acc!=null?__('درصد درست تست‌ها','test accuracy'):__('تعداد تست','tests'),'#0f9f9a');
+  card(PAD,y,cw,190,fa(R.miss.length),__('گزارش ننوشته','reports missing'),R.miss.length>=3?'#d6455a':'#2f9e5b');
+  y+=190+40;
+  if(R.strong){
+    var lb=R.basis==='pct'?[__('قوی‌ترین درس','Strongest lesson'),__('ضعیف‌ترین درس','Weakest lesson')]:[__('بیشترین زمان','Most time'),__('کمترین زمان','Least time')],hw=(W-2*PAD-24)/2;
+    [[R.strong,lb[0],'#2f9e5b',PAD+hw+24],[R.weak,lb[1],'#d6455a',PAD]].forEach(function(a){
+      cx.fillStyle='#fff';rr(a[3],y,hw,200,26);cx.fill();cx.fillStyle=a[2];rr(a[3]+hw-10,y+26,10,148,5);cx.fill();
+      T(a[1],a[3]+hw-34,y+48,'600 25px '+FF,'#6b7592');
+      T(a[0].n,a[3]+hw-34,y+104,'800 40px '+FF,'#1b2440');
+      T(wkLessonVal(a[0],R.basis),a[3]+hw-34,y+156,'700 30px '+FF,a[2]);
+    });
+    y+=200+40;
+  }
+  if(les.length){
+    cx.fillStyle='#fff';rr(PAD,y,W-2*PAD,70+les.length*66+10,26);cx.fill();
+    T(__('زمان هر درس','Time per lesson'),W-PAD-30,y+40,'800 30px '+FF,'#1b2440');
+    var mx=Math.max.apply(null,les.map(function(l){return l.min}).concat([1]));
+    les.forEach(function(l,i){
+      var yy=y+70+i*66+28;
+      T(l.n,W-PAD-30,yy,'600 27px '+FF,'#1b2440');
+      var bx=PAD+250,bw=W-2*PAD-250-250-30;
+      cx.fillStyle='#e6eaf6';rr(bx,yy-11,bw,22,11);cx.fill();
+      cx.fillStyle='#3d63f0';var fw=Math.max(14,bw*l.min/mx);rr(bx+bw-fw,yy-11,fw,22,11);cx.fill();
+      T((l.min?kkShort(l.min):'—')+(l.pc!=null?' · '+fa(l.pc)+'٪':''),PAD+30,yy,'700 25px '+FF,'#6b7592','left');
+    });
+    y+=70+les.length*66+10+30;
+  }
+  cx.fillStyle='#fff';rr(PAD,y,W-2*PAD,170,26);cx.fill();
+  T(__('گزارش‌های این هفته','Reports this week')+' · '+fa(R.rep)+'/'+fa(7),W-PAD-30,y+40,'800 28px '+FF,'#1b2440');
+  var dw=(W-2*PAD-60)/7;
+  R.days.forEach(function(d,i){
+    var x=W-PAD-30-dw*i-dw/2;
+    cx.fillStyle=d.has?'#2f9e5b':'#e6eaf6';cx.beginPath();cx.arc(x,y+98,22,0,Math.PI*2);cx.fill();
+    if(d.has)T('✓',x,y+99,'800 26px '+FF,'#fff','center');
+    T(WK_D[parse(d.k).getDay()],x,y+144,'500 20px '+FF,'#6b7592','center');
+  });
+  y+=170+40;
+  var sh=70+sugL.length*44+50;
+  cx.fillStyle='#fff8e6';rr(PAD,y,W-2*PAD,sh,26);cx.fill();
+  T('💡 '+__('پیشنهاد برای هفته‌ی بعد','Suggestion for next week'),W-PAD-30,y+42,'800 30px '+FF,'#8a5a00');
+  sugL.forEach(function(l,i){if(l)T(l,W-PAD-30,y+96+i*44,'500 28px '+FF,'#4a3a10')});
+  y+=sh+40;
+  T('Ario',W/2,y+22,'700 24px '+FF,'#9aa3bd','center');
+  return await new Promise(function(res){cv.toBlob(res,'image/png')});
+}
+async function wkPdf(png){
+  var L=await xpLib(),doc=await L.PDFDocument.create(),img=await doc.embedPng(await png.arrayBuffer());
+  var pw=595.28,ph=841.89,sc=Math.min((pw-36)/img.width,(ph-36)/img.height),w=img.width*sc,h=img.height*sc,pg=doc.addPage([pw,ph]);
+  pg.drawImage(img,{x:(pw-w)/2,y:ph-18-h,width:w,height:h});
+  return new Blob([await doc.save()],{type:'application/pdf'});
+}
+/* system share sheet (send to the parents in a chat, save to Drive...) */
+async function wkShare(blob,name,mime){
+  if(bkCap('Filesystem')&&bkCap('Share')){
+    try{
+      var b64=await new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(String(fr.result).split(',')[1])};fr.onerror=rej;fr.readAsDataURL(blob)});
+      var FS=capGet('Filesystem'),SH=capGet('Share'),r=await FS.writeFile({path:name,data:b64,directory:'CACHE'});
+      await SH.share({title:__('گزارش هفتگی','Weekly report'),url:r.uri,dialogTitle:__('ارسال گزارش هفتگی','Send the weekly report')});
+      return;
+    }catch(e){if(/cancel/i.test(String(e&&e.message||e)))return}
+  }
+  try{
+    var f=new File([blob],name,{type:mime});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:__('گزارش هفتگی','Weekly report')});return}
+  }catch(e){if(e&&e.name==='AbortError')return}
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},4000);
+  toast(__('فایل دانلود شد','File downloaded'),null,null,'ok');
+}
+var WKS={el:null,busy:false};
+/* o: {title, who, end, load:function(end)->Promise<R|null>, cfg:bool} */
+function wkSheet(o){
+  if(WKS.el)return;
+  var ttl=o.title,sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-wk="close">'+__('بستن','Close')+'</button></div><div class="wk-body"></div>',ttl),w=sw.w,body=w.querySelector('.wk-body'),end=o.end||todayKey(),R=null,fail=false;
+  WKS.el=w;
+  var oc=sw.close;sw.close=function(){WKS.el=null;oc()};
+  w.querySelector('.dim').addEventListener('click',function(){WKS.el=null});
+  function nav(){return '<div class="wk-nav"><button type="button" class="chip" data-wk="prev">'+__('هفته‌ی قبل','Previous week')+'</button><b>'+(R?wkRange(R):'')+'</b><button type="button" class="chip" data-wk="next"'+(addDays(end,7)>todayKey()?' disabled':'')+'>'+__('هفته‌ی بعد','Next week')+'</button></div>'}
+  function settings(){
+    var c=wkCfg();
+    return '<div class="sec"><div class="sec-h"><b>'+__('ارسال خودکار','Automatic')+'</b></div><div class="qsheet"><button type="button" class="qrow" role="switch" aria-checked="'+c.on+'" data-wk="on"><span class="h3d">'+icon('bell')+'</span><span class="qt"><b>'+__('اعلان گزارش هفتگی','Weekly report notice')+'</b><small>'+__('هر چهارشنبه یادآوری می‌شود؛ گزارش را همان‌جا می‌بینی','Every Wednesday; you see the report right there')+'</small></span><span class="sw"></span></button></div>'+
+      (c.on?'<div class="chips">'+['18:00','20:00','21:00','22:00'].map(function(t){return '<button type="button" class="chip" data-wkt="'+t+'" aria-pressed="'+(c.at===t)+'">'+fa(t)+'</button>'}).join('')+'</div>':'')+'</div>';
+  }
+  function paint(){
+    var h=nav();
+    if(!R)h+=fail?'<p class="hint">'+__('بارگیری نشد؛ اینترنت را بررسی کن.','Could not load; check the internet.')+'</p>':skelHTML('list');
+    else{
+      h+=wkHTML(R,o.who);
+      h+='<div class="tt-eb wk-ex"><button type="button" class="tt-btn pri" data-wk="send">'+icon('send')+__('ارسال عکس','Send picture')+'</button><button type="button" class="tt-btn" data-wk="pdf">'+icon('pdf')+'PDF</button><button type="button" class="tt-btn" data-wk="gal">'+icon('img')+__('ذخیره در گالری','Save to gallery')+'</button></div>';
+    }
+    if(o.cfg)h+=settings();
+    var y=body.scrollTop;body.innerHTML=h;body.scrollTop=y;
+  }
+  function load(){R=null;fail=false;paint();var mine=end;o.load(end).then(function(r){if(mine!==end||!WKS.el)return;R=r;fail=!r;paint()}).catch(function(){if(!WKS.el)return;fail=true;paint()})}
+  load();
+  w.addEventListener('click',async function(e){
+    var b=e.target.closest('[data-wk],[data-wkt]');if(!b)return;
+    var a=b.dataset.wk,c;
+    if(a==='close'){sw.close();return}
+    if(a==='prev'){end=addDays(end,-7);load();return}
+    if(a==='next'){if(addDays(end,7)<=todayKey()){end=addDays(end,7);load()}return}
+    if(a==='on'||b.dataset.wkt){c=wkCfg();if(a==='on')c.on=!c.on;else c.at=b.dataset.wkt;wkSave(c);paint();try{nativeSync(true)}catch(er){}return}
+    if(!R||WKS.busy)return;
+    WKS.busy=true;b.disabled=true;
+    try{
+      var png=await wkImage(R,o.who),nm='ario-weekly-'+R.to;
+      if(!png)throw new Error('empty');
+      if(a==='send')await wkShare(png,nm+'.png','image/png');
+      else if(a==='gal')await imgSave(png,nm+'.png',__('گزارش هفتگی','Weekly report'));
+      else if(a==='pdf')await wkShare(await wkPdf(png),nm+'.pdf','application/pdf');
+    }catch(er){toast(__('ساخت خروجی انجام نشد؛ دوباره تلاش کن','Could not make the file; try again'),null,null,'warn')}
+    WKS.busy=false;b.disabled=false;
+  });
+}
+function openWeekly(end){
+  wkSheet({title:__('گزارش هفتگی','Weekly report'),who:displayName(),end:end||todayKey(),cfg:true,load:function(e){return Promise.resolve(wkStudent(e))}});
+}
+actions.openWeekly=function(){openWeekly('')};
+/* advisor: one student's week (needs the report texts for the lessons) */
+function wkAdvOpen(id,end){
+  var l=cnxMyLinks().find(function(x){return x.id===id});if(!l)return;
+  wkSheet({title:__('گزارش هفتگی دانش‌آموز','Student’s weekly report'),who:cnxNm(l),end:end||todayKey(),cfg:false,load:async function(e){
+    var r=await cnxReq('/rest/v1/student_reports?link_id=eq.'+encodeURIComponent(l.id)+'&day=gte.'+addDays(e,-6)+'&day=lte.'+e+'&select=day,sp,cl,te,tc,cr,parts,body&order=day.asc&limit=14');
+    if(!r.ok||!Array.isArray(r.j))return null;
+    var recs={};r.j.forEach(function(x){recs[x.day]={sp:+x.sp||0,te:+x.te||0,tc:+x.tc||0,cr:+x.cr||0,body:x.body||''}});
+    return wkBuild(recs,e,false);
+  }});
+}
+/* advisor: every student at a glance (numbers only), tap one for the full report */
+async function wkAllOpen(){
+  if(!cnxOn()){toast(__('اول وارد حساب شو','Sign in first'),null,null,'warn');return}
+  var ttl=__('گزارش هفتگی دانش‌آموزان','Students’ weekly reports'),sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-wa="close">'+__('بستن','Close')+'</button></div><div class="wk-body">'+skelHTML('list')+'</div>',ttl),w=sw.w,body=w.querySelector('.wk-body');
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-wa]');if(!b)return;
+    if(b.dataset.wa==='close'){sw.close();return}
+    var id=b.dataset.id;sw.close();setTimeout(function(){wkAdvOpen(id)},380);
+  });
+  var ok=await cnxLoad();
+  if(!ok){body.innerHTML='<p class="hint">'+__('بارگیری نشد؛ اینترنت یا جدول‌های Supabase را بررسی کن.','Could not load; check the internet or the Supabase tables.')+'</p>';return}
+  var ls=cnxMyLinks().filter(function(l){return l.student_id}),end=todayKey(),from=addDays(end,-6);
+  if(!ls.length){body.innerHTML='<p class="hint">'+__('هنوز دانش‌آموزی وصل نیست.','No student is linked yet.')+'</p>';return}
+  body.innerHTML='<p class="hint">'+wkRange({from:from,to:end})+'</p>'+ls.map(function(l){
+    var by={},sp=0,n=0;
+    CNX.rep.filter(function(x){return x.link_id===l.id&&x.day>=from&&x.day<=end}).forEach(function(x){by[x.day]=1;sp+=+x.sp||0;n++});
+    var miss=7-n;
+    return '<button type="button" class="cd-card" data-wa="open" data-id="'+esc(l.id)+'"><span class="cd-dot '+(miss>=4?'bad':miss>=2?'warn':'ok')+'" aria-hidden="true"></span><div class="cd-tx"><b>'+esc(cnxNm(l))+'</b><small>'+fa(miss)+' '+__('گزارش ننوشته','reports missing')+'</small></div><div class="cd-num"><b>'+kkHrs(sp)+'</b><small>'+__('ساعت','hours')+'</small></div></button>';
+  }).join('');
+}
+/* Wednesday: tell the student / advisor the report is ready (the phone notice for a closed app is made in wkNotifs) */
+var wkLastChk=0;
+function wkCheck(){
+  var now=Date.now();if(now-wkLastChk<60000)return;wkLastChk=now;
+  var c=wkCfg();if(!c.on)return;
+  var k=wkWed(),due=now>=wkAtMs(k,c.at);if(!due)return;
+  try{
+    if(c.last<k){
+      c.last=k;wkSave(c);
+      var R=wkStudent(k);
+      if(R.min>0||R.rep>0)toast(__('گزارش هفتگی آماده است · '+kkShort(R.min)+' مطالعه','Your weekly report is ready · '+kkShort(R.min)+' of study'),__('ببین','Open'),function(){openWeekly(k)},'ok');
+    }
+    if(c.lastA<k&&cnxOn()&&cnxIsCounselor()){
+      c.lastA=k;wkSave(c);
+      setTimeout(function(){toast(__('گزارش هفتگی دانش‌آموزان آماده است','Your students’ weekly reports are ready'),__('ببین','Open'),wkAllOpen,'ok')},4000);
+    }
+  }catch(e){}
+}
+/* scheduled phone notices for the next two Wednesdays (works with the app closed) */
+function wkNotifs(now,td){
+  var out=[],c=wkCfg(),i,j=0;
+  if(!c.on)return out;
+  var adv=false;try{adv=cnxOn()&&cnxIsCounselor()}catch(e){}
+  var body=adv?__('گزارش هفتگی تو و دانش‌آموزانت آماده است؛ بازش کن و برای والدین بفرست.','Your weekly report and your students’ reports are ready; open it and send it to the parents.'):__('گزارش هفته‌ی تو آماده است؛ بازش کن و برای والدین بفرست.','Your weekly report is ready; open it and send it to your parents.');
+  for(i=0;i<14&&j<2;i++){
+    var k=addDays(td,i);
+    if(parse(k).getDay()!==3)continue;
+    var w=wkAtMs(k,c.at);
+    if(w>now+2000){
+      out.push(Object.assign({id:2100000640+j,title:__('📊 گزارش هفتگی','📊 Weekly report'),body:body,schedule:{at:new Date(w),allowWhileIdle:true},channelId:'summary',smallIcon:'ic_stat_barnameyar',extra:{kind:'wr'}},nsLook('wr',body)));
+      j++;
+    }
+  }
+  return out;
+}
 
 
 /* ---------- notification look sheet (theme, banner background, what to show) ---------- */
@@ -4755,7 +5563,33 @@ actions.cycleGoal=function(){var a=[3,5,8,10],i=a.indexOf(state.profile.goal||5)
 actions.cycleFGoal=function(){var a=[30,60,90,120],i=a.indexOf(state.profile.fgoal||60);state.profile.fgoal=a[(i+1)%a.length];mutate()};
 
 /* ---------- welcome / sign-in (display only, data stays on this device) ---------- */
-var wl={el:$('#wl'),i:0,goal:5,via:'name'};
+var wl={el:$('#wl'),i:0,goal:5,via:'name',role:'normal'};
+/* ---------- role: counselor · student · normal person (chosen at the first start, changeable in Settings > Center) ---------- */
+var ROLE_N={counselor:['🎓',__('مشاور','Advisor'),__('برای دانش‌آموزانم برنامه می‌فرستم و گزارش‌هایشان را می‌بینم','I send plans to my students and read their reports')],
+  student:['📚',__('دانش‌آموز','Student'),__('مشاورم برایم برنامه می‌فرستد و با او گفتگو می‌کنم','My advisor sends me plans and I chat with them')],
+  normal:['🙂',__('کاربر عادی','Regular user'),__('فقط برای برنامه‌ریزی شخصی خودم','Just for my own planning')]};
+function roleGet(){var r=state.profile.role;return ROLE_N[r]?r:''}
+function roleName(){var r=roleGet();return r?ROLE_N[r][0]+' '+ROLE_N[r][1]:__('انتخاب نشده','Not chosen')}
+function roleHTML(cur){
+  return ['counselor','student','normal'].map(function(k){
+    return '<button type="button" class="qrow" role="radio" aria-checked="'+(cur===k)+'" data-role="'+k+'"><span class="h3d at-e">'+ROLE_N[k][0]+'</span><span class="qt"><b>'+ROLE_N[k][1]+'</b><small>'+ROLE_N[k][2]+'</small></span><span class="at-r'+(cur===k?' on':'')+'" aria-hidden="true"></span></button>';
+  }).join('');
+}
+function openRole(){
+  var ttl=__('نقش من','My role');
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div><div class="ns-body at-body"></div>',ttl);
+  var w=sw.w,body=w.querySelector('.at-body');
+  function paint(){body.innerHTML='<p class="hint">'+__('نقش تعیین می‌کند بخش اتصال مشاور و دانش‌آموز چه چیزی نشان بدهد. هر وقت خواستی عوضش کن.','Your role decides what the advisor–student link shows. You can change it any time.')+'</p><div class="qsheet">'+roleHTML(roleGet())+'</div>'}
+  paint();
+  function done(){if(ui.tab==='account')render()}
+  w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e],[data-role]');if(!b)return;
+    if(b.dataset.e==='close'){sw.close();done();return}
+    state.profile.role=b.dataset.role;writeCache();persist();paint();
+  });
+  w.querySelector('.dim').addEventListener('click',done);
+}
+actions.openRole=openRole;
 var VIA={google:[(__("ادامه با گوگل")),(__("ورود واقعی با گوگل هنوز فعال نیست. فقط نام و ایمیلت روی همین دستگاه ذخیره می‌شود."))],email:[(__("ادامه با ایمیل")),(__("ایمیلت فقط روی همین دستگاه ذخیره می‌شود. رمز یا ایمیل تأیید در کار نیست."))],name:[(__("ادامه با نام")),(__("فقط نامت روی همین دستگاه ذخیره می‌شود."))]};
 function okEmail(x){return /^[^\s@]{1,60}@[^\s@]{1,40}\.[^\s@]{2,20}$/.test(String(x||'').trim())}
 function wMail(){return wl.via!=='name'}
@@ -4765,7 +5599,8 @@ function wDraw(){
   $('#wNav').hidden=wl.i===0;
   $('#wBack').hidden=!wl.i;
   $('#wBack').parentNode.style.gridTemplateColumns=wl.i?'':'1fr';
-  $('#wNext').textContent=wl.i===3?(__("شروع کن")):(__("بعدی"));
+  $('#wRoleH').textContent=__('تو کدام هستی؟','Who are you?');$('#wRoleP').textContent=__('بعداً از تنظیمات هم می‌توانی عوضش کنی.','You can change this later in Settings.');$('#wRole').innerHTML=roleHTML(wl.role);
+  $('#wNext').textContent=wl.i===4?(__("شروع کن")):(__("بعدی"));
   $('#wHead').textContent=VIA[wl.via][0];
   $('#wNote').textContent=VIA[wl.via][1];
   $('#wEmail').hidden=!wMail();
@@ -4774,7 +5609,7 @@ function wDraw(){
 }
 function openWelcome(){
   var p=state.profile;
-  wl.via=VIA[p.via]?p.via:'name';wl.goal=p.goal||5;
+  wl.via=VIA[p.via]?p.via:'name';wl.goal=p.goal||5;wl.role=roleGet()||'normal';
   $('#wName').value=p.name||'';$('#wEmail').value=p.email||'';
   wl.i=String(p.name||'').trim()?2:0;
   wDraw();wl.el.hidden=false;document.documentElement.style.overflow='hidden';
@@ -4787,6 +5622,7 @@ function wFinish(skip){
     state.profile.via=wl.via;
     state.profile.email=wMail()&&okEmail(em)?em:'';
     state.profile.goal=wl.goal;
+    state.profile.role=wl.role;
   }
   state.profile.welcomed=true;
   closeWelcome();mutate();
@@ -4803,7 +5639,7 @@ function wNext(){
     if(!nm.value.trim()){wShake(nm);return}
     if(wMail()&&!okEmail(em.value)){wShake(em);return}
   }
-  if(wl.i<3){wl.i++;wDraw()}else wFinish(false)
+  if(wl.i<4){wl.i++;wDraw()}else wFinish(false)
 }
 function maybeWelcome(){
   if(!wl.el.hidden)return;
@@ -4814,6 +5650,7 @@ $('#wNext').addEventListener('click',wNext);
 $('#wBack').addEventListener('click',function(){if(wl.i>0){wl.i--;wDraw()}});
 $('#wName').addEventListener('input',wCheck);
 $('#wEmail').addEventListener('input',wCheck);
+$('#wRole').addEventListener('click',function(e){var b=e.target.closest('[data-role]');if(!b)return;wl.role=b.dataset.role;wDraw()});
 $('#wGoal').addEventListener('click',function(e){var b=e.target.closest('[data-g]');if(!b)return;wl.goal=Number(b.dataset.g);wDraw()});
 wl.el.addEventListener('click',function(e){
   var b=e.target.closest('[data-via]');if(!b)return;
@@ -6535,6 +7372,17 @@ async function cnxLoad(){
   var a=await cnxReq('/rest/v1/links?select=id,code,counselor_id,counselor_name,student_id,student_name,created_at,linked_at,expires_at&order=created_at.desc&limit=200');
   if(!a.ok||!Array.isArray(a.j))return false;
   CNX.links=a.j;
+  /* v279: friend links (a separate table; if it does not exist yet the list is simply empty) */
+  var fr=await cnxReq('/rest/v1/friend_links?select=id,code,owner_id,owner_name,friend_id,friend_name,created_at,linked_at,expires_at&order=created_at.desc&limit=100');
+  CNX.friends=fr.ok&&Array.isArray(fr.j)?fr.j.map(function(f){return {id:f.id,kind:'friend',code:f.code,counselor_id:f.owner_id,counselor_name:f.owner_name,student_id:f.friend_id,student_name:f.friend_name,created_at:f.created_at,linked_at:f.linked_at,expires_at:f.expires_at}}):[];
+  /* v296: groups (if the tables are not in Supabase yet the list is simply empty) */
+  var gq=await cnxReq('/rest/v1/chat_groups?select=id,name,owner_id,created_at&order=created_at.desc&limit=100'),
+      gmq=gq.ok&&Array.isArray(gq.j)&&gq.j.length?await cnxReq('/rest/v1/chat_group_members?select=group_id,user_id,name,last_read,joined_at&order=joined_at.asc&limit=3000'):null;
+  CNX.groups=gq.ok&&Array.isArray(gq.j)?gq.j.map(function(g){
+    var ms=gmq&&gmq.ok&&Array.isArray(gmq.j)?gmq.j.filter(function(x){return x.group_id===g.id}):[],me=ms.filter(function(x){return x.user_id===s.uid})[0];
+    return {id:g.id,kind:'group',name:g.name,counselor_id:g.owner_id,student_id:'g',created_at:g.created_at,members:ms,lr:(me&&me.last_read)||g.created_at};
+  }):[];
+  try{if(CNX.friends.some(function(f){return f.student_id})||CNX.groups.length)localStorage.setItem('ario.fr','1');else localStorage.removeItem('ario.fr')}catch(e){}
   cnxSetStudent(a.j.some(function(l){return l.student_id===s.uid}));
   var mine=a.j.some(function(l){return l.counselor_id===s.uid});
   if(mine){
@@ -6647,15 +7495,15 @@ function openCnx(focus){
     body.innerHTML='<p class="hint2">'+__("برای اتصال، اول با ایمیل وارد حساب شو (حساب کاربری ← ورود یا ساخت حساب).","Sign in with your e-mail first (Account > Sign in).")+'</p><button type="button" class="tt-btn pri" data-lk="login">'+__("ورود یا ساخت حساب","Sign in or create an account")+'</button>';
   }else{
     body.innerHTML=
-      '<div class="sec" id="lkC"><div class="sec-h"><b>'+__("من مشاورم","I am an advisor")+'</b></div>'+
+      (roleGet()==='student'?'':'<div class="sec" id="lkC"><div class="sec-h"><b>'+__("من مشاورم","I am an advisor")+'</b></div>'+
       '<p class="hint2">'+__("برای هر دانش‌آموز یک کد بساز و برایش بفرست. وقتی کد را وارد کرد، با دکمهٔ ارسال در فهرست برنامه‌های کنکوریا برنامه‌اش را برایش می‌فرستی.","Make a code for each student. Once they enter it, you can send a saved Konkuria plan to them.")+'</p>'+
       '<input class="field" id="lkNm" type="text" maxlength="80" placeholder="'+__("نام دانش‌آموز (اختیاری)","Student name (optional)")+'" aria-label="'+__("نام دانش‌آموز","Student name")+'">'+
-      '<button type="button" class="tt-btn pri cx-mk" data-lk="make">'+icon('plus')+__("ساخت کد دعوت","Make an invite code")+'</button><button type="button" class="tt-btn cx-mk" data-lk="dash">'+icon('stats')+__("داشبورد دانش‌آموزان","Students dashboard")+'</button><div class="cx-cl"></div></div>'+
-      '<div class="sec" id="lkS"><div class="sec-h"><b>'+__("من دانش‌آموزم","I am a student")+'</b></div>'+
+      '<button type="button" class="tt-btn pri cx-mk" data-lk="make">'+icon('plus')+__("ساخت کد دعوت","Make an invite code")+'</button><button type="button" class="tt-btn cx-mk" data-lk="dash">'+icon('stats')+__("داشبورد دانش‌آموزان","Students dashboard")+'</button><div class="cx-cl"></div></div>')+
+      (roleGet()==='counselor'?'':'<div class="sec" id="lkS"><div class="sec-h"><b>'+__("من دانش‌آموزم","I am a student")+'</b></div>'+
       '<p class="hint2">'+__("کدی که مشاورت داده را وارد کن تا برنامه‌هایش خودکار برایت بیاید.","Enter the code your advisor gave you to get their plans automatically.")+'</p>'+
       '<input class="field" id="lkCode" type="text" dir="ltr" maxlength="12" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX" aria-label="'+__("کد دعوت","Invite code")+'">'+
       '<input class="field" id="lkMe" type="text" maxlength="80" placeholder="'+__("نام تو (مشاور همین را می‌بیند)","Your name (your advisor sees it)")+'" aria-label="'+__("نام تو","Your name")+'" value="'+esc(state.profile.name||'')+'">'+
-      '<button type="button" class="tt-btn pri cx-mk" data-lk="redeem">'+icon('check')+__("اتصال","Connect")+'</button><div class="cx-st"></div></div>';
+      '<button type="button" class="tt-btn pri cx-mk" data-lk="redeem">'+icon('check')+__("اتصال","Connect")+'</button><div class="cx-st"></div></div>');
   }
   body.insertAdjacentHTML('beforeend','<div class="cx-msg" role="status"></div>');
   w.addEventListener('click',function(e){
@@ -6985,6 +7833,7 @@ function cdPaint(){
       '<div class="cd-mini" aria-hidden="true">'+s.days.map(function(d){return '<i class="'+(d.has?'on':'')+'" style="height:'+(d.sp?Math.max(12,Math.round(d.sp/mx*100)):6)+'%"></i>'}).join('')+'</div>'+
       '<div class="cd-num"><b>'+kkHrs(s.sp7)+'</b><small>'+__("ساعت ۷ روز","h / 7 days")+'</small></div></button>';
   }).join('');
+  h+='<button type="button" class="tt-btn cd-all" data-cd="wkall">'+icon('stats')+__("گزارش هفتگی همه","Weekly reports of all")+'</button>';
   if(unseen)h+='<button type="button" class="tt-btn cd-all" data-cd="seenall">'+icon('check')+__("همه را خوانده‌شده کن","Mark all as seen")+'</button>';
   body.innerHTML=h;
 }
@@ -6996,6 +7845,7 @@ function cdDetail(body,l){
   h+='<div class="cd-sum"><div><b>'+(s.n7?kkShort(Math.round(s.sp7/s.n7)):'—')+'</b><small>'+__("میانگین روز گزارش‌دار","avg per reported day")+'</small></div><div><b>'+fa(s.n7)+'/'+fa(7)+'</b><small>'+__("روز گزارش‌دار","days reported")+'</small></div><div><b>'+fa(s.streak)+'</b><small>'+__("روز پیاپی","day streak")+'</small></div></div>';
   h+='<section class="cd-ch"><h3>'+__("ساعت مطالعه (۱۴ روز)","Study hours (14 days)")+'</h3><div class="cd-bars">'+d14.map(function(d){return cdBar(d,'sp',mxS,kkHrs)}).join('')+'</div></section>';
   h+='<section class="cd-ch"><h3>'+__("تعداد تست (۱۴ روز)","Tests (14 days)")+'</h3><div class="cd-bars">'+d14.map(function(d){return cdBar(d,'te',mxT,fa)}).join('')+'</div></section>';
+  h+='<button type="button" class="tt-btn cd-all" data-cd="wk" data-id="'+esc(l.id)+'">'+icon('stats')+__("گزارش هفتگی","Weekly report")+'</button>';
   h+=cdExamHTML(l);
   h+='<h3 class="cd-h">'+__("گزارش‌ها","Reports")+'</h3>';
   if(!s.rs.length)h+=emptyArtHTML('chart',__("هنوز گزارشی نرسیده","No report yet"),__("وقتی دانش‌آموز گزارش‌کارش را بفرستد اینجا می‌آید و اعلان می‌گیری.","It shows up here when the student sends a report, and you get a notice."),null,'sm');
@@ -7045,6 +7895,8 @@ function cdClick(e){
   else if(a==='back'){if(CD.day)CD.day='';else CD.view='';cdMsg('');cdPaint();w.querySelector('.sheet').scrollTop=0}
   else if(a==='copy')rpCopy(b,CD.txt);
   else if(a==='seenall')cdSeenAll('');
+  else if(a==='wk'){wkAdvOpen(b.dataset.id||CD.view)}
+  else if(a==='wkall'){wkAllOpen()}
   else if(a==='invite'){CD.sw.close();openCnx('c')}
 }
 actions.openCd=function(){cdOpen('')};
@@ -7103,7 +7955,7 @@ function kkStreak(){
   while(kkDay(k)>0&&n<5000){n++;k=addDays(k,-1)}
   return n;
 }
-function kkPut(day,s){var d=kkD().d;if(!d[day])d[day]=[];d[day].push(s)}
+function kkPut(day,s){var b=null;try{b=pgState()}catch(e){}var d=kkD().d;if(!d[day])d[day]=[];d[day].push(s);try{pgFeedback(b)}catch(e){}}
 function kkFull(day){if(kkList(day).length>=60){toast('در هر روز تا ۶۰ جلسه می‌شود ثبت کرد',null,null,'warn');return true}return false}
 function kkSubBars(map){
   var arr=Object.keys(map).map(function(n){return {n:n,m:map[n]}}).filter(function(x){return x.m>0}).sort(function(a,b){return b.m-a.m});
@@ -7175,7 +8027,7 @@ function viewKK(){
   var td=todayKey(),k=ui.kd||td;if(k>td)k=ui.kd=td;
   var st=ui.ksec==='stats',rpg=ui.ksec==='rep';
   return head(st?'ساعت‌های مطالعه':rpg?'گزارش‌های روزانه':F.long.format(parse(k)),'کنکوریا',{right:'<span class="kk-rb">'+(qaMicOK()?'<button type="button" id="kkMic" class="round glass" data-act="kkVoice" aria-label="ثبت مطالعه با صدا">'+icon('mic')+'</button>':'')+'<button type="button" class="round glass" data-act="kkAdd" aria-label="ثبت مطالعه">'+icon('plus')+'</button></span>'})+
-    kcCard()+ttCard()+rpCard()+rkCard()+tbCard()+segG([['day','مطالعه'],['stats','آمار'],['rep','گزارش‌ها']],'ksec',st?'stats':rpg?'rep':'day')+
+    kcCard()+ttCard()+rpCard()+rkCard()+tbCard()+pgCard()+segG([['day','مطالعه'],['stats','آمار'],['rep','گزارش‌ها']],'ksec',st?'stats':rpg?'rep':'day')+
     (st?kkStatsHTML():rpg?rpHistHTML():kkDayHTML(k,td));
 }
 actions.ksec=function(d){ui.ksec=d.v;render('swap')};
@@ -9676,10 +10528,36 @@ actions.kcmBack=kcmBackA;
 var MC={msgs:{},last:{},un:{},unT:0,poll:0,pulling:0,busy:0,lt:0,bl:{},sum:{},draft:{},tray:0,seenAt:0,tick:0};
 var MC_MAX=50*1048576;
 function mcLinks(){return cnxOn()&&CNX.uid?(CNX.links||[]).filter(function(l){return l.student_id&&(l.counselor_id===CNX.uid||l.student_id===CNX.uid)}):[]}
-function mcLink(id){return mcLinks().filter(function(l){return l.id===id})[0]||null}
+function mcFriends(){return cnxOn()&&CNX.uid?(CNX.friends||[]).filter(function(l){return l.student_id}):[]}
+function mcGroups(){return cnxOn()&&CNX.uid?(CNX.groups||[]):[]}
+function mcAll(){return mcLinks().concat(mcFriends(),mcGroups())}
+function mcFr(l){return l.kind==='friend'}
+function mcGr(l){return !!l&&l.kind==='group'}
+function frFlag(){try{return !!localStorage.getItem('ario.fr')}catch(e){return false}}
+function mcOpenNow(){return !!ui.mcl&&ui.mcl!=='*'&&ui.mcl!=='#f'}
+function mcLink(id){return mcAll().filter(function(l){return l.id===id})[0]||null}
 function mcCns(l){return l.counselor_id===CNX.uid}
-function mcPeer(l){return mcCns(l)?(l.student_name||__('دانش‌آموز','Student')):(l.counselor_name||__('مشاور','Advisor'))}
-function mcIni(l){return mcCns(l)?(String(mcPeer(l)).trim().charAt(0)||'د'):'م'}
+function mcPeer(l){if(mcGr(l))return l.name||__('گروه','Group');if(mcFr(l))return (mcCns(l)?l.student_name:l.counselor_name)||__('دوست','Friend');return mcCns(l)?(l.student_name||__('دانش‌آموز','Student')):(l.counselor_name||__('مشاور','Advisor'))}
+function mcIni(l){if(mcGr(l))return Array.from(String(l.name||'گ'))[0]||'گ';if(mcFr(l))return String(mcPeer(l)).trim().charAt(0)||'د';return mcCns(l)?(String(mcPeer(l)).trim().charAt(0)||'د'):'م'}
+/* ----- Telegram-style profile picture beside the other person's bubbles ----- */
+function mcHue(n){var h=0,i;n=String(n||'');for(i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))%360;return h}
+function mcMyAv(){var p=state.profile,n=String(displayName()||'');return {p:okPhoto(p.photo)&&!isVip(p.photo)?p.photo:'',h:isFinite(+p.hue)&&p.hue!=null?+p.hue:mcHue(n),n:Array.from(n)[0]||''}}
+/* every message carries the sender's picture (a built-in photo id / colour and first letter), so no extra upload is needed */
+function mcPeerAv(l){
+  var a=MC.msgs[l.id]||[],i,nm=String(mcPeer(l)),v;
+  for(i=a.length-1;i>=0;i--){if(a[i].sender_id!==CNX.uid&&a[i].meta&&a[i].meta.av){v=a[i].meta.av;return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||''}}}
+  return {p:'',h:mcHue(nm),n:Array.from(nm)[0]||''};
+}
+function mcSnd(l,m){var ms=(l&&l.members)||[],i;for(i=0;i<ms.length;i++)if(ms[i].user_id===m.sender_id&&ms[i].name)return ms[i].name;return (m.meta&&m.meta.nm)||__('عضو','Member')}
+function mcMsgAv(m,nm){var v=(m.meta&&m.meta.av)||{};return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)&&v.h!=null?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||''}}
+function mcAvHTMLv(v){return '<i class="mc-av" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
+function mcAvHTML(l){var v=mcPeerAv(l);return '<i class="mc-av" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
+/* only the last bubble of a run shows the picture (the others keep the space) */
+function mcAvFix(){
+  var th=document.getElementById('mcTh');if(!th)return;
+  var rows=th.children,i,n;
+  for(i=0;i<rows.length;i++){if(!rows[i].classList.contains('mc-hasav'))continue;n=rows[i+1];rows[i].classList.toggle('mc-av-on',!(n&&n.classList.contains('mc-hasav')&&n.dataset.snd===rows[i].dataset.snd))}
+}
 function mcTitle(){var ls=mcLinks();return ls.some(function(l){return !mcCns(l)})?__('من و مشاور','Me & my advisor'):__('من و دانش‌آموزان','Me & my students')}
 function mcNewId(){
   try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}
@@ -9689,7 +10567,8 @@ function mcNewId(){
 }
 function mcMs(s){var t=Date.parse(s);return isNaN(t)?0:t}
 function mcSort(a){a.sort(function(x,y){return mcMs(x.created_at)-mcMs(y.created_at)||(x.id<y.id?-1:1)})}
-function mcUnTotal(){var n=0,k;for(k in MC.un)n+=MC.un[k]||0;return n}
+function mcUnTotal(){var n=0,ok={};mcLinks().forEach(function(l){ok[l.id]=1});for(var k in MC.un)if(ok[k])n+=MC.un[k]||0;return n}
+function mcUnAll(){var n=0;for(var k in MC.un)n+=MC.un[k]||0;return n}
 
 /* ----- storage (private bucket "chat") ----- */
 async function mcTok(){var s=sbSess();if(s&&s.exp<Date.now()/1000+60&&s.rt)s=await sbRefresh(s);return s&&s.at||''}
@@ -9737,8 +10616,9 @@ async function mcSave(blob,name){
 /* ----- texts ----- */
 function mcPrev(m){
   if(!m)return '';
-  var t=m.kind==='p'?'📷 '+__('عکس','Photo'):m.kind==='v'?'🎥 '+__('ویدیو','Video'):m.kind==='a'?'🎤 '+__('پیام صوتی','Voice message'):m.kind==='r'?'🎥 '+__('پیام ویدیویی','Video message'):m.kind==='f'?'📎 '+(m.mname||__('فایل','File')):m.kind==='g'?'📝 '+__('گزارش‌کار روزانه','Daily report'):String(m.body||'').replace(/\s+/g,' ').slice(0,80);
-  return (m.sender_id===CNX.uid?__('تو: ','You: '):'')+t;
+  var t=m.kind==='p'?'📷 '+__('عکس','Photo'):m.kind==='v'?'🎥 '+__('ویدیو','Video'):m.kind==='a'?'🎤 '+__('پیام صوتی','Voice message'):m.kind==='r'?'🎥 '+__('پیام ویدیویی','Video message'):m.kind==='f'?'📎 '+(m.mname||__('فایل','File')):m.kind==='g'?'📝 '+__('گزارش‌کار روزانه','Daily report'):m.kind==='q'?'📊 '+String(m.body||'').replace(/\s+/g,' ').slice(0,60):String(m.body||'').replace(/\s+/g,' ').slice(0,80);
+  var gl=mcLink(m.link_id);
+  return (m.sender_id===CNX.uid?__('تو: ','You: '):mcGr(gl)?mcSnd(gl,m)+': ':'')+t;
 }
 function mcErrMsg(e){
   var st=e&&e.st;
@@ -9756,6 +10636,7 @@ function mcCardHTML(){
 function mcCardPaint(){
   var w=document.getElementById('mcCardW');if(w)w.innerHTML=mcCardHTML();
   var l=document.getElementById('mcListW');if(l&&ui.mcl==='*')l.innerHTML=mcRowsHTML();
+  var f=document.getElementById('frList');if(f&&ui.mcl==='#f')f.innerHTML=frListHTML();
 }
 function mcRowsHTML(){
   return mcLinks().map(function(l){
@@ -9774,21 +10655,25 @@ async function mcRefresh(force){
   try{
     if(!CNX.lt||Date.now()-CNX.lt>45000){if(!(await cnxLoad()))return}
     MC.lt=Date.now();
-    var ls=mcLinks();
+    var ls=mcAll();
     if(!ls.length){MC.un={};MC.sum={};mcCardPaint();return}
     var a=await cnxReq('/rest/v1/link_messages?select=id,link_id,sender_id,kind,body,mname,created_at&order=created_at.desc&limit=80'),
-        b=await cnxReq('/rest/v1/link_messages?select=link_id&seen_at=is.null&sender_id=neq.'+encodeURIComponent(CNX.uid)+'&limit=500');
+        gids=mcGroups().map(function(g){return g.id}),
+        b=await cnxReq('/rest/v1/link_messages?select=link_id&seen_at=is.null&sender_id=neq.'+encodeURIComponent(CNX.uid)+(gids.length?'&link_id=not.in.('+gids.join(',')+')':'')+'&limit=500'),
+        gc=gids.length?await cnxReq('/rest/v1/link_messages?select=link_id,created_at&sender_id=neq.'+encodeURIComponent(CNX.uid)+'&link_id=in.('+gids.join(',')+')&order=created_at.desc&limit=400'):null;
     if(a.ok&&Array.isArray(a.j)){var sm={};a.j.forEach(function(m){if(!sm[m.link_id])sm[m.link_id]=m});MC.sum=sm}
     if(b.ok&&Array.isArray(b.j)){
-      var un={},old=mcUnTotal();
+      var un={},old=mcUnAll();
       b.j.forEach(function(x){un[x.link_id]=(un[x.link_id]||0)+1});
+      /* groups: unread = messages of the others newer than my last_read */
+      if(gc&&gc.ok&&Array.isArray(gc.j))gc.j.forEach(function(x){var g=mcLink(x.link_id);if(g&&mcGr(g)&&mcMs(x.created_at)>mcMs(g.lr))un[x.link_id]=(un[x.link_id]||0)+1});
       /* the chat that is open on the screen is read at once */
-      if(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*'&&!document.hidden)delete un[ui.mcl];
+      if(ui.tab==='kcm'&&mcOpenNow()&&!document.hidden)delete un[ui.mcl];
       MC.un=un;
-      var now=mcUnTotal();
-      if(MC.tick&&now>old&&!(ui.tab==='kcm'&&ui.mcl&&ui.mcl!=='*'&&!document.hidden)){
-        var one=ls.filter(function(l){return un[l.id]})[0];
-        toast('💬 '+(one?mcPeer(one):__('گفتگو','Chat'))+': '+(one&&MC.sum[one.id]?mcPrev(MC.sum[one.id]).slice(0,60):__('پیام تازه','New message')),__('باز کردن','Open'),function(){if(one)mcOpenChat(one.id,ls.length>1)},'info');
+      var now=mcUnAll();
+      if(MC.tick&&now>old&&!(ui.tab==='kcm'&&mcOpenNow()&&!document.hidden)){
+        var one=ls.filter(function(l){return un[l.id]&&!mcMuted(l.id)})[0];
+        if(one)toast('💬 '+(one?mcPeer(one):__('گفتگو','Chat'))+': '+(one&&MC.sum[one.id]?mcPrev(MC.sum[one.id]).slice(0,60):__('پیام تازه','New message')),__('باز کردن','Open'),function(){if(one)mcOpenChat(one.id,mcFr(one)||mcGr(one)?'#f':mcLinks().length>1?'*':'')},'info');
       }
       MC.tick=1;
     }
@@ -9797,27 +10682,339 @@ async function mcRefresh(force){
 }
 setInterval(function(){
   if(document.hidden||!cnxOn())return;
-  var look=ui.tab==='coach'||(ui.tab==='kcm'&&!ui.kcsec&&(ui.mcl==='*'||!ui.mcl));
-  if(look||cnxIsStudent()||cnxIsCounselor()){if(Date.now()-MC.lt>(look?20000:60000))mcRefresh(true)}
+  var look=ui.tab==='coach'||(ui.tab==='kcm'&&!ui.kcsec&&(ui.mcl==='*'||ui.mcl==='#f'||!ui.mcl));
+  if(look||cnxIsStudent()||cnxIsCounselor()||frFlag()){if(Date.now()-MC.lt>(look?20000:60000))mcRefresh(true)}
 },10000);
-setTimeout(function(){if(cnxOn()&&(cnxIsStudent()||cnxIsCounselor()))mcRefresh(true)},7000);
-document.addEventListener('visibilitychange',function(){if(!document.hidden&&cnxOn())setTimeout(function(){mcRefresh(true);if(ui.mcl&&ui.mcl!=='*')mcPull()},900)});
+setTimeout(function(){if(cnxOn()&&(cnxIsStudent()||cnxIsCounselor()||frFlag()))mcRefresh(true)},7000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&cnxOn())setTimeout(function(){mcRefresh(true);if(mcOpenNow())mcPull()},900)});
+
+/* ---------- v279: friend chat - hidden door: tap the profile banner 2 times on the right and 3 times on the left ---------- */
+var FRG={seq:'',t:0};
+document.addEventListener('click',function(e){
+  var c=e.target&&e.target.closest&&e.target.closest('.cover');
+  if(!c||ui.tab!=='account'||ui.accPage)return;
+  var r=c.getBoundingClientRect(),side=e.clientX>r.left+r.width/2?'R':'L',now=Date.now();
+  if(now-FRG.t>1800)FRG.seq='';
+  FRG.t=now;FRG.seq=(FRG.seq+side).slice(-5);
+  if(FRG.seq==='RRLLL'){FRG.seq='';hap('send');frOpen()}
+},true);
+function frOpen(){
+  if(ui.tab!=='kcm')ui.mcTab=ui.tab;
+  subPush();ui.tab='kcm';ui.kcsec='';ui.mcl='#f';ui.mcFrom='';render('enter');window.scrollTo(0,0);
+}
+function frMsg(t,bad){var m=document.getElementById('frMsg');if(!m)return;m.textContent=t||'';m.className='cx-msg'+(bad?' bad':'')}
+function frView(){
+  var h=head(__('گفتگو','Chat'),__('گفتگو با دوست','Chat with a friend'),{back:1,backAct:'mcBack',backTxt:__('حساب','Account')});
+  if(!cnxOn())return h+'<div class="glass mc-frbox"><p class="hint2">'+__('برای گفتگو با دوستت اول با ایمیل وارد حساب شو.','Sign in with your email first to chat with a friend.')+'</p><button type="button" class="tt-btn pri" data-act="mcLogin">'+__('ورود با ایمیل','Sign in with email')+'</button></div>';
+  return h+'<div class="glass mc-frbox"><div class="sec-h"><b>'+__('کد من','My code')+'</b></div><p class="hint2">'+__('یک کد بساز و برای دوستت بفرست؛ تا ۷ روز معتبر است.','Make a code and send it to your friend; it works for 7 days.')+'</p><button type="button" class="tt-btn pri cx-mk" data-act="frMake">'+icon('plus')+__('ساخت کد دوستی','Make a friend code')+'</button></div>'+
+    '<div class="glass mc-frbox"><div class="sec-h"><b>'+__('کد دوستم را دارم','I have my friend’s code')+'</b></div><input class="field" id="frCode" type="text" dir="ltr" maxlength="12" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD2345" style="text-align:center;letter-spacing:3px"><button type="button" class="tt-btn pri cx-mk" data-act="frGo">'+icon('check')+__('اتصال','Connect')+'</button></div>'+
+    '<div class="glass mc-frbox"><div class="sec-h"><b>'+__('گروه و پیام گروهی','Groups & group messages')+'</b></div><p class="hint2">'+__('با دوستانت گروه بساز، یا یک پیام را برای چند دوست با هم بفرست.','Make a group with your friends, or send one message to several friends at once.')+'</p><div class="mc-gact"><button type="button" class="tt-btn pri" data-act="grNew">'+icon('plus')+__('ساخت گروه','New group')+'</button><button type="button" class="tt-btn" data-act="grBulk">'+__('پیام به چند دوست','Message several')+'</button></div></div>'+
+    '<div class="cx-msg" id="frMsg" role="status"></div><div id="frList">'+frListHTML()+'</div>';
+}
+function frListHTML(){
+  var fl=CNX.friends||[],on=fl.filter(function(f){return f.student_id}),pend=fl.filter(function(f){return !f.student_id&&f.counselor_id===CNX.uid}),h='',gs=mcGroups();
+  if(gs.length)h+='<div class="kc-topics glass">'+gs.map(grRowHTML).join('')+'</div>';
+  if(on.length)h+='<div class="kc-topics glass">'+on.map(function(l){
+    var s=MC.sum[l.id],u=MC.un[l.id]||0;
+    return '<div class="mc-frw"><button type="button" class="kc-topic mc-row" data-act="mcOpen" data-from="#f" data-id="'+esc(l.id)+'"><span class="kc-tt"><b><i class="kc-ph" style="background:linear-gradient(145deg,#f472b6,#e11d48)">'+esc(mcIni(l))+'</i>'+esc(mcPeer(l))+(u?'<span class="un-b" role="status">'+fa(u>99?99:u)+'</span>':'')+'</b><small>'+(s?kcxTime(s.created_at):'')+'</small></span><span class="kc-tpv">'+esc(s?mcPrev(s):__('هنوز پیامی نیست','No messages yet'))+'</span></button><button type="button" class="mc-x" data-act="frDel" data-id="'+esc(l.id)+'" aria-label="'+__('قطع ارتباط','End the link')+'">'+icon('close')+'</button></div>';
+  }).join('')+'</div>';
+  if(pend.length)h+='<div class="glass mc-frbox"><div class="sec-h"><b>'+__('کدهای منتظر دوست','Codes waiting for a friend')+'</b></div>'+pend.map(function(f){
+    return '<div class="mc-code"><b dir="ltr">'+esc(f.code)+'</b><span><button type="button" class="tt-btn" data-act="frShare" data-code="'+esc(f.code)+'">'+__('ارسال','Share')+'</button><button type="button" class="tt-btn" data-act="frDel" data-id="'+esc(f.id)+'">'+__('حذف','Delete')+'</button></span></div>';
+  }).join('')+'</div>';
+  return h;
+}
+actions.mcLogin=function(){sbSheet()};
+actions.frMake=async function(){
+  var s=sbSess();if(!s)return;
+  frMsg(__('در حال ساخت کد…','Making the code…'));
+  var r,i;
+  for(i=0;i<3;i++){
+    r=await cnxReq('/rest/v1/friend_links','POST',{code:cnxNewCode(),owner_id:s.uid,owner_name:String(displayName()).slice(0,80)},{Prefer:'return=representation'});
+    if(r.ok||r.st!==409)break;
+  }
+  if(!r.ok){frMsg(r.st===404?__('جدول دوستی هنوز در Supabase ساخته نشده (بخش v279 فایل supabase/setup.sql را اجرا کن).','The friend table is not in Supabase yet (run the v279 block of supabase/setup.sql).'):cnxNetErr(r),1);return}
+  frMsg(__('کد ساخته شد؛ برای دوستت بفرستش.','Code made; send it to your friend.'));
+  await cnxLoad();mcCardPaint();
+  var c=r.j&&r.j[0]&&r.j[0].code;if(c)actions.frShare({code:c});
+};
+actions.frShare=async function(d){
+  var t=__('بیا در Ario با هم چت کنیم! کد دوستی من: ','Let’s chat on Ario! My friend code: ')+d.code+'\n'+__('در برنامه: حساب ← روی بنر پروفایل ۲ بار سمت راست و ۳ بار سمت چپ بزن ← کد را وارد کن.','In the app: Account → tap the profile banner twice on the right and three times on the left → enter the code.');
+  try{var SH=capGet('Share');if(SH){await SH.share({text:t,dialogTitle:__('ارسال کد دوستی','Share the friend code')});return}}catch(e){if(/cancel/i.test(String(e&&e.message||e)))return}
+  try{if(navigator.share){await navigator.share({text:t});return}}catch(e){if(e&&e.name==='AbortError')return}
+  try{await navigator.clipboard.writeText(t);toast(__('کد کپی شد','Code copied'),null,null,'info')}catch(e){toast(d.code,null,null,'info')}
+};
+actions.frGo=async function(){
+  var inp=document.getElementById('frCode'),code=cnxNormCode(inp?inp.value:'');
+  if(code.length!==8){frMsg(__('کد ۸ حرفی است؛ دوباره نگاه کن.','The code has 8 characters; check it again.'),1);return}
+  frMsg(__('در حال اتصال…','Connecting…'));
+  var r=await cnxReq('/rest/v1/rpc/redeem_friend','POST',{p_code:code,p_name:String(displayName()).slice(0,80)});
+  if(!r.ok){frMsg(r.st===404?__('تابع دوستی هنوز در Supabase ساخته نشده (بخش v279 فایل supabase/setup.sql را اجرا کن).','The friend function is not in Supabase yet (run the v279 block of supabase/setup.sql).'):cnxNetErr(r),1);return}
+  var j=r.j||{};
+  if(!j.ok){var M={notfound:__('این کد پیدا نشد.','Code not found.'),self:__('این کد را خودت ساخته‌ای؛ آن را به دوستت بده.','You made this code yourself; give it to your friend.'),used:__('این کد قبلاً استفاده شده.','This code is already used.'),expired:__('این کد منقضی شده؛ یک کد تازه بخواه.','This code expired; ask for a new one.')};frMsg(M[j.err]||cnxNetErr(r),1);return}
+  if(inp)inp.value='';
+  frMsg(__('وصل شدی به ','Connected to ')+(j.owner_name||__('دوستت','your friend'))+'.');
+  await cnxLoad();mcCardPaint();
+};
+actions.frDel=function(d){
+  askConfirm({title:__('قطع ارتباط؟','End the link?'),msg:__('همهٔ پیام‌های این گفتگو برای هر دو نفر پاک می‌شود.','All messages of this chat are deleted for both of you.'),btns:[{t:__('قطع ارتباط','End the link'),cls:'bad',fn:async function(){
+    var r=await cnxReq('/rest/v1/friend_links?id=eq.'+encodeURIComponent(d.id),'DELETE',null,{Prefer:'return=minimal'});
+    if(!r.ok){frMsg(cnxNetErr(r),1);return}
+    delete MC.msgs[d.id];delete MC.sum[d.id];delete MC.un[d.id];
+    await cnxLoad();mcCardPaint();
+  }}]});
+};
+
+/* ---------- v296: groups + one message to several friends ----------
+   A group is one more kind of chat (kind:'group'); its id is the link_id of its messages (see the v296 block of supabase/setup.sql).
+   CNX.groups = [{id,name,counselor_id:owner,members:[{user_id,name,last_read}],lr:my last_read}]. In a group "unread" is counted from lr. */
+function grFriends(){return mcFriends().map(function(l){var u=mcCns(l)?l.student_id:l.counselor_id;return {id:u,name:mcPeer(l),link:l}})}
+function grHue(n){return mcHue(n)}
+function grPickHTML(list,on){
+  return list.map(function(f){
+    return '<label class="gr-pk"><input type="checkbox" value="'+esc(f.id)+'"'+(on.indexOf(f.id)>-1?' checked':'')+'><i class="gr-av" style="--h:'+grHue(f.name)+'">'+esc(Array.from(String(f.name||'د'))[0]||'د')+'</i><span dir="auto">'+esc(f.name)+'</span></label>';
+  }).join('');
+}
+function grChecked(root){return [].map.call(root.querySelectorAll('.gr-list input:checked'),function(i){return i.value})}
+function grErrText(j){
+  var M={name:__('نام گروه را بنویس.','Write a group name.'),members:__('حداقل یک دوست انتخاب کن.','Pick at least one friend.'),notfriend:__('فقط دوستان اتصال‌شده را می‌شود اضافه کرد.','Only linked friends can be added.'),full:__('گروه پر است (حداکثر ۵۰ نفر).','The group is full (50 people at most).'),owner:__('فقط مدیر گروه می‌تواند این کار را بکند.','Only the group owner can do this.'),self:__('خودت را نمی‌شود حذف کرد؛ از «ترک گروه» استفاده کن.','You cannot remove yourself; use “Leave group”.')};
+  return M[j&&j.err]||__('انجام نشد. دوباره امتحان کن','That did not work. Try again');
+}
+function grNoTable(r){return r&&r.st===404?__('بخش گروه هنوز در Supabase ساخته نشده (بخش v296 فایل supabase/setup.sql را اجرا کن).','Groups are not in Supabase yet (run the v296 block of supabase/setup.sql).'):''}
+function grRowHTML(l){
+  var s=MC.sum[l.id],u=MC.un[l.id]||0;
+  return '<button type="button" class="kc-topic mc-row" data-act="mcOpen" data-from="#f" data-id="'+esc(l.id)+'"><span class="kc-tt"><b><i class="kc-ph" style="background:linear-gradient(145deg,#34d399,#0f9d6e)">'+esc(mcIni(l))+'</i>'+esc(mcPeer(l))+(u?'<span class="un-b" role="status">'+fa(u>99?99:u)+'</span>':'')+'</b><small>'+(s?kcxTime(s.created_at):'')+'</small></span><span class="kc-tpv">'+esc(s?mcPrev(s):fa(l.members.length)+' '+__('عضو','members'))+'</span></button>';
+}
+function grSheet(title,inner,okTxt){
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+title+'</h2><button type="button" data-gr="close">'+__('بستن','Close')+'</button></div><div class="gr-body">'+inner+'<div class="cx-msg" id="grMsg" role="status"></div>'+(okTxt?'<button type="button" class="tt-btn pri cx-mk" data-gr="ok">'+okTxt+'</button>':'')+'</div>',title);
+  sw.w.classList.add('gr-wrap');
+  sw.msg=function(t,bad){var m=sw.w.querySelector('#grMsg');if(m){m.textContent=t||'';m.className='cx-msg'+(bad?' bad':'')}};
+  return sw;
+}
+actions.grNew=function(){
+  var fl=grFriends();
+  if(!fl.length){toast(__('اول یک دوست اضافه کن (کد دوستی).','Add a friend first (friend code).'),null,null,'warn');return}
+  if(document.querySelector('.gr-wrap'))return;
+  var sw=grSheet(__('گروه جدید','New group'),'<input class="field" id="grName" maxlength="60" dir="auto" autocomplete="off" placeholder="'+__('نام گروه','Group name')+'"><p class="hint2">'+__('اعضا را از بین دوستانت انتخاب کن','Pick the members from your friends')+'</p><div class="gr-list">'+grPickHTML(fl,[])+'</div>',__('ساخت گروه','Create group'));
+  var busy=0;
+  sw.w.addEventListener('click',async function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    if(b.dataset.gr==='close'){sw.close();return}
+    if(b.dataset.gr!=='ok'||busy)return;
+    var nm=sw.w.querySelector('#grName').value.trim(),ids=grChecked(sw.w);
+    if(!nm){sw.msg(grErrText({err:'name'}),1);return}
+    if(!ids.length){sw.msg(grErrText({err:'members'}),1);return}
+    busy=1;b.disabled=true;sw.msg(__('در حال ساخت…','Creating…'));
+    var r=await cnxReq('/rest/v1/rpc/create_group','POST',{p_name:nm,p_members:ids,p_my_name:String(displayName()).slice(0,80)});
+    busy=0;b.disabled=false;
+    if(!r.ok){sw.msg(grNoTable(r)||cnxNetErr(r),1);return}
+    var j=r.j||{};if(!j.ok){sw.msg(grErrText(j),1);return}
+    await cnxLoad();sw.close();mcCardPaint();hap('send');
+    if(j.id)mcOpenChat(j.id,'#f');
+  });
+};
+actions.grBulk=function(){
+  var fl=grFriends();
+  if(!fl.length){toast(__('اول یک دوست اضافه کن (کد دوستی).','Add a friend first (friend code).'),null,null,'warn');return}
+  if(document.querySelector('.gr-wrap'))return;
+  var sw=grSheet(__('پیام به چند دوست','Message several friends'),'<p class="hint2">'+__('یک پیام برای هر دوستی که انتخاب کنی جدا فرستاده می‌شود؛ جواب‌ها هم جدا می‌آید.','The message goes to each chosen friend on their own; their replies come back separately.')+'</p><button type="button" class="tt-btn gr-all" data-gr="all">'+__('انتخاب همه','Select all')+'</button><div class="gr-list">'+grPickHTML(fl,[])+'</div><textarea class="field" id="grText" rows="4" maxlength="3000" dir="auto" placeholder="'+__('پیام','Message')+'"></textarea>',__('ارسال','Send'));
+  sw.w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    var k=b.dataset.gr;
+    if(k==='close'){sw.close();return}
+    if(k==='all'){var ins=sw.w.querySelectorAll('.gr-list input'),all=[].every.call(ins,function(i){return i.checked});[].forEach.call(ins,function(i){i.checked=!all});return}
+    if(k!=='ok')return;
+    var t=sw.w.querySelector('#grText').value.trim(),ids=grChecked(sw.w);
+    if(!ids.length){sw.msg(grErrText({err:'members'}),1);return}
+    if(!t){sw.msg(__('پیام را بنویس.','Write the message.'),1);return}
+    var by={},n=0;grFriends().forEach(function(f){by[f.id]=f.link});
+    ids.forEach(function(id){if(by[id]&&mcSendText(by[id],t))n++});
+    sw.close();
+    toast(__('پیام برای ','Message sent to ')+fa(n)+' '+__('دوست فرستاده شد','friends'),null,null,'ok');
+  });
+};
+/* the group's own page: members, rename, add / remove (owner), mute, leave */
+function grpInfo(l){
+  if(document.querySelector('.gr-info'))return;
+  var id=l.id;
+  var sw=grSheet(__('اطلاعات گروه','Group info'),'<div class="gr-ib"></div>','');
+  sw.w.classList.add('gr-info');
+  var box=sw.w.querySelector('.gr-ib');
+  function paint(){
+    var g=mcLink(id);if(!g){sw.close();return}
+    var own=mcCns(g),ms=g.members||[];
+    var h='<div class="gr-hd"><i class="gr-av big" style="--h:'+grHue(g.name)+'">'+esc(mcIni(g))+'</i><b dir="auto">'+esc(g.name)+'</b><small>'+fa(ms.length)+' '+__('عضو','members')+'</small></div>';
+    if(own)h+='<div class="gr-ren"><input class="field" id="grRen" maxlength="60" dir="auto" value="'+esc(g.name)+'" aria-label="'+__('نام گروه','Group name')+'"><button type="button" class="tt-btn" data-gr="ren">'+__('ذخیره نام','Save name')+'</button></div>';
+    h+='<div class="sec-h"><b>'+__('اعضا','Members')+'</b></div><div class="gr-mems">'+ms.map(function(m){
+      var me=m.user_id===CNX.uid,nm=m.name||__('عضو','Member');
+      return '<div class="gr-mr"><i class="gr-av" style="--h:'+grHue(nm)+'">'+esc(Array.from(String(nm))[0]||'ع')+'</i><span dir="auto">'+esc(nm)+(me?' ('+__('تو','you')+')':'')+'</span>'+(m.user_id===g.counselor_id?'<em>'+__('مدیر','Owner')+'</em>':'')+(own&&!me?'<button type="button" class="mc-x" data-gr="rm" data-u="'+esc(m.user_id)+'" aria-label="'+__('حذف از گروه','Remove')+'">'+icon('close')+'</button>':'')+'</div>';
+    }).join('')+'</div>';
+    h+='<div class="mc-gact">'+(own?'<button type="button" class="tt-btn pri" data-gr="add">'+icon('plus')+__('افزودن عضو','Add member')+'</button>':'')+'<button type="button" class="tt-btn" data-gr="mute">'+(mcMuted(id)?__('صدا را باز کن','Unmute'):__('بی‌صدا','Mute'))+'</button><button type="button" class="tt-btn bad" data-gr="leave">'+__('ترک گروه','Leave group')+'</button></div>';
+    box.innerHTML=h;
+  }
+  paint();
+  async function after(r,okMsg){
+    if(!r.ok){sw.msg(grNoTable(r)||cnxNetErr(r),1);return false}
+    var j=r.j||{};if(!j.ok){sw.msg(grErrText(j),1);return false}
+    await cnxLoad();sw.msg(okMsg||'');paint();mcCardPaint();return true;
+  }
+  sw.w.addEventListener('click',async function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    var k=b.dataset.gr,g=mcLink(id);if(!g&&k!=='close')return;
+    if(k==='close'){sw.close();return}
+    if(k==='mute'){mcMuteSet(id,!mcMuted(id));paint();return}
+    if(k==='ren'){
+      var nm=sw.w.querySelector('#grRen').value.trim();if(!nm){sw.msg(grErrText({err:'name'}),1);return}
+      if(await after(await cnxReq('/rest/v1/rpc/group_rename','POST',{p_group:id,p_name:nm}),__('نام عوض شد.','Name changed.'))&&ui.tab==='kcm')render('swap');
+      return;
+    }
+    if(k==='rm'){
+      var mm=(g.members||[]).filter(function(x){return x.user_id===b.dataset.u})[0];
+      askConfirm({title:__('حذف از گروه؟','Remove from the group?'),msg:(mm&&mm.name||'')+' '+__('دیگر پیام‌های گروه را نمی‌بیند.','will no longer see the group’s messages.'),btns:[{t:__('حذف','Remove'),cls:'bad',fn:async function(){await after(await cnxReq('/rest/v1/rpc/group_remove','POST',{p_group:id,p_user:b.dataset.u}))}}]});
+      return;
+    }
+    if(k==='add'){
+      var have=(g.members||[]).map(function(x){return x.user_id}),cand=grFriends().filter(function(f){return have.indexOf(f.id)<0});
+      if(!cand.length){sw.msg(__('همه‌ی دوستانت در گروه هستند.','All your friends are already in the group.'));return}
+      var s2=grSheet(__('افزودن عضو','Add member'),'<div class="gr-list">'+grPickHTML(cand,[])+'</div>',__('افزودن','Add'));
+      s2.w.addEventListener('click',async function(ev){
+        var c=ev.target.closest('[data-gr]');if(!c)return;
+        if(c.dataset.gr==='close'){s2.close();return}
+        if(c.dataset.gr!=='ok')return;
+        var ids=grChecked(s2.w);if(!ids.length){s2.msg(grErrText({err:'members'}),1);return}
+        c.disabled=true;var bad=null,i,r;
+        for(i=0;i<ids.length;i++){r=await cnxReq('/rest/v1/rpc/group_add','POST',{p_group:id,p_user:ids[i]});if(!r.ok||!(r.j&&r.j.ok)){bad=r;break}}
+        c.disabled=false;
+        if(bad){s2.msg(grNoTable(bad)||(bad.ok?grErrText(bad.j):cnxNetErr(bad)),1);return}
+        await cnxLoad();s2.close();paint();mcCardPaint();if(ui.tab==='kcm')render('swap');
+      });
+      return;
+    }
+    if(k==='leave'){
+      askConfirm({title:__('ترک گروه؟','Leave the group?'),msg:__('دیگر پیام‌های این گروه را نمی‌بینی.','You will no longer see this group’s messages.'),btns:[{t:__('ترک گروه','Leave'),cls:'bad',fn:async function(){
+        var r=await cnxReq('/rest/v1/rpc/group_leave','POST',{p_group:id});
+        if(!r.ok||!(r.j&&r.j.ok)){sw.msg(grNoTable(r)||(r.ok?grErrText(r.j):cnxNetErr(r)),1);return}
+        delete MC.msgs[id];delete MC.sum[id];delete MC.un[id];delete MC.last[id];
+        await cnxLoad();sw.close();mcStop();
+        ui.mcl='#f';ui.mcFrom='';render('enter');window.scrollTo(0,0);
+      }}]});
+    }
+  });
+}
 
 /* ----- opening / closing ----- */
-function mcOpenChat(id,fromList){
-  subPush();ui.tab='kcm';ui.kcsec='';ui.mcl=id;ui.mcFrom=fromList?'*':'';render('enter');window.scrollTo(0,0);
+function mcOpenChat(id,from){
+  if(ui.tab!=='kcm')ui.mcTab=ui.tab;
+  subPush();ui.tab='kcm';ui.kcsec='';ui.mcl=id;ui.mcFrom=from===true?'*':from||'';render('enter');window.scrollTo(0,0);
 }
 actions.mcCard=function(){
   var ls=mcLinks();if(!ls.length){mcRefresh(true);return}
-  if(ls.length===1){mcOpenChat(ls[0].id,false);return}
+  if(ls.length===1){mcOpenChat(ls[0].id,'');return}
+  if(ui.tab!=='kcm')ui.mcTab=ui.tab;
   subPush();ui.tab='kcm';ui.kcsec='';ui.mcl='*';ui.mcFrom='';render('enter');window.scrollTo(0,0);
 };
-actions.mcOpen=function(d){mcOpenChat(d.id,true)};
-function mcStop(){clearInterval(MC.poll);MC.poll=0}
+actions.mcOpen=function(d){mcOpenChat(d.id,d.from||'*')};
+function mcStop(){clearInterval(MC.poll);MC.poll=0;mcpKill()}
+/* ---------- v281: the other person's profile page (like Telegram's, without phone / call) ---------- */
+function mcMutedMap(){try{return JSON.parse(localStorage.getItem('ario.mcmute')||'{}')||{}}catch(e){return {}}}
+function mcMuted(id){return !!mcMutedMap()[id]}
+function mcMuteSet(id,on){var m=mcMutedMap();if(on)m[id]=1;else delete m[id];try{localStorage.setItem('ario.mcmute',JSON.stringify(m))}catch(e){}}
+function mcpKill(){var o=document.querySelector('.mcp');if(o)o.remove();ui.mcp=false}
+function mcpClose(){mcpKill()}
+function mcpUrls(t){return String(t||'').match(/https?:\/\/[^\s<>"']+/g)||[]}
+function mcpOpen(l){
+  if(mcGr(l)){grpInfo(l);return}
+  if(document.querySelector('.mcp'))return;
+  var id=l.id,av=mcPeerAv(l),nm=mcPeer(l),fr=mcFr(l),cn=mcCns(l);
+  var role=fr?__('دوست تو','Your friend'):cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor');
+  var a=MC.msgs[id]||[],last=null,i;
+  for(i=a.length-1;i>=0;i--)if(a[i].sender_id!==CNX.uid){last=a[i];break}
+  var st=last?__('آخرین پیام: ','Last message: ')+kcxDay(mcMs(last.created_at))+' '+kcxTime(mcMs(last.created_at)):__('هنوز پیامی نفرستاده','No message from them yet');
+  var ph=av.p?'<span class="aimg '+av.p+'" role="img" aria-label="'+esc(nm)+'"></span>':'<b>'+esc(av.n)+'</b>';
+  var o=document.createElement('div');o.className='mcp';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-label',nm);
+  o.innerHTML='<div class="mcp-hero" style="--h:'+av.h+'"><div class="mcp-ph">'+ph+'</div><div class="mcp-sh"></div>'+
+    '<button type="button" class="mcp-back" data-mcp="close" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button>'+
+    '<div class="mcp-melt"></div><div class="mcp-bot"><div class="mcp-id"><h2 dir="auto">'+esc(nm)+'</h2><p>'+esc(st)+'</p></div>'+
+    '<div class="mcp-acts"><button type="button" data-mcp="msg">'+icon('chat')+'<span>'+__('پیام','Message')+'</span></button><button type="button" data-mcp="mute" class="'+(mcMuted(id)?'on':'')+'">'+icon('bell')+'<span>'+(mcMuted(id)?__('بی‌صدا شده','Muted'):__('بی‌صدا','Mute'))+'</span></button></div></div></div>'+
+    '<div class="mcp-card glass"><div><b>'+esc(role)+'</b><small>'+__('نقش در این گفتگو','Role in this chat')+'</small></div>'+(l.linked_at?'<div><b>'+esc(cnxDate(l.linked_at))+'</b><small>'+__('تاریخ اتصال','Connected on')+'</small></div>':'')+'<div><b>'+fa(a.length)+'</b><small>'+__('پیام‌های بارگیری‌شده','Messages loaded')+'</small></div></div>'+
+    '<div class="mcp-tabs" role="tablist"></div><div class="mcp-body"></div>';
+  document.body.appendChild(o);
+  var tabs=[['m',__('رسانه','Media')],['f',__('فایل‌ها','Files')],['a',__('صدا','Voice')],['l',__('لینک‌ها','Links')],['g',__('گزارش‌ها','Reports')]],cur='m',TB=o.querySelector('.mcp-tabs'),BD=o.querySelector('.mcp-body');
+  function items(k){
+    var A=(MC.msgs[id]||[]).filter(function(m){return !m.pending&&!m.failed});
+    if(k==='m')return A.filter(function(m){return m.kind==='p'||m.kind==='v'||m.kind==='r'});
+    if(k==='f')return A.filter(function(m){return m.kind==='f'});
+    if(k==='a')return A.filter(function(m){return m.kind==='a'});
+    if(k==='g')return A.filter(function(m){return m.kind==='g'});
+    var out=[];A.forEach(function(m){if(m.kind==='t')mcpUrls(m.body).forEach(function(u){out.push({id:m.id,url:u,created_at:m.created_at})})});return out;
+  }
+  function paint(){
+    TB.innerHTML=tabs.map(function(t){return '<button type="button" role="tab" aria-selected="'+(t[0]===cur)+'" data-mcpt="'+t[0]+'">'+t[1]+'</button>'}).join('');
+    var it=items(cur).slice().reverse(),h='';
+    if(!it.length){BD.innerHTML='<p class="mcp-e">'+__('هنوز چیزی در این بخش نیست.','Nothing here yet.')+'</p>';return}
+    if(cur==='m'){
+      h='<div class="mcp-grid">'+it.map(function(m){return '<button type="button" class="mcp-g" data-mcpm="'+esc(m.id)+'" aria-label="'+(m.kind==='p'?__('عکس','Photo'):__('ویدیو','Video'))+'"><img alt="" data-mcpi="'+esc(m.id)+'" draggable="false">'+(m.kind!=='p'?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button>'}).join('')+'</div>';
+    }else if(cur==='f'){
+      h=it.map(function(m){return '<button type="button" class="mcp-r" data-mcf="'+esc(m.id)+'"><span class="mc-fi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg></span><span class="mc-ft"><b dir="auto">'+esc(m.mname||__('فایل','File'))+'</b><small>'+mcSize(m.msize)+' · '+kcxDay(mcMs(m.created_at))+'</small></span></button>'}).join('');
+    }else if(cur==='a'){
+      h=it.map(function(m){var d=Math.round(+(m.meta&&m.meta.d)||0);return '<button type="button" class="mcp-r" data-mcpj="'+esc(m.id)+'"><span class="mc-fi">🎤</span><span class="mc-ft"><b>'+(m.sender_id===CNX.uid?__('تو','You'):esc(nm))+'</b><small>'+(d?fa(Math.floor(d/60))+':'+fa(('0'+d%60).slice(-2))+' · ':'')+kcxDay(mcMs(m.created_at))+' '+kcxTime(mcMs(m.created_at))+'</small></span></button>'}).join('');
+    }else if(cur==='g'){
+      h=it.map(function(m){var me=m.meta||{},dl='';try{dl=F.long.format(parse(me.day))}catch(e){dl=me.day||''}return '<button type="button" class="mcp-r" data-mcpj="'+esc(m.id)+'"><span class="mc-fi">📝</span><span class="mc-ft"><b>'+esc(dl)+'</b><small>'+(m.sender_id===CNX.uid?__('تو','You'):esc(nm))+' · '+kcxTime(mcMs(m.created_at))+'</small></span></button>'}).join('');
+    }else{
+      h=it.map(function(x){return '<button type="button" class="mcp-r" data-mcpj="'+esc(x.id)+'"><span class="mc-fi">🔗</span><span class="mc-ft"><b dir="ltr" style="text-align:start">'+esc(x.url.replace(/^https?:\/\//,'').slice(0,60))+'</b><small>'+kcxDay(mcMs(x.created_at))+'</small></span></button>'}).join('');
+    }
+    BD.innerHTML=h;
+    if(cur==='m')it.forEach(function(m){
+      var im=BD.querySelector('img[data-mcpi="'+m.id+'"]');if(!im)return;
+      var pth=m.thumb||(m.kind==='p'?m.media:'');
+      if(SP.mem['spt_'+m.id]){im.src=SP.mem['spt_'+m.id];return}
+      if(VN.mem['vnp_'+m.id]){im.src=VN.mem['vnp_'+m.id];return}
+      if(pth)mcBlob(pth).then(function(x){im.src=x.u}).catch(function(){});
+    });
+  }
+  paint();
+  subPush();ui.mcp=true;
+  o.addEventListener('click',function(e){
+    var b;
+    if((b=e.target.closest('[data-mcp]'))){
+      var k=b.dataset.mcp;
+      if(k==='close'){if(history.state&&history.state.sub)history.back();else mcpKill()}
+      else if(k==='msg'){var foc=function(){var t=document.getElementById('mcT');if(t)t.focus()};if(history.state&&history.state.sub){history.back();setTimeout(foc,350)}else{mcpKill();foc()}}
+      else if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);b.classList.toggle('on',on);b.querySelector('span').textContent=on?__('بی‌صدا شده','Muted'):__('بی‌صدا','Mute');toast(on?__('اعلان‌های این گفتگو بی‌صدا شد','Notifications of this chat are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info')}
+      return;
+    }
+    if((b=e.target.closest('[data-mcpt]'))){cur=b.dataset.mcpt;paint();return}
+    if((b=e.target.closest('[data-mcpm]'))){mcShowMedia(b.dataset.mcpm);return}
+    if((b=e.target.closest('[data-mcf]'))){mcSaveMsg(b.dataset.mcf);return}
+    if((b=e.target.closest('[data-mcpj]'))){
+      var jid=b.dataset.mcpj;
+      var after=function(){
+        var r=document.querySelector('.kcx-row[data-mid="'+jid+'"]');
+        if(r){r.scrollIntoView({block:'center',behavior:'smooth'});r.classList.remove('mc-flash');void r.offsetWidth;r.classList.add('mc-flash')}
+      };
+      if(history.state&&history.state.sub){history.back();setTimeout(after,380)}else{mcpKill();setTimeout(after,100)}
+    }
+  });
+}
+/* open a photo / video from the loaded messages (also used by the profile page) */
+function mcShowMedia(sid){
+  var sm=mcMsg(sid);if(!sm)return;
+  var show=function(){spView([{id:sid,k:sm.kind==='p'?'p':'v',d:+(sm.meta&&sm.meta.d)||0,tid:'',ts:mcMs(sm.created_at)}],0)};
+  if(SP.mem['sp_'+sid]){show();return}
+  if(sm.kind==='r'&&VN.mem['vn_'+sid]){SP.mem['sp_'+sid]=VN.mem['vn_'+sid];show();return}
+  if(!sm.media)return;
+  toast(__('در حال بارگیری…','Loading…'),null,null,'info',1);
+  mcBlob(sm.media,sm.kind!=='p').then(function(x){SP.mem['sp_'+sid]=x.u;show()}).catch(function(){toast(__('بارگیری نشد','Could not load'),null,null,'warn')});
+}
+function mcSaveMsg(id){
+  var fm=mcMsg(id);if(!fm||!fm.media)return;
+  toast(__('در حال بارگیری…','Loading…'),null,null,'info',1);
+  mcBlob(fm.media,true).then(function(x){return mcSave(x.b,fm.mname||('file.'+mcExt(x.b,'')))}).catch(function(){toast(__('بارگیری نشد','Could not load'),null,null,'warn')});
+}
+
 function mcBackA(){
   mcStop();
-  if(ui.mcl&&ui.mcl!=='*'&&ui.mcFrom==='*'){ui.mcl='*';ui.mcFrom=''}
-  else{ui.mcl='';ui.mcFrom='';ui.tab='coach'}
+  if(mcOpenNow()&&ui.mcFrom){ui.mcl=ui.mcFrom;ui.mcFrom=''}
+  else{ui.mcl='';ui.mcFrom='';ui.tab=ui.mcTab||'coach'}
   render('enter');window.scrollTo(0,0);
 }
 actions.mcBack=function(){if(history.state&&history.state.sub){history.back();return}mcBackA()};
@@ -9825,30 +11022,31 @@ actions.mcDash=function(){var l=mcLink(ui.mcl);if(l)cdOpen(l.id)};
 
 /* ----- the open chat ----- */
 function mcView(){
-  var l=ui.mcl==='*'?null:mcLink(ui.mcl);
   if(ui.mcl==='*')return mcListView();
+  if(ui.mcl==='#f')return frView();
+  var l=mcLink(ui.mcl);
   if(!l){ui.mcl='';return '<div class="empty" style="padding:28px 18px;text-align:center"><b>'+__('گفتگو پیدا نشد','Chat not found')+'</b><p style="opacity:.7;font-size:13px">'+__('شاید ارتباط قطع شده یا هنوز بارگیری نشده است.','The link may have ended or is still loading.')+'</p><button type="button" class="tt-btn pri" data-act="mcBack">'+__('برگشت','Back')+'</button></div>'}
-  var cn=mcCns(l),clip='<svg viewBox="0 0 24 24" class="ic clip" aria-hidden="true"><path d="M20.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a1.8 1.8 0 0 1-2.5-2.5l8-8"/></svg>',
+  var cn=mcCns(l),fr=mcFr(l),gr=mcGr(l),clip='<svg viewBox="0 0 24 24" class="ic clip" aria-hidden="true"><path d="M20.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a1.8 1.8 0 0 1-2.5-2.5l8-8"/></svg>',
       rep='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19M10 12.5h6M10 16h6"/></svg>';
   return '<div class="kcx mcx" data-lk="'+esc(l.id)+'"><div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="mcBack" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button>'+
-    '<div class="kcx-pill glass"><div class="kcx-av" style="background:linear-gradient(145deg,#38bdf8,#2563eb)">'+esc(mcIni(l))+'</div><div class="kcx-ti"><b>'+esc(mcPeer(l))+'</b><small>'+(cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor'))+'</small></div></div>'+
-    (cn?'<button type="button" class="kcx-rb glass" data-act="mcDash" aria-label="'+__('داشبورد','Dashboard')+'">'+icon('stats')+'</button>':'')+'</div>'+
+    '<div class="kcx-pill glass"><div class="kcx-av" style="background:'+(gr?'linear-gradient(145deg,#34d399,#0f9d6e)':fr?'linear-gradient(145deg,#f472b6,#e11d48)':'linear-gradient(145deg,#38bdf8,#2563eb)')+'">'+esc(mcIni(l))+'</div><div class="kcx-ti"><b>'+esc(mcPeer(l))+'</b><small>'+(gr?fa((l.members||[]).length)+' '+__('عضو','members'):fr?__('دوست تو','Your friend'):cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor'))+'</small></div></div>'+
+    (cn&&!fr&&!gr?'<button type="button" class="kcx-rb glass" data-act="mcDash" aria-label="'+__('داشبورد','Dashboard')+'">'+icon('stats')+'</button>':'')+'</div>'+
     '<div class="kcx-l" id="mcL"><div class="kcx-th" id="mcTh">'+mcThreadHTML(l)+'</div></div>'+
     '<div class="kcx-em glass" id="mcEm" aria-hidden="true"></div>'+
     '<form class="kcx-in" id="mcF" autocomplete="off"><div class="kcx-box glass"><textarea id="mcT" rows="1" maxlength="3000" enterkeyhint="send" placeholder="'+__('پیام','Message')+'" aria-label="'+__('پیام','Message')+'"></textarea>'+
-    (cn?'':'<button type="button" class="kcx-ib" id="mcE" aria-label="'+__('ارسال گزارش‌کار','Send a daily report')+'" aria-expanded="false">'+rep+'</button>')+
+    (gr||cn&&!fr?'':'<button type="button" class="kcx-ib" id="mcE" aria-label="'+__('ارسال گزارش‌کار','Send a daily report')+'" aria-expanded="false">'+rep+'</button>')+
     '<button type="button" class="kcx-ib kcx-at" id="mcA" aria-label="'+__('ارسال عکس، ویدیو یا فایل','Send a photo, video or file')+'">'+clip+'</button></div>'+
     '<button type="submit" class="kcx-s" aria-label="'+__('ارسال','Send')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 19V5"/><path d="M5.5 11.5 12 5l6.5 6.5"/></svg></button>'+vnBtnHTML('kcx-s kcx-vn')+'</form></div>';
 }
 function mcThreadHTML(l){
   var a=MC.msgs[l.id];
   if(!a){return '<div class="mc-ld" aria-label="'+__('در حال بارگیری','Loading')+'"><i></i><i></i><i></i></div>'}
-  if(!a.length)return '<div class="kcx-e0">'+emptyArtHTML('chat',__('هنوز پیامی نیست','No messages yet'),mcCns(l)?__('اولین پیام را برای دانش‌آموزت بنویس.','Write the first message to your student.'):__('اولین پیام را برای مشاورت بنویس.','Write the first message to your advisor.'),null,'sm')+'</div>';
+  if(!a.length)return '<div class="kcx-e0">'+emptyArtHTML('chat',__('هنوز پیامی نیست','No messages yet'),mcGr(l)?__('اولین پیام را در گروه بنویس.','Write the first message in the group.'):mcFr(l)?__('اولین پیام را برای دوستت بنویس.','Write the first message to your friend.'):mcCns(l)?__('اولین پیام را برای دانش‌آموزت بنویس.','Write the first message to your student.'):__('اولین پیام را برای مشاورت بنویس.','Write the first message to your advisor.'),null,'sm')+'</div>';
   var h='',ld='';
   a.forEach(function(m){var dk=new Date(mcMs(m.created_at)).toDateString();if(dk!==ld){h+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(mcMs(m.created_at))+'</span></div>';ld=dk}h+=mcRow(m)});
   return h;
 }
-function mcTk(m){return m.failed?'<i class="mc-tk bad">!</i>':m.pending?'<i class="mc-tk">…</i>':'<i class="mc-tk'+(m.seen_at?' on':'')+'">'+(m.seen_at?'✓✓':'✓')+'</i>'}
+function mcTk(m){if(m.failed)return '<i class="mc-tk bad">!</i>';if(m.pending)return '<i class="mc-tk">…</i>';var sn=m.seen_at&&!mcGr(mcLink(m.link_id));return '<i class="mc-tk'+(sn?' on':'')+'">'+(sn?'✓✓':'✓')+'</i>'}
 function mcRow(m){
   var mine=m.sender_id===CNX.uid,c=mine?'u':'a',tm=kcxTime(mcMs(m.created_at)),tt=tm+(mine?' '+mcTk(m):''),h,me=m.meta||{};
   if(m.kind==='t')h='<div class="kcx-m '+c+'"><p dir="auto">'+esc(m.body||'').replace(/\n/g,'<br>')+'</p><time>'+tt+'</time></div>';
@@ -9861,6 +11059,7 @@ function mcRow(m){
     h='<div class="kcx-m '+c+' '+vnCls(vv)+'" data-vid="'+esc(m.id)+'" data-d="'+(+vv.d||0)+'">'+vnInner(vv,tt)+'</div>';
   }
   else if(m.kind==='f')h='<div class="kcx-m '+c+' mc-file"><button type="button" class="mc-fb" data-mcf="'+esc(m.id)+'"><span class="mc-fi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg></span><span class="mc-ft"><b dir="auto">'+esc(m.mname||__('فایل','File'))+'</b><small>'+mcSize(m.msize)+' · '+__('ذخیره یا باز کردن','Save or open')+'</small></span></button><time>'+tt+'</time></div>';
+  else if(m.kind==='q')h='<div class="kcx-m '+c+' mc-q'+(me.mu&&!(+me.ok>=0)?' mu':'')+'" data-q="'+esc(m.id)+'"><div class="mc-qin">'+mcPollInner(m)+'</div><time>'+tt+'</time></div>';
   else if(m.kind==='g'){
     var nums=[];
     if(me.sp!=null)nums.push(__('مطالعه ','Study ')+fa(Math.round(me.sp/6)/10)+__(' ساعت',' h'));
@@ -9870,7 +11069,11 @@ function mcRow(m){
     h='<div class="kcx-m '+c+' mc-rep"><b>📝 '+__('گزارش‌کار روزانه','Daily report')+' · '+esc(dl)+'</b>'+(nums.length?'<small>'+nums.join(' · ')+'</small>':'')+'<div class="mc-rt" dir="auto">'+esc(m.body||'').replace(/\n/g,'<br>')+'</div><button type="button" class="mc-rm" data-mcg="1">'+__('نمایش همه','Show all')+'</button><time>'+tt+'</time></div>';
   }
   else h='<div class="kcx-m '+c+'"><p>…</p></div>';
-  return '<div class="kcx-row'+(m.failed?' mc-failed':'')+'" data-mid="'+esc(m.id)+'" data-mine="'+(mine?1:0)+'">'+h+'</div>';
+  var rx=mcReOf(m.id);
+  if(rx)h=h.replace('class="kcx-m ','class="kcx-m hre ').replace(/<\/div>$/,'<span class="kcx-re">'+rx+'</span></div>');
+  var lk=mine?null:mcLink(m.link_id),gp=lk&&mcGr(lk),sn='';
+  if(gp){sn=mcSnd(lk,m);h=h.replace(/^(<div[^>]*>)/,'$1<b class="mc-sn" dir="auto" style="color:hsl('+mcHue(m.sender_id)+',62%,52%)">'+esc(sn)+'</b>')}
+  return '<div class="kcx-row'+(m.failed?' mc-failed':'')+(lk?' mc-hasav':'')+'" data-mid="'+esc(m.id)+'" data-snd="'+esc(m.sender_id)+'" data-mine="'+(mine?1:0)+'">'+(lk?(gp?mcAvHTMLv(mcMsgAv(m,sn)):mcAvHTML(lk)):'')+h+'</div>';
 }
 /* thumbnails, pictures of round videos and voice files arrive after the bubble is on the screen */
 function mcHydrate(list){
@@ -9894,7 +11097,8 @@ function mcHydrate(list){
 function mcMsg(id){var a=MC.msgs[ui.mcl]||[],i;for(i=0;i<a.length;i++)if(a[i].id===id)return a[i];return null}
 
 /* paints what changed (new bubbles at the end, removed ones, ticks) without rebuilding the thread, so the scroll position stays */
-function mcSync(stick){
+function mcSync(stick){mcSync0(stick);mcAvFix()}
+function mcSync0(stick){
   var th=document.getElementById('mcTh'),l=mcLink(ui.mcl),L=document.getElementById('mcL');if(!th||!l)return;
   var a=MC.msgs[l.id];if(!a)return;
   var near=!L||L.scrollHeight-L.scrollTop-L.clientHeight<120;
@@ -9936,7 +11140,7 @@ function mcMerge(id,rows){
   return ch;
 }
 async function mcPull(){
-  var id=ui.mcl;if(!id||id==='*'||MC.pulling||!document.getElementById('mcTh')||document.hidden)return;
+  var id=ui.mcl;if(!id||id==='*'||id==='#f'||MC.pulling||!document.getElementById('mcTh')||document.hidden)return;
   var l=mcLink(id);if(!l)return;
   MC.pulling=1;
   try{
@@ -9967,20 +11171,25 @@ async function mcPull(){
     }else if(st&&st.ok&&Array.isArray(st.j)&&!st.j.length&&a.length){
       MC.msgs[id]=a=a.filter(function(m){return m.pending||m.failed});
     }
-    if(first){var th=document.getElementById('mcTh');if(th){th.innerHTML=mcThreadHTML(l);mcHydrate(a);var L=document.getElementById('mcL');if(L)L.scrollTop=L.scrollHeight;var s0=a.length&&a[a.length-1];MC.sum[id]=s0||MC.sum[id]}}
+    if(first){var th=document.getElementById('mcTh');if(th){th.innerHTML=mcThreadHTML(l);mcAvFix();mcHydrate(a);var L=document.getElementById('mcL');if(L)L.scrollTop=L.scrollHeight;var s0=a.length&&a[a.length-1];MC.sum[id]=s0||MC.sum[id]}}
     else mcSync(false);
     if(a.length)MC.sum[id]=a[a.length-1];
     /* everything the other person sent is read now */
-    if(!document.hidden&&a.some(function(m){return m.sender_id!==CNX.uid&&!m.seen_at})){
+    if(mcGr(l)){
+      var lastIn=0;a.forEach(function(m){if(m.sender_id!==CNX.uid&&!m.pending){var t=mcMs(m.created_at);if(t>lastIn)lastIn=t}});
+      if(!document.hidden&&lastIn>mcMs(l.lr)){l.lr=new Date(lastIn).toISOString();cnxReq('/rest/v1/rpc/mark_chat_seen','POST',{p_link:id})}
+    }else if(!document.hidden&&a.some(function(m){return m.sender_id!==CNX.uid&&!m.seen_at})){
       cnxReq('/rest/v1/rpc/mark_chat_seen','POST',{p_link:id}).then(function(x){if(x.ok){a.forEach(function(m){if(m.sender_id!==CNX.uid&&!m.seen_at)m.seen_at=new Date().toISOString()})}});
     }
     if(MC.un[id]){delete MC.un[id];mcCardPaint()}
+    mcPollPull(id);
   }catch(e){}finally{MC.pulling=0}
 }
 
 /* ----- sending ----- */
 async function mcPost(l,m,up){
   m.link_id=l.id;m.sender_id=CNX.uid;m.created_at=m.created_at||new Date().toISOString();m.pending=1;m._up=up||[];
+  m.meta=m.meta||{};m.meta.av=mcMyAv();if(mcGr(l))m.meta.nm=String(displayName()).slice(0,80);
   var a=MC.msgs[l.id]||(MC.msgs[l.id]=[]);
   if(!a.some(function(x){return x.id===m.id}))a.push(m);
   mcSort(a);if(ui.mcl===l.id)mcSync(true);
@@ -10037,7 +11246,206 @@ function mcSendReport(l,k){
   var id=mcNewId();
   mcPost(l,{id:id,kind:'g',body:String(r.t||'').slice(0,9000),meta:{day:k,sp:r.sp,cl:r.cl,te:r.te,tc:r.tc,cr:r.cr,n:r.n}});
   /* the same report also feeds the counselor's dashboard (quietly) */
-  cnxReq('/rest/v1/rpc/send_report','POST',{p_link:l.id,p_day:k,p_sp:r.sp,p_cl:r.cl,p_te:r.te,p_tc:r.tc,p_cr:r.cr,p_parts:r.n,p_body:String(r.t||'').slice(0,9000)}).catch(function(){});
+  if(!mcFr(l))cnxReq('/rest/v1/rpc/send_report','POST',{p_link:l.id,p_day:k,p_sp:r.sp,p_cl:r.cl,p_te:r.te,p_tc:r.tc,p_cr:r.cr,p_parts:r.n,p_body:String(r.t||'').slice(0,9000)}).catch(function(){});
+}
+/* ---------- polls in chats (v298): paper-clip menu → «نظرسنجی» ----------
+   A poll is a message of kind 'q': body = the question, meta = {o:[options], mu:multiple answers, rv:revoting, sh:shuffle, ok:right answer (quiz) or -1}.
+   Votes are rows of public.link_poll_votes (see the v298 block of supabase/setup.sql), written only through the poll_vote() function.
+   MC.pv[msgId] = [{user_id,opts:[0-based option numbers]}]; MC.qd[msgId] = options ticked but not sent yet (multiple answers). */
+MC.pv={};MC.pvs={};MC.qd={};MC.qb={};
+function mcPollOpts(m){var o=m.meta&&m.meta.o;return Array.isArray(o)?o:[]}
+function mcPollQuiz(m){return !!m.meta&&+m.meta.ok>=0}
+function mcPollMine(m){var v=MC.pv[m.id]||[],i;for(i=0;i<v.length;i++)if(v[i].user_id===CNX.uid)return v[i].opts||[];return null}
+/* shuffled options keep one order for each person (seeded by the person and the poll) */
+function mcPollOrder(m){
+  var n=mcPollOpts(m).length,idx=[],i;for(i=0;i<n;i++)idx.push(i);
+  if(m.meta&&m.meta.sh){
+    var key=function(x){var s=String(CNX.uid)+m.id+x,h=0,k;for(k=0;k<s.length;k++)h=(h*31+s.charCodeAt(k))|0;return h};
+    idx.sort(function(a,b){return key(a)-key(b)});
+  }
+  return idx;
+}
+function mcPollInner(m){
+  var o=mcPollOpts(m),mine=mcPollMine(m),voted=!!mine,quiz=mcPollQuiz(m),mu=!!(m.meta&&m.meta.mu)&&!quiz,rv=!!(m.meta&&m.meta.rv)&&!quiz,
+      vs=MC.pv[m.id]||[],cnt=o.map(function(){return 0}),tot=vs.length,okI=quiz?+m.meta.ok:-1,dr=MC.qd[m.id]||[],busy=!!(m.pending||m.failed);
+  vs.forEach(function(v){(v.opts||[]).forEach(function(i){if(cnt[i]!=null)cnt[i]++})});
+  var rows=mcPollOrder(m).map(function(i){
+    var sel=voted?mine.indexOf(i)>-1:dr.indexOf(i)>-1,pc=tot?Math.round(cnt[i]/tot*100):0,cls='mc-qo'+(sel?' on':'')+(voted?' res':'')+(voted&&quiz&&i===okI?' ok':'')+(voted&&quiz&&sel&&i!==okI?' no':'');
+    return '<button type="button" class="'+cls+'" data-mcq="'+esc(m.id)+'" data-i="'+i+'"'+(busy?' disabled':'')+'>'+
+      (voted?'<i class="mc-qb" style="width:'+pc+'%"></i>':'')+
+      '<span class="mc-qm">'+(sel?(voted&&quiz&&i!==okI?'✕':'✓'):(voted&&quiz&&i===okI?'✓':''))+'</span><span class="mc-qt" dir="auto">'+esc(o[i])+'</span>'+(voted?'<span class="mc-qp">'+fa(pc)+'٪</span>':'')+'</button>';
+  }).join('');
+  var foot='<div class="mc-qf"><span>'+(tot?fa(tot)+' '+__('رأی','votes'):__('هنوز رأیی نیست','No votes yet'))+'</span>'+
+    (!voted&&mu?'<button type="button" class="mc-qs2" data-mcqs="1"'+(dr.length&&!busy?'':' disabled')+'>'+__('ثبت رأی','Vote')+'</button>':'')+
+    (voted&&rv?'<button type="button" class="mc-qx" data-mcqu="1">'+__('پس گرفتن رأی','Retract vote')+'</button>':'')+'</div>';
+  return '<b class="mc-qq" dir="auto">'+esc(m.body||'')+'</b><small class="mc-qk">'+(quiz?'🎯 '+__('آزمون','Quiz'):'📊 '+(mu?__('نظرسنجی · چندجوابه','Poll · multiple answers'):__('نظرسنجی','Poll')))+'</small><div class="mc-qr">'+rows+'</div>'+foot;
+}
+function mcPollPaint(id){
+  var el=document.querySelector('.mc-q[data-q="'+id+'"] .mc-qin'),m=mcMsg(id);
+  if(el&&m)el.innerHTML=mcPollInner(m);
+}
+function mcPollErr(r){
+  var e=r&&r.j&&r.j.error;
+  if(r&&r.st===404)return __('نظرسنجی هنوز در Supabase ساخته نشده (بخش v298 فایل supabase/setup.sql را اجرا کن).','Polls are not in Supabase yet (run the v298 block of supabase/setup.sql).');
+  if(e==='locked')return __('رأی این نظرسنجی قابل تغییر نیست.','Votes in this poll can not be changed.');
+  return __('رأی ثبت نشد؛ دوباره امتحان کن.','The vote was not saved; try again.');
+}
+async function mcPollVote(m,opts){
+  var prev=(MC.pv[m.id]||[]).slice(),rest=prev.filter(function(v){return v.user_id!==CNX.uid});
+  MC.pv[m.id]=opts.length?rest.concat([{user_id:CNX.uid,opts:opts.slice()}]):rest;
+  delete MC.qd[m.id];MC.qb[m.id]=1;mcPollPaint(m.id);hap('send');
+  var r;try{r=await cnxReq('/rest/v1/rpc/poll_vote','POST',{p_msg:m.id,p_opts:opts})}catch(e){r={ok:false}}
+  delete MC.qb[m.id];
+  if(!r.ok||!(r.j&&r.j.ok)){MC.pv[m.id]=prev;mcPollPaint(m.id);toast(mcPollErr(r),null,null,'warn');return}
+  if(mcPollQuiz(m)&&opts.length)toast(opts[0]===+m.meta.ok?'✅ '+__('درست بود!','Correct!'):'❌ '+__('جواب درست نبود','Not the right answer'),null,null,opts[0]===+m.meta.ok?'ok':'warn',true);
+  MC.pvs[m.id]=JSON.stringify(MC.pv[m.id]);
+}
+/* taps on a poll bubble; returns true when the tap belonged to a poll */
+function mcPollClick(e){
+  var b=e.target.closest('[data-mcq],[data-mcqs],[data-mcqu]');if(!b)return false;
+  var box=b.closest('.mc-q'),m=box&&mcMsg(box.dataset.q);
+  e.stopPropagation();
+  if(!m||m.pending||m.failed||MC.qb[m.id])return true;
+  var mine=mcPollMine(m),quiz=mcPollQuiz(m),mu=!!(m.meta&&m.meta.mu)&&!quiz,rv=!!(m.meta&&m.meta.rv)&&!quiz;
+  if(b.hasAttribute('data-mcqu')){if(mine&&rv)mcPollVote(m,[]);return true}
+  if(b.hasAttribute('data-mcqs')){if(!mine&&(MC.qd[m.id]||[]).length)mcPollVote(m,MC.qd[m.id].slice());return true}
+  var i=+b.dataset.i;
+  if(mine){if(rv&&!mu&&mine.indexOf(i)<0)mcPollVote(m,[i]);return true}
+  if(mu){var d=MC.qd[m.id]||(MC.qd[m.id]=[]),k=d.indexOf(i);if(k<0)d.push(i);else d.splice(k,1);mcPollPaint(m.id)}
+  else mcPollVote(m,[i]);
+  return true;
+}
+/* the open chat asks for the votes of its polls (called after every message pull) */
+async function mcPollPull(id){
+  var a=MC.msgs[id]||[],ids=a.filter(function(m){return m.kind==='q'&&!m.pending&&!m.failed}).slice(-40).map(function(m){return m.id});
+  if(!ids.length)return;
+  var r;try{r=await cnxReq('/rest/v1/link_poll_votes?select=msg_id,user_id,opts&msg_id=in.('+ids.join(',')+')&limit=3000')}catch(e){return}
+  if(!r||!r.ok||!Array.isArray(r.j)||ui.mcl!==id)return;
+  var by={};ids.forEach(function(i){by[i]=[]});
+  r.j.forEach(function(v){if(by[v.msg_id])by[v.msg_id].push({user_id:v.user_id,opts:Array.isArray(v.opts)?v.opts:[]})});
+  ids.forEach(function(i){
+    if(MC.qb[i])return;
+    var sig=JSON.stringify(by[i]);
+    if(MC.pvs[i]!==sig){MC.pvs[i]=sig;MC.pv[i]=by[i];mcPollPaint(i)}
+  });
+}
+/* ----- the poll maker (a bottom sheet, like Telegram's «New Poll») ----- */
+function mcPollSheet(l){
+  var lab=__('نظرسنجی جدید','New poll'),MAXO=10,opts=['',''],S={mu:false,rv:true,sh:false,quiz:false},okI=-1;
+  var tg=function(k,ic,t,sb){return '<button type="button" class="qrow" role="switch" aria-checked="'+S[k]+'" data-mq="'+k+'"><span class="h3d">'+icon(ic)+'</span><span class="qt"><b>'+t+'</b><small>'+sb+'</small></span><span class="sw"></span></button>'};
+  var sw=spSheet('<div class="sheet-top"><span></span><h2>'+lab+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div>'+
+    '<div class="mq-f"><label class="mq-l" for="mqQ">'+__('سؤال','Question')+'</label>'+
+    '<input class="field" id="mqQ" maxlength="200" dir="auto" autocomplete="off" placeholder="'+__('سؤال را بنویس','Ask a question')+'">'+
+    '<label class="mq-l">'+__('گزینه‌ها','Options')+'</label><div id="mqO" class="mq-o"></div>'+
+    '<button type="button" class="tt-btn" id="mqAdd">'+icon('plus')+' '+__('افزودن گزینه','Add an option')+'</button><p class="hint2" id="mqLeft"></p>'+
+    '<div class="qsheet" id="mqS">'+tg('mu','select',__('چند جواب','Multiple answers'),__('رأی‌دهنده‌ها می‌توانند بیش از یک گزینه بزنند','Voters can select more than one option'))+
+      tg('rv','refresh',__('تغییر رأی','Revoting'),__('رأی‌دهنده‌ها می‌توانند رأی‌شان را عوض کنند','Voters can change their vote'))+
+      tg('sh','spark',__('به‌هم‌ریختن گزینه‌ها','Shuffle options'),__('ترتیب گزینه‌ها برای هر نفر فرق می‌کند','Answers appear in a random order for each voter'))+
+      tg('quiz','target',__('جواب درست (آزمون)','Set correct answer'),__('یک گزینه را به‌عنوان جواب درست علامت بزن','Mark one option as the right answer'))+'</div>'+
+    '<button type="button" class="btn" id="mqGo" disabled>'+__('ارسال نظرسنجی','Send poll')+'</button></div>',lab);
+  var w=sw.w,Q=w.querySelector('#mqQ'),O=w.querySelector('#mqO'),Go=w.querySelector('#mqGo');
+  function clean(){return opts.map(function(t,i){return {t:String(t).trim(),i:i}}).filter(function(x){return x.t})}
+  function check(){
+    var c=clean(),uniq={};c.forEach(function(x){uniq[x.t]=1});
+    var ok=Q.value.trim()&&c.length>=2&&Object.keys(uniq).length===c.length&&(!S.quiz||(okI>=0&&String(opts[okI]).trim()));
+    Go.disabled=!ok;
+    w.querySelector('#mqLeft').textContent=opts.length<MAXO?__('می‌توانی ','You can add ')+fa(MAXO-opts.length)+__(' گزینه‌ی دیگر اضافه کنی.',' more options.'):__('به حداکثر گزینه رسیدی.','You reached the maximum.');
+    w.querySelector('#mqAdd').hidden=opts.length>=MAXO;
+  }
+  function draw(){
+    O.innerHTML=opts.map(function(t,i){
+      return '<div class="mq-r">'+(S.quiz?'<button type="button" class="mq-ok'+(okI===i?' on':'')+'" data-ok="'+i+'" aria-label="'+__('جواب درست','Right answer')+'" aria-pressed="'+(okI===i)+'">✓</button>':'')+
+        '<input class="field" data-oi="'+i+'" maxlength="100" dir="auto" autocomplete="off" value="'+esc(t)+'" placeholder="'+__('گزینه','Option')+' '+fa(i+1)+'">'+
+        (opts.length>2?'<button type="button" class="mc-x" data-rm="'+i+'" aria-label="'+__('حذف گزینه','Remove option')+'">'+icon('close')+'</button>':'')+'</div>';
+    }).join('');
+    [].forEach.call(w.querySelectorAll('#mqS .qrow'),function(b){b.setAttribute('aria-checked',S[b.dataset.mq]);
+      var off=S.quiz&&(b.dataset.mq==='mu'||b.dataset.mq==='rv');b.classList.toggle('dis',off);if(off)b.setAttribute('aria-disabled','true');else b.removeAttribute('aria-disabled')});
+    check();
+  }
+  draw();
+  Q.addEventListener('input',check);
+  w.addEventListener('input',function(e){var i=e.target.dataset&&e.target.dataset.oi;if(i==null)return;opts[+i]=e.target.value;check()});
+  w.addEventListener('click',function(e){
+    var b;
+    if(e.target.closest('[data-e="close"]')){sw.close();return}
+    if((b=e.target.closest('#mqAdd'))){if(opts.length<MAXO){opts.push('');draw();var ins=O.querySelectorAll('input');ins[ins.length-1].focus()}return}
+    if((b=e.target.closest('[data-rm]'))){var r=+b.dataset.rm;opts.splice(r,1);if(okI===r)okI=-1;else if(okI>r)okI--;draw();return}
+    if((b=e.target.closest('[data-ok]'))){okI=okI===+b.dataset.ok?-1:+b.dataset.ok;draw();return}
+    if((b=e.target.closest('#mqS .qrow'))){
+      var k=b.dataset.mq;if(S.quiz&&(k==='mu'||k==='rv'))return;
+      S[k]=!S[k];if(k==='quiz'){if(S.quiz){S.mu=false;S.rv=false}else okI=-1}
+      draw();return;
+    }
+    if(e.target.closest('#mqGo')){
+      if(Go.disabled)return;
+      var c=clean(),ok=-1;if(S.quiz)c.forEach(function(x,n){if(x.i===okI)ok=n});
+      var q=Q.value.trim();
+      mcPost(l,{id:mcNewId(),kind:'q',body:q.slice(0,200),meta:{o:c.map(function(x){return x.t}),mu:S.quiz?false:S.mu,rv:S.quiz?false:S.rv,sh:S.sh,ok:ok}});
+      sw.close();
+    }
+  });
+  setTimeout(function(){try{Q.focus()}catch(e){}},350);
+}
+/* reactions in the group are kept on this phone only (the server has no column for them) */
+function mcReMap(){try{return JSON.parse(localStorage.getItem('ario.mcre')||'{}')||{}}catch(e){return {}}}
+function mcReOf(id){return mcReMap()[id]||''}
+function mcReSet(id,v){var o=mcReMap();if(v)o[id]=v;else delete o[id];try{localStorage.setItem('ario.mcre',JSON.stringify(o))}catch(e){}}
+function mcTextOf(m){return m.kind==='t'||m.kind==='g'?String(m.body||''):''}
+function mcCopy(t){
+  function ok(){toast('کپی شد',null,null,'ok')}
+  function fb(){var x=document.createElement('textarea');x.value=t;x.style.cssText='position:fixed;opacity:0;top:0';document.body.appendChild(x);x.select();try{document.execCommand('copy');ok()}catch(er){}x.remove()}
+  try{navigator.clipboard.writeText(t).then(ok,fb)}catch(er){fb()}
+}
+function mcMenuClose(root){var p=root.querySelector('.kcx-pop');if(!p)return;p.classList.add('out');setTimeout(function(){p.remove()},170)}
+function mcMenu(root,l,r,m){
+  mcMenuClose(root);
+  var bub=r.querySelector('.kcx-m');if(!bub)return;
+  var mine=m.sender_id===CNX.uid,txt=mcTextOf(m),RE=['❤️','👍','👎','🔥','🥰','👏','😁'],RE2=['😂','😮','😢','🎉','🤔','💯','🙏','👌','😍','🤯','😎','👀','💪','✅','😴','🤝'],cur=mcReOf(m.id);
+  var rc=bub.getBoundingClientRect(),W=window.innerWidth,H=window.innerHeight;
+  var p=document.createElement('div');p.className='kcx-pop';
+  var bar='<div class="kcx-pr glass"><div class="kcx-pre">'+RE.map(function(e){return '<button type="button" data-re="'+e+'"'+(cur===e?' class="on"':'')+'>'+e+'</button>'}).join('')+'<button type="button" class="kcx-rx" data-rx aria-label="'+__('بیشتر','More')+'">'+icon('chev')+'</button></div><div class="kcx-prm">'+RE2.map(function(e){return '<button type="button" data-re="'+e+'">'+e+'</button>'}).join('')+'</div></div>';
+  var mn='<div class="kcx-pm glass"><div class="kcx-ph"><span>'+icon('clock')+'</span>'+kcxTime(mcMs(m.created_at))+'</div>'+
+    (m.failed||m.pending?'':'<button type="button" data-pa="reply">'+SVREPLY+'<b>'+__('پاسخ','Reply')+'</b></button>')+
+    (txt?'<button type="button" data-pa="copy">'+icon('copy')+'<b>'+__('کپی','Copy')+'</b></button>':'')+
+    (txt?'<button type="button" data-pa="fwd">'+SVFWD+'<b>'+__('هدایت','Forward')+'</b></button>':'')+
+    (mine?'<button type="button" class="del" data-pa="del">'+icon('trash')+'<b>'+__('حذف','Delete')+'</b></button>':'')+'</div>';
+  p.innerHTML='<div class="kcx-pb"></div><div class="kcx-pc"></div>'+bar+mn;
+  root.appendChild(p);
+  var bb=p.querySelector('.kcx-pr'),mm=p.querySelector('.kcx-pm'),cl=p.querySelector('.kcx-pc');
+  cl.appendChild(bub.cloneNode(true));cl.firstChild.style.maxWidth='none';cl.firstChild.style.animation='none';
+  var bh=bb.offsetHeight||52,mh=mm.offsetHeight,mw=mm.offsetWidth,bw=bb.offsetWidth;
+  var top0=76,bot0=H-12,avail=bot0-top0-bh-mh-20,ch=Math.min(rc.height,Math.max(120,avail));
+  var y=rc.top-bh-8;if(y<top0)y=top0;if(y+bh+8+ch+10+mh>bot0)y=Math.max(top0,bot0-(bh+8+ch+10+mh));
+  var cy=y+bh+8;
+  cl.style.cssText='left:'+rc.left+'px;top:'+cy+'px;width:'+rc.width+'px;max-height:'+ch+'px';
+  var mid=rc.left+rc.width/2,left=function(w,al){var x=al==='c'?mid-w/2:(mid<W/2?rc.left:rc.right-w);return Math.max(8,Math.min(W-w-8,x))};
+  bb.style.cssText='left:'+left(bw,'c')+'px;top:'+y+'px';
+  mm.style.cssText='left:'+left(mw)+'px;top:'+(cy+ch+10)+'px;transform-origin:'+(mid<W/2?'left':'right')+' top';
+  p.addEventListener('click',function(e){
+    var re=e.target.closest('[data-re]'),pa=e.target.closest('[data-pa]'),rx=e.target.closest('[data-rx]');
+    if(rx){bb.classList.toggle('open');return}
+    if(re){
+      var v=re.dataset.re,nv=cur===v?'':v;mcReSet(m.id,nv);
+      var old=bub.querySelector('.kcx-re');if(old)old.remove();
+      bub.classList.toggle('hre',!!nv);if(nv){var s=document.createElement('span');s.className='kcx-re';s.textContent=nv;bub.appendChild(s)}
+      mcMenuClose(root);return;
+    }
+    if(pa){
+      var k=pa.dataset.pa;mcMenuClose(root);
+      if(k==='reply'){
+        var T=document.getElementById('mcT');if(T){
+          var q=(txt||(m.kind==='p'?__('عکس','Photo'):m.kind==='v'?__('ویدیو','Video'):m.kind==='f'?(m.mname||__('فایل','File')):m.kind==='q'?'📊 '+(m.body||''):__('پیام صوتی','Voice message'))).replace(/\s+/g,' ').trim();
+          T.value='«'+(q.length>60?q.slice(0,60)+'…':q)+'»\n';T.dispatchEvent(new Event('input'));T.focus();
+        }
+      }
+      else if(k==='copy')mcCopy(txt);
+      else if(k==='fwd'){try{if(navigator.share){navigator.share({text:txt}).catch(function(){});return}}catch(er){}mcCopy(txt)}
+      else if(k==='del')setTimeout(function(){mcDelete(l,m)},180);
+      return;
+    }
+    if(e.target.classList.contains('kcx-pb')||e.target===p)mcMenuClose(root);
+  });
+  requestAnimationFrame(function(){p.classList.add('in')});
 }
 function mcDelete(l,m){
   askConfirm({title:__('حذف پیام','Delete message'),msg:__('این پیام برای هر دو نفر پاک می‌شود.','This message is deleted for both of you.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:async function(){
@@ -10053,7 +11461,7 @@ function mcDelete(l,m){
   }}]});
 }
 /* picture / video / file chooser */
-function mcChoose(cb){
+function mcChoose(cb,onPoll){
   var lab=__('ارسال عکس، ویدیو یا فایل','Send a photo, video or file');
   var sw=spSheet('<div class="sheet-top"><span></span><h2>'+lab+'</h2><button type="button" data-e="close">'+__('بستن','Close')+'</button></div>'+
     '<div class="sp-opts">'+
@@ -10061,6 +11469,7 @@ function mcChoose(cb){
     '<label class="sp-o">'+SP_VID+'<span>'+__('ضبط فیلم','Record a video')+'</span><input type="file" accept="video/*" capture="environment" data-f></label>'+
     '<label class="sp-o">'+icon('img')+'<span>'+__('انتخاب از گالری','Choose from gallery')+'</span><input type="file" accept="image/*,video/*" data-f></label>'+
     '<label class="sp-o"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg><span>'+__('فایل (PDF، نوشته و ...)','File (PDF, text...)')+'</span><input type="file" data-f data-t="f"></label>'+
+    (onPoll?'<button type="button" class="sp-o" data-e="poll">'+icon('stats')+'<span>'+__('نظرسنجی','Poll')+'</span></button>':'')+
     '</div>',lab);
   sw.w.addEventListener('change',function(e){
     var i=e.target;if(!i||!i.matches||!i.matches('[data-f]'))return;
@@ -10068,7 +11477,7 @@ function mcChoose(cb){
     setTimeout(sw.close,60);
     try{cb(f,i.dataset.t==='f')}catch(er){}
   });
-  sw.w.addEventListener('click',function(e){if(e.target.closest('[data-e="close"]'))sw.close()});
+  sw.w.addEventListener('click',function(e){if(e.target.closest('[data-e="close"]'))sw.close();else if(onPoll&&e.target.closest('[data-e="poll"]')){sw.close();setTimeout(onPoll,120)}});
 }
 
 /* ----- wiring of the open chat ----- */
@@ -10082,7 +11491,7 @@ function mcInit(){
   F.addEventListener('submit',function(e){e.preventDefault();send();T.focus({preventScroll:true})});
   T.addEventListener('input',fit);
   T.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
-  A.addEventListener('click',function(){mcChoose(function(f,asFile){mcSendFile(l,f,asFile)})});
+  A.addEventListener('click',function(){mcChoose(function(f,asFile){mcSendFile(l,f,asFile)},function(){mcPollSheet(l)})});
   /* daily report (student side) */
   function tray(open){
     if(!E)return;
@@ -10097,8 +11506,11 @@ function mcInit(){
   vnBind(F.querySelector('.kcx-vn'),function(){return F},function(blob,meta){mcSendVn(l,blob,meta)},false);
   vnStopCur();
   /* taps inside the thread */
+  var pill=root.querySelector('.kcx-pill');if(pill){pill.style.cursor='pointer';pill.addEventListener('click',function(){mcpOpen(l)})}
+  L.addEventListener('click',function(e){if(mcPollClick(e)){e.stopImmediatePropagation();e.preventDefault()}});
   L.addEventListener('click',function(e){
     var b;
+    if((b=e.target.closest('.mc-av-on .mc-av'))){e.stopPropagation();mcpOpen(l);return}
     if((b=e.target.closest('[data-vnp]'))){
       var bub=b.closest('[data-vid]');if(!bub)return;e.stopPropagation();
       var vid=bub.dataset.vid,m=mcMsg(vid);
@@ -10129,17 +11541,19 @@ function mcInit(){
       askConfirm({title:__('ارسال نشد','Not sent'),msg:__('دوباره بفرستم؟','Send it again?'),btns:[{t:__('ارسال دوباره','Send again'),fn:function(){mcSend(l,fm2)}},{t:__('حذف','Delete'),cls:'bad',fn:function(){mcDelete(l,fm2)}}]});
     }
   });
-  /* keeping a finger on one of your own messages: delete */
-  var lp=0,lx=0,ly=0;
+  /* keeping a finger on a message: Telegram-style reaction bar + menu (reply, copy, forward, delete for your own) */
+  var lp=0,lx=0,ly=0,lpDone=0;
   L.addEventListener('pointerdown',function(e){
-    clearTimeout(lp);var r=e.target.closest('.kcx-row[data-mine="1"]');if(!r||e.target.closest('button,a,video,input'))return;
+    clearTimeout(lp);lp=0;var r=e.target.closest('.kcx-row');if(!r||e.target.closest('button,a,video,input'))return;
     lx=e.clientX;ly=e.clientY;
-    lp=setTimeout(function(){lp=0;var m=mcMsg(r.dataset.mid);if(m){try{navigator.vibrate&&navigator.vibrate(12)}catch(x){}mcDelete(l,m)}},560);
+    lp=setTimeout(function(){lp=0;var m=mcMsg(r.dataset.mid);if(m){lpDone=Date.now();try{navigator.vibrate&&navigator.vibrate(12)}catch(x){}try{window.getSelection().removeAllRanges()}catch(x){}mcMenu(root,l,r,m)}},420);
   });
   L.addEventListener('pointermove',function(e){if(lp&&(Math.abs(e.clientX-lx)>10||Math.abs(e.clientY-ly)>10)){clearTimeout(lp);lp=0}});
   ['pointerup','pointercancel','scroll'].forEach(function(n){L.addEventListener(n,function(){clearTimeout(lp);lp=0},true)});
-  L.addEventListener('contextmenu',function(e){if(e.target.closest('.kcx-row[data-mine="1"]'))e.preventDefault()});
+  L.addEventListener('click',function(e){if(Date.now()-lpDone<500){e.stopPropagation();e.preventDefault()}},true);
+  L.addEventListener('contextmenu',function(e){if(e.target.closest('.kcx-row'))e.preventDefault()});
   /* show what we have at once, then ask the server */
+  mcAvFix();
   if(MC.msgs[id]){mcHydrate(MC.msgs[id]);L.scrollTop=L.scrollHeight}
   mcStop();
   mcPull();
@@ -10476,6 +11890,105 @@ function tbCard(){
     if(pt.length)sm=pt.join(' · ');
   }catch(er){}
   return '<button type="button" class="wrcard glass" data-act="tbOpen"><span class="ib" style="background:linear-gradient(145deg,#fbbf24,#e07b0b)">'+icon('book')+'</span><div><b>'+__("کتابخانه و یادداشت‌ها","Library & notes")+'</b><small>'+sm+'</small></div></button>';
+}
+/* ---------- Progress garden (باغچه‌ی پیشرفت) ----------
+   Built only from the study hours in state.profile.kk, so it needs no new saved data and is backed up with the profile.
+   Every day with any study grows the current plant one step; PG_NEED study days make a plant complete and it moves into the garden.
+   A day without study makes the growing plant wilt (days of the past only; today is never counted as missed).
+   One study day makes it green again, and it keeps the growth it already had. Finished plants never wilt. */
+var PG_NEED=7;
+var PG_SP=[
+  {n:'رز',e:'Rose',c:'#e8416b',t:'f'},
+  {n:'آفتابگردان',e:'Sunflower',c:'#f5b301',t:'f'},
+  {n:'بنفشه',e:'Violet',c:'#8b5cf6',t:'f'},
+  {n:'درخت گیلاس',e:'Cherry tree',c:'#f48fb1',t:'t'},
+  {n:'لاله',e:'Tulip',c:'#ef4444',t:'f'},
+  {n:'درخت پرتقال',e:'Orange tree',c:'#fb923c',t:'t'}
+];
+function pgName(i){var s=PG_SP[i%PG_SP.length];return EN?s.e:s.n}
+function pgState(){
+  var td=todayKey(),d=kkD().d,ks=Object.keys(d).filter(function(k){return k<=td&&kkDay(k)>0}).sort();
+  var o={done:[],g:0,sp:0,wilt:false,days:ks.length,today:false,none:!ks.length};
+  if(!ks.length)return o;
+  var k=ks[0],g=0,sp=0,wilt=false,n=0;
+  while(k<=td&&n++<4000){
+    if(kkDay(k)>0){
+      g++;wilt=false;
+      if(g>=PG_NEED){o.done.push({sp:sp,k:k});sp=(sp+1)%PG_SP.length;g=0}
+    }else if(k<td)wilt=true;
+    k=addDays(k,1);
+  }
+  o.g=g;o.sp=sp;o.wilt=wilt;o.today=kkDay(td)>0;
+  return o;
+}
+function pgStage(g){return g<=0?0:Math.min(5,Math.ceil(g*5/PG_NEED))}
+function pgSvg(st,spi,wilt,id){
+  var S=PG_SP[spi%PG_SP.length],tree=S.t==='t';
+  var lf=wilt?'#a8a05a':'#3fb950',lf2=wilt?'#948b4c':'#2e9e43',sk=wilt?'#8f8a4a':'#2f9e44',tr=wilt?'#7d6b58':'#8d5a2b',bl=wilt?'#bfae98':S.c;
+  var h=[0,20,38,54,68,80][st],top=100-h,o='',i,y;
+  o+='<ellipse cx="50" cy="105" rx="31" ry="8" fill="#7a5a45"/><ellipse cx="50" cy="102.5" rx="25" ry="5.5" fill="#9b7b5c"/>';
+  if(st===0){o+='<ellipse cx="50" cy="99" rx="5.5" ry="3.6" fill="#5d4037"/>';return '<svg viewBox="0 0 100 120" aria-hidden="true">'+o+'</svg>'}
+  var g='';
+  g+=tree&&st>=3?'<rect x="46" y="'+top+'" width="8" height="'+(h+2)+'" rx="3" fill="'+tr+'"/>':'<path d="M50 101 L50 '+top+'" stroke="'+sk+'" stroke-width="'+(tree?5:4)+'" stroke-linecap="round" fill="none"/>';
+  if(st>=2){y=100-h*.42;g+='<ellipse cx="38" cy="'+y+'" rx="11" ry="5.5" transform="rotate('+(wilt?35:-25)+' 38 '+y+')" fill="'+lf+'"/><ellipse cx="62" cy="'+y+'" rx="11" ry="5.5" transform="rotate('+(wilt?-35:25)+' 62 '+y+')" fill="'+lf2+'"/>'}
+  if(st>=3&&!tree){y=100-h*.72;g+='<ellipse cx="39" cy="'+y+'" rx="9.5" ry="4.8" transform="rotate('+(wilt?30:-28)+' 39 '+y+')" fill="'+lf2+'"/><ellipse cx="61" cy="'+y+'" rx="9.5" ry="4.8" transform="rotate('+(wilt?-30:28)+' 61 '+y+')" fill="'+lf+'"/>'}
+  if(st<=3){g+='<ellipse cx="44" cy="'+(top+1)+'" rx="8" ry="4.4" transform="rotate('+(wilt?30:-35)+' 44 '+(top+1)+')" fill="'+lf+'"/><ellipse cx="56" cy="'+(top+1)+'" rx="8" ry="4.4" transform="rotate('+(wilt?-30:35)+' 56 '+(top+1)+')" fill="'+lf2+'"/>'}
+  if(st===4){g+=tree?'<circle cx="50" cy="'+(top-2)+'" r="15" fill="'+(wilt?lf2:lf)+'"/><circle cx="41" cy="'+(top+4)+'" r="10" fill="'+lf2+'"/><circle cx="59" cy="'+(top+4)+'" r="10" fill="'+lf+'"/>':'<ellipse cx="50" cy="'+(top-3)+'" rx="6" ry="8" fill="'+bl+'"/><path d="M44 '+(top+2)+' Q50 '+(top+8)+' 56 '+(top+2)+'" fill="'+lf2+'"/>'}
+  if(st===5){
+    if(tree){
+      g+='<circle cx="50" cy="'+(top-4)+'" r="19" fill="'+(wilt?lf:lf2)+'"/><circle cx="36" cy="'+(top+6)+'" r="14" fill="'+lf+'"/><circle cx="64" cy="'+(top+6)+'" r="14" fill="'+lf2+'"/><circle cx="50" cy="'+(top+8)+'" r="13" fill="'+lf+'"/>';
+      [[42,-8],[58,-2],[50,10],[34,6],[66,8]].forEach(function(p){g+='<circle cx="'+p[0]+'" cy="'+(top+p[1])+'" r="3.4" fill="'+bl+'"/>'});
+    }else{
+      for(i=0;i<7;i++)g+='<ellipse cx="50" cy="'+(top-8)+'" rx="5.2" ry="9" transform="rotate('+(i*360/7)+' 50 '+top+')" fill="'+bl+'"/>';
+      g+='<circle cx="50" cy="'+top+'" r="6" fill="'+(wilt?'#c9b27a':'#fbbf24')+'"/>';
+    }
+  }
+  o+='<g class="pg-pl" transform="'+(wilt?'rotate(14 50 100)':'')+'">'+g+'</g>';
+  return '<svg viewBox="0 0 100 120" aria-hidden="true">'+o+'</svg>';
+}
+function pgMsg(S){
+  if(S.none)return __('هنوز بذری نکاشته‌ای؛ با اولین ثبت مطالعه، بذر تو کاشته می‌شود 🌰','No seed planted yet; your first study entry plants it 🌰');
+  if(S.wilt)return __('گیاهت پژمرده شده 🥀 غیبت کرده‌ای؛ با یک روز مطالعه دوباره سبز می‌شود','Your plant has wilted 🥀 you missed a day; one day of study turns it green again');
+  if(S.today)return __('امروز آبیاری شد 💧 گیاهت یک قدم بزرگ‌تر شد','Watered today 💧 your plant grew one step');
+  return __('امروز کمی مطالعه کن تا گیاهت رشد کند 🌱','Study a little today so your plant grows 🌱');
+}
+function pgCard(){
+  var sm=__('هر روز مطالعه یک گیاه را بزرگ می‌کند','Every study day grows a plant');
+  try{
+    var S=pgState();
+    if(!S.none)sm=(S.wilt?__('پژمرده است؛ یک روز مطالعه نجاتش می‌دهد','Wilted; one study day saves it'):fa(S.g)+' '+__('از','of')+' '+fa(PG_NEED)+' '+__('روز تا گیاه کامل','days to a full plant'))+(S.done.length?' · '+fa(S.done.length)+' '+__('گیاه در باغچه','in the garden'):'');
+  }catch(er){}
+  return '<button type="button" class="wrcard glass" data-act="pgOpen"><span class="ib" style="background:linear-gradient(145deg,#4ade80,#15803d)">'+icon('leaf')+'</span><div><b>'+__('باغچه‌ی پیشرفت','Progress garden')+'</b><small>'+sm+'</small></div></button>';
+}
+function pgBody(S){
+  var st=pgStage(S.g),dots='',i,h;
+  for(i=0;i<PG_NEED;i++)dots+='<i class="'+(i<S.g?'on':'')+(S.wilt&&i<S.g?' wl':'')+'"></i>';
+  h='<section class="pg-hero glass"><div class="pg-big'+(S.wilt?' wilt':'')+'">'+pgSvg(st,S.sp,S.wilt)+'</div><div class="pg-side"><small>'+(S.none?'':__('گیاه در حال رشد','Growing now'))+'</small><b>'+esc(pgName(S.sp))+'</b><p>'+pgMsg(S)+'</p></div></section>';
+  h+='<div class="pg-dots" aria-label="'+fa(S.g)+' / '+fa(PG_NEED)+'">'+dots+'</div>';
+  var cur=0;try{cur=kkStreak()}catch(er){}
+  h+='<div class="hstats"><div><b>'+fa(S.days)+'</b><small>'+__('روز مطالعه','study days')+'</small></div><div><b>'+fa(S.done.length)+'</b><small>'+__('گیاه کامل','full plants')+'</small></div><div><b>'+fa(cur)+'</b><small>'+__('روز پیاپی','day streak')+'</small></div></div>';
+  h+='<h3 class="gh"><span>'+__('باغچه‌ی تو','Your garden')+'</span></h3>';
+  if(S.done.length)h+='<div class="pg-grid">'+S.done.map(function(x){return '<div class="pg-cell glass"><div class="pg-sm">'+pgSvg(5,x.sp,false)+'</div><b>'+esc(pgName(x.sp))+'</b><small>'+esc(relDate(x.k))+'</small></div>'}).join('')+'</div>';
+  else h+='<p class="hint">'+__('هر گیاهی که ۷ روز مطالعه کند، کامل می‌شود و برای همیشه در باغچه‌ات می‌ماند.','A plant that gets '+PG_NEED+' study days is complete and stays in your garden for good.')+'</p>';
+  h+='<p class="hint">'+__('هر روز مطالعه (هر مقدار) گیاه را رشد می‌دهد. روزی که غیبت کنی گیاه پژمرده می‌شود، ولی نمی‌میرد: با یک روز مطالعه دوباره سبز می‌شود و رشدش حفظ می‌ماند.','Any study on a day grows the plant. Miss a day and it wilts, but it never dies: one day of study makes it green again and keeps its growth.')+'</p>';
+  return h;
+}
+function pgOpen(){
+  if(document.querySelector('.pg-wrap'))return;
+  var ttl=__('باغچه‌ی پیشرفت','Progress garden');
+  var sw=ttSheetWrap('<div class="sheet-top"><span></span><h2>'+ttl+'</h2><button type="button" data-pg="close">'+__('بستن','Close')+'</button></div><div class="pg-body">'+pgBody(pgState())+'</div>',ttl);
+  sw.w.classList.add('pg-wrap');
+  sw.w.addEventListener('click',function(e){if(e.target.closest('[data-pg="close"]'))sw.close()});
+}
+actions.pgOpen=pgOpen;
+/* a short note after a study entry changes the plant (runs from kkPut, so every way of adding study shows it) */
+function pgFeedback(b){
+  if(!b)return;
+  var a=pgState(),m='';
+  if(a.done.length>b.done.length)m=__('یک گیاه کامل شد و به باغچه‌ات رفت 🌳','A plant is complete and moved to your garden 🌳');
+  else if(b.wilt&&!a.wilt)m=__('گیاهت دوباره سبز شد 🌿','Your plant is green again 🌿');
+  else if(a.g>b.g)m=__('گیاهت یک قدم بزرگ‌تر شد 🌱','Your plant grew one step 🌱');
+  if(m)setTimeout(function(){toast(m,__('ببین','Open'),pgOpen,'ok')},1600);
 }
 var kkEd=null;
 function openKK(id){
@@ -11211,7 +12724,7 @@ function imvDo(){
    kind 'pdf': pages are drawn by the native PdfViewer plugin (Android PdfRenderer) one at a time as JPEGs, only for the pages near the screen.
    kind 'note': pages are blank paper with a template (lined, grid, dots…). Both kinds use the same ink engine (pen, highlighter, eraser, lasso, text, photos). */
 var pdfv={sdOn:false,sdTok:0,sdBusy:0,sdQ:[],thC:{},sdIO:null,sdDirty:0,sdT:{},kind:'pdf',doc:null,tool:'hand',col:'#111827',col2:'#0a7aff',hsv:{h:215,s:1,v:1},an:{},rat:[],undo:[],redo:[],drw:null,anT:0,on:false,el:null,sc:null,pgs:null,rec:null,io:null,n:0,zoom:1,st:{},q:[],busy:0,tok:0,cur:1,raf:0,svT:0,tap:0,tapX:0,tapY:0,sx:0,sy:0,pz:null,pzUsed:0,pw:{p:4,h:24,e:22},sel:null,pop:'',pen:0,tplAll:false,colSel:false,thumb:null,vis:null};
-var PV_Z=[1,1.5,2,3,4],PV_ZMAX=4;
+var PV_Z=[1,1.5,2,3,4,6,8],PV_ZMAX=8;
 /* page templates (paper patterns). Drawn as a full-page SVG in page units (1000 wide) so they stay sharp at any zoom and export identically. */
 var INK_TPL=[['blank','ساده','Blank'],['lined','خط‌دار','Lined'],['lined2','خط‌دار ریز','Narrow lined'],['grid','شطرنجی','Grid'],['grid2','شطرنجی ریز','Small grid'],['dots','نقطه‌ای','Dotted'],['dots2','نقطه‌ای ریز','Fine dots'],['graph','میلی‌متری','Graph'],['cornell','کرنل','Cornell']];
 var INK_PAPER=['#ffffff','#fff6dd','#eef1f6','#1c2030'];
@@ -11307,7 +12820,7 @@ function pvMount(kind,rec,doc,title){
     if(e.touches.length||e.changedTouches.length!==1||!pdfv.n||pdfv.tool!=='hand')return;
     var t=e.changedTouches[0],now=Date.now();
     if(Math.abs(t.clientX-pdfv.sx)>10||Math.abs(t.clientY-pdfv.sy)>10){pdfv.tap=0;return}
-    if(now-pdfv.tap<320&&Math.abs(t.clientX-pdfv.tapX)<30&&Math.abs(t.clientY-pdfv.tapY)<30){pdfv.tap=0;pvSetZoom(pdfv.zoom>1?1:2.5,t.clientX,t.clientY);return}
+    if(now-pdfv.tap<320&&Math.abs(t.clientX-pdfv.tapX)<30&&Math.abs(t.clientY-pdfv.tapY)<30){pdfv.tap=0;pvZoomTo(pdfv.zoom>1?1:2.5,t.clientX,t.clientY);return}
     pdfv.tap=now;pdfv.tapX=t.clientX;pdfv.tapY=t.clientY;
   },{passive:true});
   pdfv.pgs.addEventListener('pointerdown',anDown);pdfv.pgs.addEventListener('pointermove',anMove);pdfv.pgs.addEventListener('pointerup',anUp);pdfv.pgs.addEventListener('pointercancel',anUp);
@@ -11370,7 +12883,7 @@ function pvObserve(){
    When you zoom in, only the pages you can actually see are redrawn sharper; the old picture stays under them
    until the sharper one is ready, so nothing ever goes white. Pictures that were already drawn are remembered
    (cache folder in the app, blob addresses in the browser), so scrolling back or zooming again is instant. */
-var PV_WCAP=2000,PV_CACHE_MAX=40;
+var PV_WCAP=2800,PV_CACHE_MAX=40;
 function pvImgReset(){
   try{if(pdfv.uc)pdfv.uc.forEach(function(u){if(typeof u==='string'&&u.indexOf('blob:')===0)try{URL.revokeObjectURL(u)}catch(e){}})}catch(e){}
   pdfv.uc=new Map();pdfv.iu={};pdfv.rw={};pdfv.qs={};pdfv.nok=0;pdfv.nofile=pdfv.nofile||0;pdfv.rfT=0;
@@ -11511,7 +13024,7 @@ function pvOnScroll(){
     if(!pdfv.on||!pdfv.pgs||!pdfv.n||!pdfv.rec)return;
     var c=pvCur();
     if(c!==pdfv.cur){pdfv.cur=c;pvLabel();pdfv.rec.lp=c;clearTimeout(pdfv.svT);pdfv.svT=setTimeout(persist,800)}
-    if(pdfv.zoom>1.02&&pdfv.kind==='pdf'){clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,90)}
+    if(pdfv.zoom>1.02&&pdfv.kind==='pdf'&&!pdfv.pz&&!pdfv.za){clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,90)}
   });
 }
 function pvGoTo(p){
@@ -11531,73 +13044,81 @@ function pvPageIdxAt(y){
 /* Zoom keeps the point under (fx,fy) under (tx,ty).
    The point is remembered as "which page + how far across / down that page" (not as a pixel offset): the pages grow with the zoom but the
    8px gaps between them do not, so a plain pixel scale drifted by (pages above x gap) and the view jumped to another place or page. */
-function pvSetZoom(z,fx,fy,tx,ty){
+function pvSetZoom(z,fx,fy,tx,ty,live){
   var sc=pdfv.sc,g=pdfv.pgs;if(!sc||!g||!pdfv.n)return;
-  z=Math.max(1,Math.min(PV_ZMAX,z));if(z<1.08)z=1;
-  if(Math.abs(z-pdfv.zoom)<0.001)return;
+  z=Math.max(1,Math.min(PV_ZMAX,z));if(!live&&z<1.08)z=1;
   var rect=sc.getBoundingClientRect(),rtl=getComputedStyle(sc).direction==='rtl';
   if(typeof fx!=='number'||typeof fy!=='number'){fx=rect.left+rect.width/2;fy=rect.top+rect.height/2}
   if(typeof tx!=='number'||typeof ty!=='number'){tx=fx;ty=fy}
-  var oldMax=sc.scrollWidth-sc.clientWidth,offL=rtl?sc.scrollLeft+oldMax:sc.scrollLeft;
-  var cx=offL+(fx-rect.left),cy=sc.scrollTop+(fy-rect.top);
-  var pi=pvPageIdxAt(cy),pg=g.children[pi];
-  var top=g.offsetTop+pg.offsetTop,h=Math.max(1,pg.offsetHeight),left=g.offsetLeft+pg.offsetLeft,w=Math.max(1,pg.offsetWidth);
-  var ry=(cy-top)/h,rx=(cx-left)/w;
+  if(Math.abs(z-pdfv.zoom)<0.0005){
+    /* same zoom: only move the content by the way the anchor point travelled */
+    if(live){sc.scrollTop+=fy-ty;sc.scrollLeft+=fx-tx}
+    return;
+  }
+  /* measured on the screen itself (works the same for left-to-right and right-to-left scrolling) */
+  var cy0=sc.scrollTop+(fy-rect.top),pi=pvPageIdxAt(cy0),pg=g.children[pi],pr=pg.getBoundingClientRect();
+  var ry=(fy-pr.top)/Math.max(1,pr.height),rx=(fx-pr.left)/Math.max(1,pr.width);
   pdfv.zoom=z;
   /* the pictures scale exactly with the zoom: only the 8px side padding stays fixed */
   g.style.width='calc('+(z*100)+'% - '+(16*(z-1))+'px)';
-  var top2=g.offsetTop+pg.offsetTop,h2=pg.offsetHeight,left2=g.offsetLeft+pg.offsetLeft,w2=pg.offsetWidth;
-  sc.scrollTop=Math.max(0,top2+ry*h2-(ty-rect.top));
-  var nm=sc.scrollWidth-sc.clientWidth,nx=Math.max(0,Math.min(nm,left2+rx*w2-(tx-rect.left)));
-  sc.scrollLeft=rtl?nx-nm:nx;
+  var pr2=pg.getBoundingClientRect();
+  sc.scrollTop+=pr2.top+ry*pr2.height-ty;
+  sc.scrollLeft+=pr2.left+rx*pr2.width-tx;
   /* every page keeps showing its current picture (the browser just scales it) until the sharper one is ready */
   pvWPaint();
-  clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,30);
+  if(!live){clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,30)}
 }
-/* two-finger pinch: the pages follow the fingers live (CSS transform), then are redrawn sharp at the new zoom when the fingers lift */
+/* a short smooth zoom (double tap, menu): the same point of the page stays under the same spot of the screen on every frame */
+function pvZoomTo(z,x,y){
+  var sc=pdfv.sc;if(!sc||!pdfv.n)return;
+  z=Math.max(1,Math.min(PV_ZMAX,z));if(z<1.08)z=1;
+  var rect=sc.getBoundingClientRect();
+  if(typeof x!=='number'||typeof y!=='number'){x=rect.left+rect.width/2;y=rect.top+rect.height/2}
+  var z0=pdfv.zoom,t0=performance.now(),D=240,tok=pdfv.za=(pdfv.za||0)+1;
+  if(Math.abs(z-z0)<0.001)return;
+  clearTimeout(pdfv.rfT);if(pdfv.el)pdfv.el.classList.add('zm');
+  function step(t){
+    if(pdfv.za!==tok||!pdfv.sc)return;
+    var k=Math.min(1,(t-t0)/D),e=1-Math.pow(1-k,3);
+    pvSetZoom(k<1?z0+(z-z0)*e:z,x,y,x,y,true);
+    if(k<1)requestAnimationFrame(step);
+    else{pdfv.za=0;setTimeout(function(){if(pdfv.el&&!pdfv.pz)pdfv.el.classList.remove('zm')},120);clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,40)}
+  }
+  requestAnimationFrame(step);
+}
+/* two-finger pinch: the pages are really resized on every frame around the point between the fingers, so the text under the fingers
+   stays under them with no jump when the fingers lift. The sharper pictures are only drawn after the fingers are lifted. */
 function pvPinchStart(e){
   if(!pdfv.n||!pdfv.pgs||pdfv.pz)return;
   var a=e.touches[0],b=e.touches[1];
   var d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);if(d<10)return;
   pvCancelDraw();
-  var g=pdfv.pgs.getBoundingClientRect(),mx=(a.clientX+b.clientX)/2,my=(a.clientY+b.clientY)/2;
-  pdfv.pz={d0:d,z0:pdfv.zoom,k:1,m0x:mx,m0y:my,mx:mx,my:my,st:pdfv.sc.scrollTop,sl:pdfv.sc.scrollLeft};
-  pdfv.pzUsed=1;pdfv.tap=0;
-  pdfv.pgs.style.transformOrigin=(mx-g.left)+'px '+(my-g.top)+'px';
-  pdfv.pgs.style.willChange='transform';
-  /* while the fingers are down the pages are just moved by the graphics chip: shadows and blending are switched off */
+  var mx=(a.clientX+b.clientX)/2,my=(a.clientY+b.clientY)/2;
+  pdfv.pz={d0:d,z0:pdfv.zoom,z:pdfv.zoom,lx:mx,ly:my,mx:mx,my:my,raf:0};
+  pdfv.pzUsed=1;pdfv.tap=0;pdfv.za=0;
+  clearTimeout(pdfv.rfT);
   clearTimeout(pdfv.zmT);if(pdfv.el)pdfv.el.classList.add('zm');
 }
 function pvPinchMove(e){
   var p=pdfv.pz;if(!p||!pdfv.pgs||!pdfv.sc)return;
   var a=e.touches[0],b=e.touches[1];if(!a||!b)return;
   var d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-  var z=Math.max(1,Math.min(PV_ZMAX,p.z0*d/p.d0));
-  p.k=z/p.z0;p.mx=(a.clientX+b.clientX)/2;p.my=(a.clientY+b.clientY)/2;
+  p.z=Math.max(1,Math.min(PV_ZMAX,p.z0*d/p.d0));
+  p.mx=(a.clientX+b.clientX)/2;p.my=(a.clientY+b.clientY)/2;
   if(p.raf)return;
   p.raf=requestAnimationFrame(function(){
     p.raf=0;if(pdfv.pz!==p||!pdfv.pgs||!pdfv.sc)return;
-    /* the page must not scroll under a pinch */
-    if(pdfv.sc.scrollTop!==p.st)pdfv.sc.scrollTop=p.st;
-    if(pdfv.sc.scrollLeft!==p.sl)pdfv.sc.scrollLeft=p.sl;
-    pdfv.pgs.style.transform='translate3d('+(p.mx-p.m0x)+'px,'+(p.my-p.m0y)+'px,0) scale('+p.k+')';
+    pvSetZoom(p.z,p.lx,p.ly,p.mx,p.my,true);
+    p.lx=p.mx;p.ly=p.my;
   });
 }
 function pvPinchEnd(){
   var p=pdfv.pz;pdfv.pz=null;
-  var g=pdfv.pgs;
-  if(p&&p.raf){cancelAnimationFrame(p.raf);p.raf=0}
+  if(p&&p.raf){cancelAnimationFrame(p.raf);p.raf=0;if(pdfv.pgs&&pdfv.sc){pvSetZoom(p.z,p.lx,p.ly,p.mx,p.my,true);p.lx=p.mx;p.ly=p.my}}
   clearTimeout(pdfv.zmT);pdfv.zmT=setTimeout(function(){if(pdfv.el)pdfv.el.classList.remove('zm')},260);
-  if(g){g.style.transform='';g.style.transformOrigin='';g.style.willChange=''}
-  if(!p||!pdfv.sc||!g)return;
-  /* the page was held still during the pinch: start from exactly that place */
-  pdfv.sc.scrollTop=p.st;pdfv.sc.scrollLeft=p.sl;
-  var z=p.z0*p.k;
-  if(Math.abs(z-pdfv.zoom)<0.03){
-    /* only panned with two fingers, or barely zoomed: put the scroll back where it was */
-    pdfv.sc.scrollTop=p.st-(p.my-p.m0y);pdfv.sc.scrollLeft=p.sl-(p.mx-p.m0x);return;
-  }
-  pvSetZoom(z,p.m0x,p.m0y,p.mx,p.my);
+  if(!p||!pdfv.sc||!pdfv.pgs)return;
+  if(pdfv.zoom<1.08&&pdfv.zoom!==1)pvSetZoom(1,p.mx,p.my,p.mx,p.my);
+  else{clearTimeout(pdfv.rfT);pdfv.rfT=setTimeout(pvRefineVis,60)}
 }
 /* ---------- ink engine: pen, highlighter, eraser, lasso, text, photos ----------
    Items are kept per page in page units (1000 wide) so they stay in place at any zoom:
@@ -11825,6 +13346,10 @@ function inkTxLeft(s,T,w){ /* left edge (page units) of a line of width w inside
   var x=+s.x,W=T.W,pos=inkTxPos(s,T.m),base=s.r?x-W:x;
   return pos==='m'?base+(W-w)/2:pos==='s'?(s.r?x-w:x):(s.r?x-W:x+W-w);
 }
+function inkTxC(s){ /* centre of a text block (page units); text turns around it */
+  var T=inkTxMeasure(s),f=+s.f,x=+s.x,y=+s.y,l=s.r?x-T.W:x;
+  return [l+T.W/2,y+(f*1.5+(T.ls.length-1)*f*T.lh)/2];
+}
 function inkItemSvg(s,i){
   if(!s||typeof s!=='object')return '';
   var okc=typeof s.c==='string'&&/^#[0-9a-fA-F]{6}$/.test(s.c),w=+s.w;
@@ -11843,7 +13368,9 @@ function inkItemSvg(s,i){
     if(pos==='m'){ax=rtl?x0-W/2:x0+W/2;anc=' text-anchor="middle"'}else if(pos==='e'){ax=rtl?x0-W:x0+W;anc=' text-anchor="end"'}
     if(m.bg){var pd=f*0.3;bg='<rect x="'+((rtl?x0-W:x0)-pd)+'" y="'+(y0-f*0.1)+'" width="'+(W+pd*2)+'" height="'+(f*1.5+(T.ls.length-1)*f*T.lh)+'" rx="'+(f*0.25)+'" fill="'+m.bg+'" opacity=".92"/>'}
     if(m.u)deco.push('underline');if(m.st)deco.push('line-through');
-    return bg+'<text class="tx" fill="'+s.c+'" font-size="'+f+'" direction="'+(rtl?'rtl':'ltr')+'" x="'+ax+'" y="'+(y0+f)+'"'+anc+' style="font-family:'+(m.fm?INK_TFAM[m.fm].replace(/"/g,"'"):INK_TFD)+(m.b?';font-weight:700':'')+(m.i?';font-style:italic':'')+(deco.length?';text-decoration:'+deco.join(' '):'')+'">'+T.ls.map(function(t,j){return '<tspan x="'+ax+'"'+(j?' dy="'+(f*T.lh)+'"':'')+'>'+(esc(t)||' ')+'</tspan>'}).join('')+'</text>';
+    var txs=bg+'<text class="tx" fill="'+s.c+'" font-size="'+f+'" direction="'+(rtl?'rtl':'ltr')+'" x="'+ax+'" y="'+(y0+f)+'"'+anc+' style="font-family:'+(m.fm?INK_TFAM[m.fm].replace(/"/g,"'"):INK_TFD)+(m.b?';font-weight:700':'')+(m.i?';font-style:italic':'')+(deco.length?';text-decoration:'+deco.join(' '):'')+'">'+T.ls.map(function(t,j){return '<tspan x="'+ax+'"'+(j?' dy="'+(f*T.lh)+'"':'')+'>'+(esc(t)||' ')+'</tspan>'}).join('')+'</text>';
+    if(+s.a){var tc=inkTxC(s);txs='<g transform="rotate('+(+s.a)+' '+tc[0]+' '+tc[1]+')">'+txs+'</g>'}
+    return txs;
   }
   if(s.t==='i'){
     if(typeof s.k!=='string'||!/^[a-z0-9]+$/.test(s.k)||!(+s.w>0&&+s.h>0)||!isFinite(s.x)||!isFinite(s.y))return '';
@@ -11991,7 +13518,7 @@ function inkSelDraw(){
   var bar=lkd?sbb('slock','unlock',__("باز کردن قفل","Unlock")):
     (one?sbb('sedit','edit',__("ویرایش","Edit")):'')+(imgOne?sbb('srot','refresh',__("چرخش ۹۰ درجه","Rotate 90°"))+sbb('scrop','crop',__("برش","Crop"))+sbb('slock','lock',__("قفل کردن جای عکس","Lock position")):'')+
     (imgAny?'':sbb('scol','palette',__("رنگ","Color")))+sbb('sdup','copy',__("کپی","Duplicate"))+sbb('sdel','trash',__("حذف","Delete"));
-  el.innerHTML=(imgOne?'<i class=\"ink-rh\" data-rh=\"1\">'+icon('refresh')+'</i>':'')+(lkd?'':'<i class=\"ink-sh\" data-sh=\"1\"></i>')+'<div class=\"ink-sb\" style=\"left:'+((cx-(b[0]/10))/((b[2]-b[0])/10)*100)+'%\">'+bar+'</div>';
+  el.innerHTML=(lkd?'':'<i class=\"ink-rh\" data-rh=\"1\">'+icon('refresh')+'</i>')+(lkd?'':'<i class=\"ink-sh\" data-sh=\"1\"></i>')+'<div class=\"ink-sb\" style=\"left:'+((cx-(b[0]/10))/((b[2]-b[0])/10)*100)+'%\">'+bar+'</div>';
   pg.appendChild(el);
 }
 function inkSelPreview(d){
@@ -12039,21 +13566,24 @@ function inkShape(p){
   var n=p.length;if(n<8)return null;
   var len=inkPLen(p),x0=1e9,y0=1e9,x1=-1e9,y1=-1e9,i;
   p.forEach(function(q){if(q[0]<x0)x0=q[0];if(q[0]>x1)x1=q[0];if(q[1]<y0)y0=q[1];if(q[1]>y1)y1=q[1]});
-  var w=x1-x0,h=y1-y0,diag=Math.hypot(w,h);if(len<70||diag<40)return null;
-  var a=p[0],b=p[n-1],chord=Math.hypot(b[0]-a[0],b[1]-a[1]),closed=chord<len*0.22;
+  var w=x1-x0,h=y1-y0,diag=Math.hypot(w,h);if(len<50||diag<30)return null;
+  var a=p[0],b=p[n-1],chord=Math.hypot(b[0]-a[0],b[1]-a[1]),closed=chord<len*0.3;
   if(!closed){
     /* straight line */
     var dev=0,dx=b[0]-a[0],dy=b[1]-a[1];
     for(i=0;i<n;i++)dev=Math.max(dev,Math.abs(dy*(p[i][0]-a[0])-dx*(p[i][1]-a[1]))/(chord||1));
-    if(chord>50&&dev<Math.max(8,chord*0.06)){
+    if(chord>40&&dev<Math.max(10,chord*0.1)){
       var ang=Math.atan2(dy,dx)*180/Math.PI,sn=Math.round(ang/45)*45,e=b;
-      if(Math.abs(ang-sn)<8){var r=sn*Math.PI/180;e=[a[0]+Math.cos(r)*chord,a[1]+Math.sin(r)*chord]}
+      if(Math.abs(ang-sn)<10){var r=sn*Math.PI/180;e=[a[0]+Math.cos(r)*chord,a[1]+Math.sin(r)*chord]}
       return inkDense([a,e],false,8);
     }
     return null;
   }
   var cl=p.slice();cl.push(p[0]);
-  var v=inkRDP(cl,Math.max(9,diag*0.07));v.pop();   /* drop the repeated closing point */
+  var v=inkRDP(cl,Math.max(9,diag*0.08));v.pop();   /* drop the repeated closing point */
+  /* a hand-drawn corner often leaves two nearby points (and the start/end overlap): merge them */
+  (function(){var md=diag*0.14,out=[],j;v.forEach(function(q){var l=out[out.length-1];if(!l||Math.hypot(q[0]-l[0],q[1]-l[1])>md)out.push(q)});
+    while(out.length>2&&Math.hypot(out[0][0]-out[out.length-1][0],out[0][1]-out[out.length-1][1])<=md)out.pop();v=out})();
   if(v.length===3)return inkDense(v,true,8);
   if(v.length===4){
     var fitErr=0,k;
@@ -12068,7 +13598,7 @@ function inkShape(p){
   if(rx<15||ry<15)return null;
   p.forEach(function(q){var t=Math.sqrt(Math.pow((q[0]-cx)/rx,2)+Math.pow((q[1]-cy)/ry,2));s+=t;s2+=t*t});
   var mean=s/n,sd=Math.sqrt(Math.max(0,s2/n-mean*mean));
-  if(Math.abs(mean-1)<0.14&&sd<0.14){
+  if(Math.abs(mean-1)<0.16&&sd<0.16){
     if(Math.abs(rx/ry-1)<0.16){var rr=(rx+ry)/2;rx=ry=rr}
     var o=[],K=64;for(i=0;i<=K;i++){var t2=i/K*Math.PI*2;o.push([cx+Math.cos(t2)*rx,cy+Math.sin(t2)*ry])}
     return o;
@@ -12089,8 +13619,8 @@ function inkSnapNow(d){
      - they are lifted/lowered onto one level line (earlier writing on that line stays put and is the guide),
      - in a line written in one go the gaps between words are evened out.
    Everything is one undo step. Highlighter, shapes, ruler lines and long underlines are left alone. */
-function inkTidyOn(){try{return localStorage.getItem('ario_inktidy')==='1'}catch(e){return false}}
-function inkTidySet(on){try{if(on)localStorage.setItem('ario_inktidy','1');else localStorage.removeItem('ario_inktidy')}catch(e){}}
+function inkTidyOn(){try{return localStorage.getItem('ario_inktidy')!=='0'}catch(e){return true}}
+function inkTidySet(on){try{localStorage.setItem('ario_inktidy',on?'1':'0')}catch(e){}}
 function inkTidyHint(){
   /* the feature starts switched off, so tell the writer (at most 3 times in total, once per opening) where to turn it on */
   if(inkTidyOn()||pdfv.tHint)return;
@@ -12105,7 +13635,7 @@ function inkTidyQueue(i,it){
   if(!q&&!it)return;
   if(q&&q.i!==i){clearTimeout(q.t);inkTidyRun(q);q=null;if(!it)return}
   if(!q)q=pdfv.tq={i:i,its:[],t:0};
-  if(it)q.its.push(it);clearTimeout(q.t);q.t=setTimeout(function(){inkTidyRun(q)},1300);
+  if(it)q.its.push(it);clearTimeout(q.t);q.t=setTimeout(function(){inkTidyRun(q)},900);
 }
 function inkTidyRun(q){
   if(pdfv.tq===q)pdfv.tq=null;
@@ -12165,7 +13695,7 @@ function inkTidyRun(q){
     if(Math.abs(words[a].my-words[b].my)<0.75*H&&gap<4.5*H)lp[lf(a)]=lf(b);
   }
   var lines={};words.forEach(function(w,k){var r=lf(k);(lines[r]||(lines[r]=[])).push(w)});
-  var MAXA=Math.tan(20*Math.PI/180);
+  var MAXA=Math.tan(30*Math.PI/180);
   function fit(ws){                                    /* weighted line through the words: my = a + s*cx */
     var sw=0,sx=0,sy=0,sxx=0,sxy=0;
     ws.forEach(function(w){var q=Math.max(1,w.w);sw+=q;sx+=q*w.cx;sy+=q*w.my;sxx+=q*w.cx*w.cx;sxy+=q*w.cx*w.my});
@@ -12180,19 +13710,19 @@ function inkTidyRun(q){
     if(fx.length>=2){var f=fit(fx);if(Math.abs(f.s)>MAXA)return;tg=function(w){return f.a+f.s*w.cx}}
     else if(fx.length===1){var y=fx[0].my;tg=function(){return y}}
     else{if(mw.length<2)return;var f2=fit(mw);if(Math.abs(f2.s)>MAXA)return;tg=function(){return f2.m}}
-    mw.forEach(function(w){var d=tg(w)-w.my;if(Math.abs(d)<=1.1*H&&Math.abs(d)>=0.8){w.dy=d;any=true}});
+    mw.forEach(function(w){var d=tg(w)-w.my;if(Math.abs(d)<=2*H&&Math.abs(d)>=0.5){w.dy=d;any=true}});
     /* even gaps between words of a line that was written in one go */
     if(!fx.length&&mw.length>=3){
       var so=mw.slice().sort(function(p,r){return p.cx-r.cx}),n=so.length,gs=[],ok=true,tw=0,k;
       for(k=0;k<n;k++)tw+=so[k].w;
       for(k=1;k<n;k++){var g=so[k].x0-so[k-1].x1;if(g<0)ok=false;gs.push(g)}
       var avg=((so[n-1].x1-so[0].x0)-tw)/(n-1);
-      if(ok&&avg>=0.25*H&&Math.max.apply(null,gs)-Math.min.apply(null,gs)>0.25*H){
+      if(ok&&avg>=0.25*H&&Math.max.apply(null,gs)-Math.min.apply(null,gs)>0.15*H){
         var pos=so[0].x1+avg,dxs=[0],good=true;
         for(k=1;k<n-1;k++){dxs.push(pos-so[k].x0);pos+=so[k].w+avg}
         dxs.push(0);
-        dxs.forEach(function(d){if(Math.abs(d)>1.5*H)good=false});
-        if(good)so.forEach(function(w,k){if(Math.abs(dxs[k])>=0.8){w.dx=dxs[k];any=true}});
+        dxs.forEach(function(d){if(Math.abs(d)>2.5*H)good=false});
+        if(good)so.forEach(function(w,k){if(Math.abs(dxs[k])>=0.5){w.dx=dxs[k];any=true}});
       }
     }
   });
@@ -12219,8 +13749,8 @@ function anDown(e){
   if(e.pointerType==='touch'&&inkStylus()&&!hd){pdfv.drw={mode:'pan',id:e.pointerId,x:e.clientX,y:e.clientY};return}
   var pt=anPt(sv,e,i),d,p,wd,l,k;
   if(hd&&pdfv.sel&&hd.classList.contains('ink-rh')){
-    var it0=pdfv.sel.its[0],c0=[+it0.x+it0.w/2,+it0.y+it0.h/2];
-    pdfv.drw={mode:'rot',sv:sv,i:i,id:e.pointerId,c:c0,a0:+it0.a||0,a1:Math.atan2(pt[1]-c0[1],pt[0]-c0[0])*180/Math.PI,da:0};return;
+    var it0=pdfv.sel.its[0],sb0=inkSelBox(),c0=[(sb0[0]+sb0[2])/2,(sb0[1]+sb0[3])/2],one0=pdfv.sel.its.length===1&&(it0.t==='i'||it0.t==='x');
+    pdfv.drw={mode:'rot',sv:sv,i:i,id:e.pointerId,c:c0,a0:one0?(+it0.a||0):0,a1:Math.atan2(pt[1]-c0[1],pt[0]-c0[0])*180/Math.PI,da:0};return;
   }
   if(hd&&pdfv.sel){
     var b=inkSelBox();
@@ -12277,14 +13807,14 @@ function anMove(e){
       var l=d.pts[d.pts.length-1];
       if(Math.abs(pt[0]-l[0])+Math.abs(pt[1]-l[1])<2)continue;
       d.pts.push(pt);
-      if(d.mode==='dr'){clearTimeout(d.ht);if(inkSnapOn())d.ht=setTimeout(function(){inkSnapNow(d)},620)}
+      if(d.mode==='dr'){clearTimeout(d.ht);if(inkSnapOn())d.ht=setTimeout(function(){inkSnapNow(d)},480)}
     }else if(d.mode==='er')anEraseAt(d,pt);
     else if(d.mode==='mv'){d.dx=inkR(pt[0]-d.p0[0]);d.dy=inkR(pt[1]-d.p0[1]);inkSelPreview(d)}
     else if(d.mode==='rot'){
       var an=Math.atan2(pt[1]-d.c[1],pt[0]-d.c[0])*180/Math.PI,tot=d.a0+an-d.a1,sn=Math.round(tot/15)*15;
       if(Math.abs(tot-sn)<5)tot=sn;
       d.da=tot-d.a0;
-      var g=inkG(d.i,pdfv.an[d.i].indexOf(pdfv.sel.its[0]));if(g)g.setAttribute('transform','rotate('+d.da+' '+d.c[0]+' '+d.c[1]+')');
+      pdfv.sel.its.forEach(function(it){var g=inkG(d.i,pdfv.an[d.i].indexOf(it));if(g)g.setAttribute('transform','rotate('+d.da+' '+d.c[0]+' '+d.c[1]+')')});
     }
     else if(d.mode==='sc'){
       var b=d.b,den=(d.p0[0]-b[0])+(d.p0[1]-b[1]);
@@ -12328,7 +13858,13 @@ function anUp(e){
     inkSet(d.i,sel);
   }else if(d.mode==='rot'){
     var s3=pdfv.sel;
-    if(s3&&Math.abs(d.da)>0.5)inkMod(s3.i,s3.its,function(it){var a=(d.a0+d.da)%360;if(a<0)a+=360;it.a=Math.round(a*10)/10});
+    if(s3&&Math.abs(d.da)>0.5)inkMod(s3.i,s3.its,function(it){
+      var rr=d.da*Math.PI/180,co=Math.cos(rr),si=Math.sin(rr),cc=d.c,f=function(x,y){var dx=x-cc[0],dy=y-cc[1];return [cc[0]+dx*co-dy*si,cc[1]+dx*si+dy*co]};
+      var a=((+it.a||0)+d.da)%360;if(a<0)a+=360;a=Math.round(a*10)/10;
+      if(it.t==='x'){var o=inkTxC(it),n=f(o[0],o[1]);it.x=inkR(+it.x+n[0]-o[0]);it.y=inkR(+it.y+n[1]-o[1]);it.a=a}
+      else if(it.t==='i'){inkTf(it,f,1);it.a=a}
+      else inkTf(it,f,1);
+    });
     else anRefresh(d.i);
   }else if(d.mode==='mv'){
     var s=pdfv.sel,j=pvPageAt(e.clientX,e.clientY);
@@ -13065,8 +14601,8 @@ function pvAct(a,el){
   else if(a==='vnpg'&&el){pvPopSet('');pvGoTo(+el.dataset.p)}
   else if(a==='fcpage')fcFromNote(false);
   else if(a==='fcall')fcFromNote(true);
-  else if(a==='zset'){pvSetZoom(+el.dataset.z);pvPopSet('')}
-  else if(a==='fit'){pvPopSet('');pvSetZoom(1)}
+  else if(a==='zset'){pvZoomTo(+el.dataset.z);pvPopSet('')}
+  else if(a==='fit'){pvPopSet('');pvZoomTo(1)}
   else if(a==='pg'){pvPopSet('');pvGoTo(+el.dataset.p)}
   else if(a==='prev')pvGoTo(pvCur()-1);
   else if(a==='next')pvGoTo(pvCur()+1);
@@ -13480,6 +15016,7 @@ async function inkDrawItems(x,items,k,dark){
       x.stroke(new Path2D(s.d));x.restore();
     }else if(s.t==='x'&&typeof s.s==='string'&&/^#[0-9a-fA-F]{6}$/.test(s.c||'')){
       x.save();
+      if(+s.a){var rcn=inkTxC(s);x.translate(rcn[0],rcn[1]);x.rotate(s.a*Math.PI/180);x.translate(-rcn[0],-rcn[1])}
       var T=inkTxMeasure(s),tm=T.m,tf=+s.f,tW=T.W,tx0=+s.x,ty0=+s.y;
       if(tm.bg){var tp=tf*0.3,tl=(s.r?tx0-tW:tx0)-tp,tw=tW+tp*2,th=tf*1.5+(T.ls.length-1)*tf*T.lh,tr=tf*0.25;x.save();x.globalAlpha=0.92;x.fillStyle=tm.bg;x.beginPath();x.moveTo(tl+tr,ty0-tf*0.1);x.arcTo(tl+tw,ty0-tf*0.1,tl+tw,ty0-tf*0.1+th,tr);x.arcTo(tl+tw,ty0-tf*0.1+th,tl,ty0-tf*0.1+th,tr);x.arcTo(tl,ty0-tf*0.1+th,tl,ty0-tf*0.1,tr);x.arcTo(tl,ty0-tf*0.1,tl+tw,ty0-tf*0.1,tr);x.closePath();x.fill();x.restore()}
       x.fillStyle=s.c;x.font=inkTxFont(tm,tf);x.direction=s.r?'rtl':'ltr';x.textAlign='left';x.textBaseline='alphabetic';
@@ -14154,7 +15691,7 @@ actions.rkRep=async function(){
   rkBusy=false;
 };
 
-actions.adPrev=adPrevA;actions.adNext=adNextA;actions.openChar=openCharA;actions.charBack=charBackA;actions.chView=chViewA;actions.chFlip=chFlipA;actions.pkWave=pkWaveA;actions.buyChar=buyCharA;
+actions.adPrev=adPrevA;actions.adNext=adNextA;actions.openChar=openCharA;actions.openChannel=openChanA;actions.charBack=charBackA;actions.chView=chViewA;actions.chFlip=chFlipA;actions.pkWave=pkWaveA;actions.buyChar=buyCharA;
 /* ---------- Ario smart highlight (button beside the lasso, notes + PDFs) ----------
    One tap: the page is read with the offline text engine (word positions), important words and sentences are found by
    cue words / numbers / terms and highlighted in different colours; the ones teachers usually ask about (definitions,
@@ -17470,6 +19007,7 @@ boot('native',function(){nativeInit()});
 boot('activityAsk',function(){kaStart()});
 boot('lock',function(){alCheck();if(lkGet()){alSecure(true);showLock()}});
 boot('gm',function(){gmCheck(true)});
+boot('channel',function(){setTimeout(chanAnnounce,4500)});
 boot('assistant',function(){
   aoBuild();
   (async function(){

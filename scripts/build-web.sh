@@ -5,8 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ESB="npx --no-install esbuild"
 # English and Arabic dictionaries + language core + Konkoria English texts + Arabic screen-text translator + the app are joined into one script
+# channel-posts.js = the posts of the in-app Ario Channel (see scripts/add-channel-post.mjs)
 # names are kept (no --minify-identifiers) so an error shown on screen says which function failed
-cat src/js/i18n-en.js src/js/i18n-ar.js src/js/i18n.js src/js/i18n-kk.js src/js/i18n-ar-dom.js src/js/think.js src/js/app.js | $ESB --minify-whitespace --minify-syntax --target=chrome80 --legal-comments=none --charset=utf8 > www/js/app.js
+cat src/js/i18n-en.js src/js/i18n-ar.js src/js/i18n.js src/js/i18n-kk.js src/js/i18n-ar-dom.js src/js/think.js src/js/channel-posts.js src/js/app.js | $ESB --minify-whitespace --minify-syntax --target=chrome80 --legal-comments=none --charset=utf8 > www/js/app.js
 $ESB src/css/app.css --minify --target=chrome80 --legal-comments=none --charset=utf8 --outfile=www/css/app.css
 
 # ---- pdf-lib (cuts pages out of a PDF: "جدا کردن صفحه‌ها") goes into www/lib; the browser build falls back to a CDN ----

@@ -11,7 +11,7 @@ fi
 APPID=$(python3 -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
 JDIR="android/app/src/main/java/$(echo "$APPID" | tr . /)"
 mkdir -p "$JDIR"
-for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin ArioCounselorWorker; do
+for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin FocusGuardPlugin FocusGuardService ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin ArioCounselorWorker; do
   sed "s/__APPID__/$APPID/g" "native/java/$f.java" > "$JDIR/$f.java"
 done
 cp -r native/res/. android/app/src/main/res/
@@ -58,5 +58,38 @@ fi
 # WorkManager: the advisor's background check for new reports (works while the app is closed)
 if [ -f "$GR" ] && ! grep -q "androidx.work:work-runtime" "$GR"; then
   sed -i '/^dependencies {/a\    implementation "androidx.work:work-runtime:2.9.1"' "$GR"
+fi
+
+# Focus guard: blocks/warns about distracting apps during a study part (Usage access + Display over other apps)
+if ! grep -q "FocusGuardService" "$MAN"; then
+  python3 - "$MAN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf8").read()
+if "xmlns:tools" not in s:
+    s = s.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+perms = ""
+for name, extra in (("FOREGROUND_SERVICE", ""), ("FOREGROUND_SERVICE_SPECIAL_USE", ""),
+                    ("PACKAGE_USAGE_STATS", ' tools:ignore="ProtectedPermissions"'), ("SYSTEM_ALERT_WINDOW", "")):
+    if "android.permission." + name + '"' not in s:
+        perms += '    <uses-permission android:name="android.permission.' + name + '"' + extra + ' />\n'
+if "ario-guard-queries" not in s:
+    q = '<!-- ario-guard-queries --><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>'
+    if "<queries>" in s:
+        s = s.replace("<queries>", "<queries>" + q, 1)
+    else:
+        perms += "    <queries>" + q + "</queries>\n"
+svc = """
+        <service
+            android:name=".FocusGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="focus_app_guard" />
+        </service>
+    """
+s = s.replace("<application", perms + "    <application", 1)
+s = s.replace("</application>", svc + "</application>", 1)
+open(p, "w", encoding="utf8").write(s)
+PY
 fi
 echo "Widget and app lock added."
