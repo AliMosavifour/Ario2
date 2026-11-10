@@ -11,7 +11,7 @@ fi
 APPID=$(python3 -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
 JDIR="android/app/src/main/java/$(echo "$APPID" | tr . /)"
 mkdir -p "$JDIR"
-for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin FocusGuardPlugin FocusGuardService ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin ArioCounselorWorker; do
+for f in ArioLang MainActivity WidgetBridgePlugin ArioWidgetProvider AppLockPlugin ImageSavePlugin PdfViewerPlugin FocusNotifyPlugin FocusGuardPlugin FocusGuardService ArioNotifyPlugin ArioNotifyCore ArioNotifyReceiver ArioTtsPlugin ArioCounselorWorker ArioChatNotify; do
   sed "s/__APPID__/$APPID/g" "native/java/$f.java" > "$JDIR/$f.java"
 done
 cp -r native/res/. android/app/src/main/res/

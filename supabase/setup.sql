@@ -719,3 +719,355 @@ begin
 end $$;
 revoke all on function public.poll_vote(uuid, int[]) from public, anon;
 grant execute on function public.poll_vote(uuid, int[]) to authenticated;
+
+
+-- =====================================================================
+-- v301: reactions on chat messages (advisor, friend and group chats). One row per person per message;
+-- written only through react_set(), read by every member of the chat. Run this block once (it is safe to run again).
+-- =====================================================================
+create table if not exists public.link_reactions (
+  msg_id     uuid not null references public.link_messages(id) on delete cascade,
+  link_id    uuid not null,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  emoji      text not null check (char_length(emoji) between 1 and 16),
+  created_at timestamptz not null default now(),
+  primary key (msg_id, user_id)
+);
+create index if not exists link_reactions_link_idx on public.link_reactions (link_id);
+alter table public.link_reactions enable row level security;
+drop policy if exists "lr_select" on public.link_reactions;
+create policy "lr_select" on public.link_reactions for select using (public.chat_member(link_id::text));
+revoke all on public.link_reactions from anon, authenticated;
+grant select on public.link_reactions to authenticated;
+
+-- set my reaction on a message (an empty p_emoji, or the same one again from the phone, takes it back)
+create or replace function public.react_set(p_msg uuid, p_emoji text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare m public.link_messages; e text := left(coalesce(trim(p_emoji), ''), 16);
+begin
+  if auth.uid() is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  select * into m from public.link_messages where id = p_msg;
+  if not found or not public.chat_member(m.link_id::text) then return jsonb_build_object('ok', false, 'error', 'nochat'); end if;
+  if e = '' then
+    delete from public.link_reactions where msg_id = p_msg and user_id = auth.uid();
+  else
+    insert into public.link_reactions (msg_id, link_id, user_id, emoji) values (p_msg, m.link_id, auth.uid(), e)
+    on conflict (msg_id, user_id) do update set emoji = excluded.emoji, created_at = now();
+  end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.react_set(uuid, text) from public, anon;
+grant execute on function public.react_set(uuid, text) to authenticated;
+
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v304: group photo. The owner of a group picks one of the built-in (non-VIP) avatars (av1..av12) as the group's picture.
+-- Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.chat_groups add column if not exists photo text not null default '';
+
+create or replace function public.group_set_photo(p_group uuid, p_photo text)
+returns json language plpgsql security definer set search_path = public as $$
+declare ph text := coalesce(trim(p_photo), '');
+begin
+  if ph <> '' and ph !~ '^av([1-9]|1[0-2])$' then return json_build_object('ok', false, 'err', 'photo'); end if;
+  update public.chat_groups set photo = ph where id = p_group and owner_id = auth.uid();
+  if not found then return json_build_object('ok', false, 'err', 'owner'); end if;
+  return json_build_object('ok', true);
+end $$;
+revoke all on function public.group_set_photo(uuid, text) from public, anon;
+grant execute on function public.group_set_photo(uuid, text) to authenticated;
+
+
+-- =====================================================================
+-- v305: group photo from the gallery. The photo column may now also hold a small square JPEG as a data URL
+-- (made on the phone, 144x144, about 6-10 KB) besides the built-in avatar names. Run this block once (it is safe to run again).
+-- =====================================================================
+create or replace function public.group_set_photo(p_group uuid, p_photo text)
+returns json language plpgsql security definer set search_path = public as $$
+declare ph text := coalesce(trim(p_photo), '');
+begin
+  if ph <> '' and ph !~ '^av([1-9]|1[0-2])$'
+     and not (ph ~ '^data:image/jpeg;base64,[A-Za-z0-9+/=]+$' and length(ph) <= 24000) then
+    return json_build_object('ok', false, 'err', 'photo');
+  end if;
+  update public.chat_groups set photo = ph where id = p_group and owner_id = auth.uid();
+  if not found then return json_build_object('ok', false, 'err', 'owner'); end if;
+  return json_build_object('ok', true);
+end $$;
+revoke all on function public.group_set_photo(uuid, text) from public, anon;
+grant execute on function public.group_set_photo(uuid, text) to authenticated;
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v311: "online" / "last seen" and "typing…" in chats (advisor, friend and group chats).
+-- user_presence = when each person was last active in the app; chat_typing = who is typing in which chat (kept only a few seconds).
+-- Nobody can read these tables directly: everything goes through chat_pulse(), which answers only for chats the person belongs to.
+-- Run this block once (it is safe to run again).
+-- =====================================================================
+create table if not exists public.user_presence (
+  user_id   uuid primary key references auth.users(id) on delete cascade,
+  last_seen timestamptz not null default now()
+);
+create table if not exists public.chat_typing (
+  link_id uuid not null,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  at      timestamptz not null default now(),
+  primary key (link_id, user_id)
+);
+alter table public.user_presence enable row level security;
+alter table public.chat_typing   enable row level security;
+revoke all on public.user_presence, public.chat_typing from anon, authenticated;
+
+-- one call does it all: marks me as active, sets/clears my "typing" flag in this chat, and returns what the others are doing
+--   p_link   = the open chat (null = I am in the app but not in a chat)
+--   p_typing = true while I am writing
+-- answer: { ok, typing: [user ids typing right now (not me)], seen: { user id: seconds since that person was last active } }
+create or replace function public.chat_pulse(p_link uuid default null, p_typing boolean default false)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); ty json := '[]'::json; sn json := '{}'::json; peers uuid[];
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  insert into public.user_presence (user_id, last_seen) values (me, now())
+    on conflict (user_id) do update set last_seen = now();
+  if p_link is null or not public.chat_member(p_link::text) then
+    return json_build_object('ok', true, 'typing', ty, 'seen', sn);
+  end if;
+  if p_typing then
+    insert into public.chat_typing (link_id, user_id, at) values (p_link, me, now())
+      on conflict (link_id, user_id) do update set at = now();
+  else
+    delete from public.chat_typing where link_id = p_link and user_id = me;
+  end if;
+  select array_agg(u) into peers from (
+    select counselor_id as u from public.links where id = p_link
+    union select student_id from public.links where id = p_link
+    union select owner_id from public.friend_links where id = p_link
+    union select friend_id from public.friend_links where id = p_link
+    union select user_id from public.chat_group_members where group_id = p_link
+  ) x where u is not null and u <> me;
+  select coalesce(json_agg(user_id), '[]'::json) into ty
+    from public.chat_typing where link_id = p_link and user_id <> me and at > now() - interval '6 seconds';
+  select coalesce(json_object_agg(user_id::text, greatest(0, extract(epoch from (now() - last_seen))::int)), '{}'::json) into sn
+    from public.user_presence where user_id = any(coalesce(peers, '{}'::uuid[]));
+  return json_build_object('ok', true, 'typing', ty, 'seen', sn);
+end $$;
+revoke all on function public.chat_pulse(uuid, boolean) from public, anon;
+grant execute on function public.chat_pulse(uuid, boolean) to authenticated;
+
+-- tidy up: typing rows older than a minute are useless (optional; call from a scheduled job if you like)
+create or replace function public.chat_typing_cleanup() returns void language sql security definer set search_path = public as $$
+  delete from public.chat_typing where at < now() - interval '1 minute';
+$$;
+revoke all on function public.chat_typing_cleanup() from public, anon, authenticated;
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v312: hide my "online / last seen / typing". With p_hide = true nothing about me is recorded or shown to others
+-- (and I do not see it for others either, like Telegram). Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.user_presence add column if not exists hidden boolean not null default false;
+drop function if exists public.chat_pulse(uuid, boolean);
+create or replace function public.chat_pulse(p_link uuid default null, p_typing boolean default false, p_hide boolean default false)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); ty json := '[]'::json; sn json := '{}'::json; peers uuid[];
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_hide then
+    insert into public.user_presence (user_id, hidden) values (me, true)
+      on conflict (user_id) do update set hidden = true;
+    delete from public.chat_typing where user_id = me;
+    return json_build_object('ok', true, 'typing', ty, 'seen', sn, 'hidden', true);
+  end if;
+  insert into public.user_presence (user_id, last_seen, hidden) values (me, now(), false)
+    on conflict (user_id) do update set last_seen = now(), hidden = false;
+  if p_link is null or not public.chat_member(p_link::text) then
+    return json_build_object('ok', true, 'typing', ty, 'seen', sn);
+  end if;
+  if p_typing then
+    insert into public.chat_typing (link_id, user_id, at) values (p_link, me, now())
+      on conflict (link_id, user_id) do update set at = now();
+  else
+    delete from public.chat_typing where link_id = p_link and user_id = me;
+  end if;
+  select array_agg(u) into peers from (
+    select counselor_id as u from public.links where id = p_link
+    union select student_id from public.links where id = p_link
+    union select owner_id from public.friend_links where id = p_link
+    union select friend_id from public.friend_links where id = p_link
+    union select user_id from public.chat_group_members where group_id = p_link
+  ) x where u is not null and u <> me;
+  select coalesce(json_agg(t.user_id), '[]'::json) into ty
+    from public.chat_typing t join public.user_presence up on up.user_id = t.user_id and not up.hidden
+    where t.link_id = p_link and t.user_id <> me and t.at > now() - interval '6 seconds';
+  select coalesce(json_object_agg(user_id::text, greatest(0, extract(epoch from (now() - last_seen))::int)), '{}'::json) into sn
+    from public.user_presence where user_id = any(coalesce(peers, '{}'::uuid[])) and not hidden;
+  return json_build_object('ok', true, 'typing', ty, 'seen', sn);
+end $$;
+revoke all on function public.chat_pulse(uuid, boolean, boolean) from public, anon;
+grant execute on function public.chat_pulse(uuid, boolean, boolean) to authenticated;
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v313: stickers in chats (message kind 's') + study challenge between friends (today's study minutes travel with chat_pulse).
+-- Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.link_messages drop constraint if exists link_messages_kind_check;
+alter table public.link_messages add constraint link_messages_kind_check check (kind in ('t','p','v','a','r','f','g','q','s'));
+
+alter table public.user_presence add column if not exists study_day text;
+alter table public.user_presence add column if not exists study_min int;
+
+drop function if exists public.chat_pulse(uuid, boolean, boolean);
+create or replace function public.chat_pulse(p_link uuid default null, p_typing boolean default false, p_hide boolean default false, p_study int default null, p_day text default null)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); ty json := '[]'::json; sn json := '{}'::json; st json := '{}'::json; peers uuid[];
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_hide then
+    insert into public.user_presence (user_id, hidden) values (me, true)
+      on conflict (user_id) do update set hidden = true;
+    delete from public.chat_typing where user_id = me;
+    return json_build_object('ok', true, 'typing', ty, 'seen', sn, 'study', st, 'hidden', true);
+  end if;
+  insert into public.user_presence (user_id, last_seen, hidden) values (me, now(), false)
+    on conflict (user_id) do update set last_seen = now(), hidden = false;
+  if p_study is not null and p_day ~ '^\d{4}-\d{2}-\d{2}$' then
+    update public.user_presence set study_day = p_day, study_min = least(greatest(p_study, 0), 1440) where user_id = me;
+  end if;
+  if p_link is null or not public.chat_member(p_link::text) then
+    return json_build_object('ok', true, 'typing', ty, 'seen', sn, 'study', st);
+  end if;
+  if p_typing then
+    insert into public.chat_typing (link_id, user_id, at) values (p_link, me, now())
+      on conflict (link_id, user_id) do update set at = now();
+  else
+    delete from public.chat_typing where link_id = p_link and user_id = me;
+  end if;
+  select array_agg(u) into peers from (
+    select counselor_id as u from public.links where id = p_link
+    union select student_id from public.links where id = p_link
+    union select owner_id from public.friend_links where id = p_link
+    union select friend_id from public.friend_links where id = p_link
+    union select user_id from public.chat_group_members where group_id = p_link
+  ) x where u is not null and u <> me;
+  select coalesce(json_agg(t.user_id), '[]'::json) into ty
+    from public.chat_typing t join public.user_presence up on up.user_id = t.user_id and not up.hidden
+    where t.link_id = p_link and t.user_id <> me and t.at > now() - interval '6 seconds';
+  select coalesce(json_object_agg(user_id::text, greatest(0, extract(epoch from (now() - last_seen))::int)), '{}'::json) into sn
+    from public.user_presence where user_id = any(coalesce(peers, '{}'::uuid[])) and not hidden;
+  if p_day is not null and exists (select 1 from public.friend_links where id = p_link) then
+    select coalesce(json_object_agg(user_id::text, coalesce(study_min, 0)), '{}'::json) into st
+      from public.user_presence where user_id = any(coalesce(peers, '{}'::uuid[])) and not hidden and study_day = p_day;
+  end if;
+  return json_build_object('ok', true, 'typing', ty, 'seen', sn, 'study', st);
+end $$;
+revoke all on function public.chat_pulse(uuid, boolean, boolean, int, text) from public, anon;
+grant execute on function public.chat_pulse(uuid, boolean, boolean, int, text) to authenticated;
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v319: friend stories (24 hours). A story is one picture (private bucket "stories", path <user id>/<story id>.jpg) plus a tiny
+-- thumbnail kept in the row, so the circles above the chat search box appear at once. Only the owner and the owner's linked friends can see it.
+-- Run this block once (it is safe to run again).
+-- =====================================================================
+create table if not exists public.friend_stories (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  media      text not null,
+  thumb      text not null default '' check (char_length(thumb) <= 24000),
+  caption    text not null default '' check (char_length(caption) <= 200),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '24 hours')
+);
+create index if not exists friend_stories_user_idx on public.friend_stories (user_id, created_at);
+alter table public.friend_stories enable row level security;
+drop policy if exists "fs_select" on public.friend_stories;
+drop policy if exists "fs_insert" on public.friend_stories;
+drop policy if exists "fs_delete" on public.friend_stories;
+-- my own rows stay visible after they expire (so my phone can tidy them up); friends see a story only while it is alive
+create policy "fs_select" on public.friend_stories for select using (user_id = auth.uid() or (expires_at > now() and public.friend_of(user_id)));
+create policy "fs_insert" on public.friend_stories for insert with check (user_id = auth.uid());
+create policy "fs_delete" on public.friend_stories for delete using (user_id = auth.uid());
+revoke all on public.friend_stories from anon;
+revoke insert, update on public.friend_stories from authenticated;
+grant select, delete on public.friend_stories to authenticated;
+grant insert (id, user_id, media, thumb, caption) on public.friend_stories to authenticated;   -- created_at / expires_at can not be forged
+
+-- "may I see the files of this folder?" (the folder name is the owner's user id)
+create or replace function public.story_visible(p_folder text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare u uuid;
+begin
+  begin u := p_folder::uuid; exception when others then return false; end;
+  return u = auth.uid() or public.friend_of(u);
+end $$;
+revoke all on function public.story_visible(text) from public, anon;
+grant execute on function public.story_visible(text) to authenticated;
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('stories', 'stories', false, 5242880)
+on conflict (id) do update set public = false, file_size_limit = 5242880;
+drop policy if exists "stories_obj_select" on storage.objects;
+drop policy if exists "stories_obj_insert" on storage.objects;
+drop policy if exists "stories_obj_delete" on storage.objects;
+create policy "stories_obj_select" on storage.objects for select to authenticated using (
+  bucket_id = 'stories' and public.story_visible((storage.foldername(name))[1]));
+create policy "stories_obj_insert" on storage.objects for insert to authenticated with check (
+  bucket_id = 'stories' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "stories_obj_delete" on storage.objects for delete to authenticated using (
+  bucket_id = 'stories' and (storage.foldername(name))[1] = auth.uid()::text);
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v320: stories - videos (up to 30 s / 40 MB), "who saw it" and the choice to allow replies (replies themselves are normal chat messages).
+-- Run this block once after the v319 block (it is safe to run again).
+-- =====================================================================
+alter table public.friend_stories add column if not exists kind text not null default 'p';
+alter table public.friend_stories drop constraint if exists friend_stories_kind_check;
+alter table public.friend_stories add constraint friend_stories_kind_check check (kind in ('p','v'));
+alter table public.friend_stories add column if not exists dur int not null default 0 check (dur between 0 and 60);
+alter table public.friend_stories add column if not exists allow_reply boolean not null default true;
+grant insert (id, user_id, media, thumb, caption, kind, dur, allow_reply) on public.friend_stories to authenticated;
+
+update storage.buckets set file_size_limit = 41943040 where id = 'stories';
+
+create table if not exists public.friend_story_views (
+  story_id  uuid not null references public.friend_stories(id) on delete cascade,
+  viewer_id uuid not null references auth.users(id) on delete cascade,
+  at        timestamptz not null default now(),
+  primary key (story_id, viewer_id)
+);
+alter table public.friend_story_views enable row level security;
+drop policy if exists "fsv_select" on public.friend_story_views;
+-- the viewer sees their own row, the owner of the story sees everybody who watched it
+create policy "fsv_select" on public.friend_story_views for select using (
+  viewer_id = auth.uid() or exists (select 1 from public.friend_stories s where s.id = story_id and s.user_id = auth.uid()));
+revoke all on public.friend_story_views from anon;
+revoke insert, update, delete on public.friend_story_views from authenticated;
+grant select on public.friend_story_views to authenticated;
+
+create or replace function public.story_view(p_story uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.friend_story_views (story_id, viewer_id)
+  select s.id, auth.uid() from public.friend_stories s
+   where s.id = p_story and s.user_id <> auth.uid() and s.expires_at > now() and public.friend_of(s.user_id)
+  on conflict do nothing;
+end $$;
+revoke all on function public.story_view(uuid) from public, anon;
+grant execute on function public.story_view(uuid) to authenticated;
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v323: voice stories (kind 'a'). Text stories and layouts are ordinary pictures, they need nothing new.
+-- Run this block once after the v320 block (it is safe to run again).
+-- =====================================================================
+alter table public.friend_stories drop constraint if exists friend_stories_kind_check;
+alter table public.friend_stories add constraint friend_stories_kind_check check (kind in ('p','v','a'));
+notify pgrst, 'reload schema';

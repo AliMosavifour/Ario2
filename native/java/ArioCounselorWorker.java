@@ -74,6 +74,7 @@ public class ArioCounselorWorker extends Worker {
             e.putString("at", d.optString("at")).putString("rt", d.optString("rt")).putLong("exp", exp);
             if (!same) e.remove("nat");
         }
+        e.putString("mu", d.optString("mu", "")).putBoolean("cn", d.optBoolean("cn", true));
         long rn = Math.max(d.optLong("rn", 0), same ? s.getLong("rn", 0) : 0);
         if (rn <= 0) rn = System.currentTimeMillis();   // first time: only reports that arrive from now on
         e.putLong("rn", rn).apply();
@@ -93,6 +94,11 @@ public class ArioCounselorWorker extends Worker {
 
     static void foreground(Context c) {
         sp(c).edit().putLong("fg", System.currentTimeMillis()).apply();
+    }
+
+    /** The app went to the background: chat messages that arrive from now on are announced. */
+    static void background(Context c) {
+        sp(c).edit().putLong("fg", 0).putLong("cm", System.currentTimeMillis()).apply();
     }
 
     static void marked(Context c, long rn) {
@@ -123,6 +129,11 @@ public class ArioCounselorWorker extends Worker {
     public Result doWork() {
         try {
             check(getApplicationContext());
+        } catch (Throwable t) {
+            // try again next time
+        }
+        try {
+            ArioChatNotify.checkNew(getApplicationContext());
         } catch (Throwable t) {
             // try again next time
         }

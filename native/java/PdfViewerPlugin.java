@@ -104,7 +104,11 @@ public class PdfViewerPlugin extends Plugin {
             call.resolve(r);
             return;
         }
-        final Uri uri = result.getData().getData();
+        importUri(call, result.getData().getData());
+    }
+
+    /** Copies a PDF (from the picker or from another app's share / open-with) into private storage. */
+    private void importUri(final PluginCall call, final Uri uri) {
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -320,6 +324,19 @@ public class PdfViewerPlugin extends Plugin {
                 }
             }
         }).start();
+    }
+
+    /** A PDF another app handed to Ario (Share / Open with): imports it, or resolves {none:true} when nothing is waiting. */
+    @PluginMethod
+    public void takeShared(PluginCall call) {
+        Uri u = MainActivity.takeSharedPdf();
+        if (u == null) {
+            JSObject r = new JSObject();
+            r.put("none", true);
+            call.resolve(r);
+            return;
+        }
+        importUri(call, u);
     }
 
     @PluginMethod

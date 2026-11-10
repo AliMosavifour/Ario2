@@ -85,6 +85,17 @@ public class ArioNotifyPlugin extends Plugin {
         call.resolve();
     }
 
+    /** The app left the screen: chat messages from now on get a phone notification. */
+    @PluginMethod
+    public void cwBg(PluginCall call) {
+        try {
+            ArioCounselorWorker.background(getContext());
+        } catch (Throwable t) {
+            // ignore
+        }
+        call.resolve();
+    }
+
     /** The app is on screen: the background check stays quiet for a few minutes. */
     @PluginMethod
     public void cwFg(PluginCall call) {

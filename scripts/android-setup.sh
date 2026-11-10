@@ -37,6 +37,11 @@ if ! grep -q 'android.intent.action.TTS_SERVICE' "$MAN"; then
   sed -i 's#<queries>#<queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>#' "$MAN"
 fi
 
+# Let other apps open / share a PDF with Ario ("Open with" and "Share"): the file is added to the library.
+if ! grep -q 'application/pdf' "$MAN"; then
+  sed -i '0,/<\/activity>/s#</activity>#    <intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:mimeType="application/pdf" /></intent-filter>\n        <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="application/pdf" /></intent-filter>\n    </activity>#' "$MAN"
+fi
+
 # Make sure the app (and its notifications) can lay out right-to-left.
 if ! grep -q 'android:supportsRtl' "$MAN"; then
   sed -i 's#<application#<application android:supportsRtl="true"#' "$MAN"
