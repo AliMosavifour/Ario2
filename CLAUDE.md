@@ -7,10 +7,15 @@ The app has a read-only channel (Today screen → first banner → `#/channel`).
 
 ```
 node scripts/add-channel-post.mjs --title "عنوان کوتاه" --text "یکی دو جمله برای کاربر" \
-  --kind new   --img path/to/picture.webp --en-title "..." --en-text "..."
+  --kind new --img path/to/picture.webp \
+  --poll-q "سؤال نظرسنجی" --poll "گزینه ۱|گزینه ۲|گزینه ۳" \
+  --en-title "..." --en-text "..." --en-poll-q "..." --en-poll "Option 1|Option 2|Option 3"
 ```
+- **RULE: every channel post MUST contain a picture of the added feature (`--img`, a real screenshot) AND a poll (`--poll-q` + `--poll`, 2–6 options split by `|`).** The script refuses to add a post without them, and `npm run build:web` fails (`scripts/check-channel-posts.mjs`) if any post dated 2026-11-11 or later lacks a picture or a poll. Posts before that date are exempt.
+- **The poll must be about the topic of that post's feature** (e.g. a post about the three-dot menu asks which item of that menu people use most or what they'd add to it), never a generic question like «برنامه چطور است؟». Options are concrete answers about that feature.
+- A person's vote is kept on their device/profile (`state.profile.chPoll`), and they can change it.
 - `--kind`: `new` (new feature), `imp` (improvement), `fix` (bug fix), `info` (news).
-- Write for the user, not for developers; add a picture when the change is visual (screenshot or an image from `www/img`).
+- Write for the user, not for developers; the picture is always required: screenshot the feature.
 - Then `npm run build:web`. Posts are bundled in the app, so they appear with the update; people see a number on the channel banner and a notice.
 
 ## Build

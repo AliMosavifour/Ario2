@@ -3,9 +3,12 @@
 // Run it for EVERY visible change or new feature of the app, then `npm run build:web`.
 //
 //   node scripts/add-channel-post.mjs --title "عنوان" --text "توضیح" \
-//        [--kind new|imp|fix|info] [--img path/to/picture.(webp|png|jpg)] [--ver v298] \
+//        --img path/to/picture.(webp|png|jpg) --poll-q "سؤال نظرسنجی" --poll "گزینه ۱|گزینه ۲|گزینه ۳" \
+//        [--kind new|imp|fix|info] [--ver v298] [--en-poll-q "Question"] [--en-poll "Option 1|Option 2"] \
 //        [--en-title "Title"] [--en-text "Text"] [--ar-title "..."] [--ar-text "..."] [--date YYYY-MM-DD]
 //
+// EVERY post must have a picture of the feature (--img) AND a poll (--poll-q + --poll with 2 to 6 options split by |).
+// The poll must be about THE TOPIC OF THAT POST's feature (not a generic question).
 // The picture is copied to www/img/chn-<id>.<ext>. Use \n in --text for a line break.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +25,11 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const die = (m) => { console.error('ERROR: ' + m); process.exit(1); };
 if (!a.title || !a.text) die('--title and --text are required (see the top of this file).');
+if (!a.img) die('--img is required: every channel post must carry a picture (screenshot) of the feature.');
+const opts = String(a.poll || '').split('|').map((x) => x.trim()).filter(Boolean);
+if (!a['poll-q'] || opts.length < 2 || opts.length > 6) die('every channel post needs a poll: --poll-q "question" --poll "option 1|option 2" (2 to 6 options).');
+const enOpts = a['en-poll'] ? String(a['en-poll']).split('|').map((x) => x.trim()).filter(Boolean) : null;
+if (enOpts && enOpts.length !== opts.length) die('--en-poll must have the same number of options as --poll.');
 const kind = a.kind || 'new';
 if (!['new', 'imp', 'fix', 'info'].includes(kind)) die('--kind must be new, imp, fix or info');
 
@@ -43,8 +51,8 @@ if (a.img) {
   fs.copyFileSync(a.img, path.join(root, 'www/img', imgName));
 }
 
-let post = "{id:'" + id + "',d:'" + date + "'," + (a.ver ? 'v:' + q(a.ver) + ',' : '') + "k:'" + kind + "'," + (imgName ? "img:'" + imgName + "'," : '') + '\n t:' + q(a.title) + ',\n x:' + q(a.text);
-if (a['en-title'] || a['en-text']) post += ',\n en:{t:' + q(a['en-title'] || a.title) + ',x:' + q(a['en-text'] || a.text) + '}';
+let post = "{id:'" + id + "',d:'" + date + "'," + (a.ver ? 'v:' + q(a.ver) + ',' : '') + "k:'" + kind + "'," + (imgName ? "img:'" + imgName + "'," : '') + '\n t:' + q(a.title) + ',\n x:' + q(a.text) + ',\n pq:' + q(a['poll-q']) + ',po:' + JSON.stringify(opts);
+if (a['en-title'] || a['en-text'] || enOpts) post += ',\n en:{t:' + q(a['en-title'] || a.title) + ',x:' + q(a['en-text'] || a.text) + (enOpts ? ',pq:' + q(a['en-poll-q'] || a['poll-q']) + ',po:' + JSON.stringify(enOpts) : '') + '}';
 if (a['ar-title'] || a['ar-text']) post += ',\n ar:{t:' + q(a['ar-title'] || a.title) + ',x:' + q(a['ar-text'] || a.text) + '}';
 post += '},\n';
 

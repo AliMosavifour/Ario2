@@ -1071,3 +1071,310 @@ notify pgrst, 'reload schema';
 alter table public.friend_stories drop constraint if exists friend_stories_kind_check;
 alter table public.friend_stories add constraint friend_stories_kind_check check (kind in ('p','v','a'));
 notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v343: voice chat (گفتگوی صوتی) in group and friend chats, like Telegram's voice chat.
+-- The sound itself goes phone-to-phone (WebRTC). Supabase only carries the small "hello" messages two phones need
+-- to find each other (offer / answer / ice) and the list of who is in the voice chat. Nothing of the sound is stored.
+--   voice_rooms   = who is in the voice chat of which chat right now (a person who stops answering for ~15 s drops out)
+--   voice_signals = short-lived connection messages between two people (deleted as soon as they are delivered)
+-- Nobody can read these tables directly: everything goes through voice_sync / voice_leave / voice_who, which answer only for chats the person belongs to.
+-- Run this block once (it is safe to run again).
+-- =====================================================================
+create table if not exists public.voice_rooms (
+  link_id   uuid not null,
+  user_id   uuid not null references auth.users(id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  beat      timestamptz not null default now(),
+  muted     boolean not null default false,
+  primary key (link_id, user_id)
+);
+create table if not exists public.voice_signals (
+  id         bigint generated always as identity primary key,
+  link_id    uuid not null,
+  from_user  uuid not null references auth.users(id) on delete cascade,
+  to_user    uuid not null references auth.users(id) on delete cascade,
+  kind       text not null check (kind in ('offer','answer','ice')),
+  payload    text not null check (char_length(payload) <= 16000),
+  created_at timestamptz not null default now()
+);
+create index if not exists voice_signals_to_idx on public.voice_signals (to_user, link_id, id);
+alter table public.voice_rooms   enable row level security;
+alter table public.voice_signals enable row level security;
+revoke all on public.voice_rooms, public.voice_signals from anon, authenticated;
+
+-- one call does it all (called about once a second while I am in the voice chat):
+--   p_join  = true on the very first call (I enter); p_muted = my microphone is off
+--   p_out   = connection messages for others: [{ "to": user id, "kind": "offer|answer|ice", "payload": "..." }]
+-- answer: { ok, peers: [{ user_id, muted }] (everyone in the voice chat, me included), signals: [{ from, kind, payload }] for me, dropped: true if I had been dropped }
+create or replace function public.voice_sync(p_link uuid, p_join boolean default false, p_muted boolean default false, p_out jsonb default '[]'::jsonb)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); o jsonb; tgt uuid; k text; n int; pe json; sg json;
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  delete from public.voice_rooms   where link_id = p_link and beat < now() - interval '15 seconds';
+  delete from public.voice_signals where created_at < now() - interval '90 seconds';
+  if p_join then
+    select count(*) into n from public.voice_rooms where link_id = p_link and user_id <> me;
+    if n >= 7 then return json_build_object('ok', false, 'err', 'full'); end if;   -- up to 8 people (every phone talks to every other phone)
+    insert into public.voice_rooms (link_id, user_id, joined_at, beat, muted) values (p_link, me, now(), now(), coalesce(p_muted, false))
+      on conflict (link_id, user_id) do update set beat = now(), muted = coalesce(p_muted, false);
+  else
+    update public.voice_rooms set beat = now(), muted = coalesce(p_muted, false) where link_id = p_link and user_id = me;
+    if not found then return json_build_object('ok', true, 'dropped', true); end if;
+  end if;
+  if jsonb_typeof(p_out) = 'array' then
+    for o in select * from jsonb_array_elements(p_out) limit 60 loop
+      begin tgt := (o->>'to')::uuid; exception when others then tgt := null; end;
+      k := o->>'kind';
+      if tgt is not null and tgt <> me and k in ('offer','answer','ice') and char_length(coalesce(o->>'payload','')) between 1 and 16000
+         and exists (select 1 from public.voice_rooms r where r.link_id = p_link and r.user_id = tgt) then
+        insert into public.voice_signals (link_id, from_user, to_user, kind, payload) values (p_link, me, tgt, k, o->>'payload');
+      end if;
+    end loop;
+  end if;
+  select coalesce(json_agg(json_build_object('user_id', r.user_id, 'muted', r.muted) order by r.joined_at), '[]'::json) into pe
+    from public.voice_rooms r where r.link_id = p_link;
+  with d as (delete from public.voice_signals s where s.to_user = me and s.link_id = p_link returning s.id, s.from_user, s.kind, s.payload)
+    select coalesce(json_agg(json_build_object('from', d.from_user, 'kind', d.kind, 'payload', d.payload) order by d.id), '[]'::json) into sg from d;
+  return json_build_object('ok', true, 'peers', pe, 'signals', sg);
+end $$;
+
+create or replace function public.voice_leave(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  delete from public.voice_rooms   where link_id = p_link and user_id = me;
+  delete from public.voice_signals where link_id = p_link and (from_user = me or to_user = me);
+  return json_build_object('ok', true);
+end $$;
+
+-- who is in the voice chat of this chat right now (for the «گفتگوی صوتی فعال است» bar in the chat)
+create or replace function public.voice_who(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare u json;
+begin
+  if auth.uid() is null or p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false); end if;
+  select coalesce(json_agg(r.user_id order by r.joined_at), '[]'::json) into u
+    from public.voice_rooms r where r.link_id = p_link and r.beat > now() - interval '15 seconds';
+  return json_build_object('ok', true, 'users', u);
+end $$;
+
+revoke all on function public.voice_sync(uuid, boolean, boolean, jsonb), public.voice_leave(uuid), public.voice_who(uuid) from public, anon;
+grant execute on function public.voice_sync(uuid, boolean, boolean, jsonb), public.voice_leave(uuid), public.voice_who(uuid) to authenticated;
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v344: voice chat like Telegram's — a title everybody sees («ویرایش عنوان») and «پایان گفتگوی صوتی» for everyone.
+--   voice_titles = the title of the voice chat while it is running (removed when the last person leaves)
+--   voice_ends   = «this voice chat was ended by X» for a minute, so the others are told why they were dropped
+-- voice_sync / voice_who now also answer with the title (older apps simply ignore the extra fields).
+-- Ending: in a group only the owner can end it for everyone; in a friend chat both friends can.
+-- Run this block once (it is safe to run again; it needs the v343 block first).
+-- =====================================================================
+create table if not exists public.voice_titles (
+  link_id    uuid primary key,
+  title      text not null check (char_length(title) between 1 and 60),
+  updated_at timestamptz not null default now()
+);
+create table if not exists public.voice_ends (
+  link_id  uuid primary key,
+  by_user  uuid,
+  ended_at timestamptz not null default now()
+);
+alter table public.voice_titles enable row level security;
+alter table public.voice_ends   enable row level security;
+revoke all on public.voice_titles, public.voice_ends from anon, authenticated;
+
+create or replace function public.voice_sync(p_link uuid, p_join boolean default false, p_muted boolean default false, p_out jsonb default '[]'::jsonb)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); o jsonb; tgt uuid; k text; n int; pe json; sg json; ti text; en boolean;
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  delete from public.voice_rooms   where link_id = p_link and beat < now() - interval '15 seconds';
+  delete from public.voice_signals where created_at < now() - interval '90 seconds';
+  if not exists (select 1 from public.voice_rooms where link_id = p_link) then
+    delete from public.voice_titles where link_id = p_link;   -- nobody is in: the old title is gone
+  end if;
+  if p_join then
+    select count(*) into n from public.voice_rooms where link_id = p_link and user_id <> me;
+    if n >= 7 then return json_build_object('ok', false, 'err', 'full'); end if;
+    if n = 0 then delete from public.voice_ends where link_id = p_link; end if;   -- a fresh voice chat starts
+    insert into public.voice_rooms (link_id, user_id, joined_at, beat, muted) values (p_link, me, now(), now(), coalesce(p_muted, false))
+      on conflict (link_id, user_id) do update set beat = now(), muted = coalesce(p_muted, false);
+  else
+    update public.voice_rooms set beat = now(), muted = coalesce(p_muted, false) where link_id = p_link and user_id = me;
+    if not found then
+      select exists (select 1 from public.voice_ends e where e.link_id = p_link and e.ended_at > now() - interval '60 seconds') into en;
+      return json_build_object('ok', true, 'dropped', true, 'ended', coalesce(en, false));
+    end if;
+  end if;
+  if jsonb_typeof(p_out) = 'array' then
+    for o in select * from jsonb_array_elements(p_out) limit 60 loop
+      begin tgt := (o->>'to')::uuid; exception when others then tgt := null; end;
+      k := o->>'kind';
+      if tgt is not null and tgt <> me and k in ('offer','answer','ice') and char_length(coalesce(o->>'payload','')) between 1 and 16000
+         and exists (select 1 from public.voice_rooms r where r.link_id = p_link and r.user_id = tgt) then
+        insert into public.voice_signals (link_id, from_user, to_user, kind, payload) values (p_link, me, tgt, k, o->>'payload');
+      end if;
+    end loop;
+  end if;
+  select coalesce(json_agg(json_build_object('user_id', r.user_id, 'muted', r.muted) order by r.joined_at), '[]'::json) into pe
+    from public.voice_rooms r where r.link_id = p_link;
+  with d as (delete from public.voice_signals s where s.to_user = me and s.link_id = p_link returning s.id, s.from_user, s.kind, s.payload)
+    select coalesce(json_agg(json_build_object('from', d.from_user, 'kind', d.kind, 'payload', d.payload) order by d.id), '[]'::json) into sg from d;
+  select t.title into ti from public.voice_titles t where t.link_id = p_link;
+  return json_build_object('ok', true, 'peers', pe, 'signals', sg, 'title', ti);
+end $$;
+
+create or replace function public.voice_who(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare u json; ti text;
+begin
+  if auth.uid() is null or p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false); end if;
+  select coalesce(json_agg(r.user_id order by r.joined_at), '[]'::json) into u
+    from public.voice_rooms r where r.link_id = p_link and r.beat > now() - interval '15 seconds';
+  select t.title into ti from public.voice_titles t where t.link_id = p_link;
+  return json_build_object('ok', true, 'users', u, 'title', ti);
+end $$;
+
+-- change (or clear, with an empty text) the title; only someone who is in the voice chat can
+create or replace function public.voice_title(p_link uuid, p_title text)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); t text := left(btrim(coalesce(p_title, '')), 60);
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  if not exists (select 1 from public.voice_rooms r where r.link_id = p_link and r.user_id = me) then return json_build_object('ok', false, 'err', 'notin'); end if;
+  if t = '' then delete from public.voice_titles where link_id = p_link;
+  else insert into public.voice_titles (link_id, title) values (p_link, t) on conflict (link_id) do update set title = excluded.title, updated_at = now(); end if;
+  return json_build_object('ok', true, 'title', nullif(t, ''));
+end $$;
+
+-- end the voice chat for everybody
+create or replace function public.voice_end(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  if exists (select 1 from public.chat_groups g where g.id = p_link and g.owner_id <> me) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  insert into public.voice_ends (link_id, by_user) values (p_link, me)
+    on conflict (link_id) do update set by_user = excluded.by_user, ended_at = now();
+  delete from public.voice_rooms   where link_id = p_link;
+  delete from public.voice_signals where link_id = p_link;
+  delete from public.voice_titles  where link_id = p_link;
+  return json_build_object('ok', true);
+end $$;
+
+revoke all on function public.voice_sync(uuid, boolean, boolean, jsonb), public.voice_who(uuid), public.voice_title(uuid, text), public.voice_end(uuid) from public, anon;
+grant execute on function public.voice_sync(uuid, boolean, boolean, jsonb), public.voice_who(uuid), public.voice_title(uuid, text), public.voice_end(uuid) to authenticated;
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v345: group description (shown on the new group info page, like Telegram's «Description»).
+-- Only the owner of the group can change it. Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.chat_groups add column if not exists description text not null default '';
+
+create or replace function public.group_set_desc(p_group uuid, p_desc text)
+returns json language plpgsql security definer set search_path = public as $$
+declare d text := left(coalesce(trim(p_desc), ''), 255);
+begin
+  update public.chat_groups set description = d where id = p_group and owner_id = auth.uid();
+  if not found then return json_build_object('ok', false, 'err', 'owner'); end if;
+  return json_build_object('ok', true);
+end $$;
+revoke all on function public.group_set_desc(uuid, text) from public, anon;
+grant execute on function public.group_set_desc(uuid, text) to authenticated;
+
+
+-- =====================================================================
+-- v350: group admins. The owner (مدیر) can make other members admins (is_admin). The owner and the admins can change the group's
+-- name, photo and description and add members; admins can also remove ordinary members (not the owner, not other admins).
+-- Only the owner can add / remove admins. Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.chat_group_members add column if not exists is_admin boolean not null default false;
+
+create or replace function public.group_can_edit(p_group uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.chat_groups where id = p_group and owner_id = auth.uid())
+      or exists (select 1 from public.chat_group_members where group_id = p_group and user_id = auth.uid() and is_admin);
+$$;
+revoke all on function public.group_can_edit(uuid) from public, anon;
+grant execute on function public.group_can_edit(uuid) to authenticated;
+
+create or replace function public.group_set_admin(p_group uuid, p_user uuid, p_on boolean)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.chat_groups where id = p_group and owner_id = auth.uid()) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  if exists (select 1 from public.chat_groups where id = p_group and owner_id = p_user) then return json_build_object('ok', false, 'err', 'self'); end if;
+  update public.chat_group_members set is_admin = coalesce(p_on, false) where group_id = p_group and user_id = p_user;
+  if not found then return json_build_object('ok', false, 'err', 'member'); end if;
+  return json_build_object('ok', true);
+end $$;
+revoke all on function public.group_set_admin(uuid, uuid, boolean) from public, anon;
+grant execute on function public.group_set_admin(uuid, uuid, boolean) to authenticated;
+
+create or replace function public.group_add(p_group uuid, p_user uuid)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  if not public.group_can_edit(p_group) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  if not public.friend_of(p_user) then return json_build_object('ok', false, 'err', 'notfriend'); end if;
+  if exists (select 1 from public.chat_group_members where group_id = p_group and user_id = p_user) then return json_build_object('ok', true); end if;
+  if (select count(*) from public.chat_group_members where group_id = p_group) >= 50 then return json_build_object('ok', false, 'err', 'full'); end if;
+  insert into public.chat_group_members (group_id, user_id, name) values (p_group, p_user, coalesce(public.friend_name_of(p_user), ''));
+  return json_build_object('ok', true);
+end $$;
+
+create or replace function public.group_remove(p_group uuid, p_user uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare is_owner boolean;
+begin
+  if not public.group_can_edit(p_group) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  if p_user = auth.uid() then return json_build_object('ok', false, 'err', 'self'); end if;
+  select exists (select 1 from public.chat_groups where id = p_group and owner_id = auth.uid()) into is_owner;
+  if exists (select 1 from public.chat_groups where id = p_group and owner_id = p_user) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  if not is_owner and exists (select 1 from public.chat_group_members where group_id = p_group and user_id = p_user and is_admin) then
+    return json_build_object('ok', false, 'err', 'admin');
+  end if;
+  delete from public.chat_group_members where group_id = p_group and user_id = p_user;
+  return json_build_object('ok', true);
+end $$;
+
+create or replace function public.group_rename(p_group uuid, p_name text)
+returns json language plpgsql security definer set search_path = public as $$
+declare nm text := left(trim(coalesce(p_name, '')), 60);
+begin
+  if nm = '' then return json_build_object('ok', false, 'err', 'name'); end if;
+  if not public.group_can_edit(p_group) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  update public.chat_groups set name = nm where id = p_group;
+  return json_build_object('ok', true);
+end $$;
+
+create or replace function public.group_set_desc(p_group uuid, p_desc text)
+returns json language plpgsql security definer set search_path = public as $$
+declare d text := left(coalesce(trim(p_desc), ''), 255);
+begin
+  if not public.group_can_edit(p_group) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  update public.chat_groups set description = d where id = p_group;
+  return json_build_object('ok', true);
+end $$;
+
+create or replace function public.group_set_photo(p_group uuid, p_photo text)
+returns json language plpgsql security definer set search_path = public as $$
+declare ph text := coalesce(trim(p_photo), '');
+begin
+  if ph <> '' and ph !~ '^av([1-9]|1[0-2])$'
+     and not (ph ~ '^data:image/jpeg;base64,[A-Za-z0-9+/=]+$' and length(ph) <= 24000) then
+    return json_build_object('ok', false, 'err', 'photo');
+  end if;
+  if not public.group_can_edit(p_group) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  update public.chat_groups set photo = ph where id = p_group;
+  return json_build_object('ok', true);
+end $$;
+notify pgrst, 'reload schema';

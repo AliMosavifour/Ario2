@@ -459,7 +459,7 @@ function cwSync(s){
   s=s===undefined?sbSess():s;
   var on=!!(s&&sbOn()),rn=0;
   try{rn=Number(localStorage.getItem('ario.lk.rn'))||0}catch(e){}
-  AN.cwSet(on?{on:true,url:SB.url,key:SB.key,uid:s.uid,at:s.at,rt:s.rt,exp:s.exp,rn:rn,cn:cwChatOn(),mu:Object.keys(mcMutedMap()).join(',')}:{on:false}).catch(function(){});
+  AN.cwSet(on?{on:true,url:SB.url,key:SB.key,uid:s.uid,at:s.at,rt:s.rt,exp:s.exp,rn:rn,cn:cwChatOn(),mu:Object.keys(mcMutedMap()).join(','),me:{nm:String(displayName()).slice(0,80),av:mcMyAv()}}:{on:false}).catch(function(){});
 }
 async function cwAdopt(){
   if(typeof AN==='undefined'||!AN||!AN.cwTake)return;
@@ -976,13 +976,25 @@ function chanTx(p,f){var o=(ARB&&p.ar)||(EN&&p.en)||p;return o[f]!=null?o[f]:p[f
 var CHAN_K={new:['✨','ویژگی تازه','New'],imp:['⚡','بهبود','Improved'],fix:['🔧','رفع اشکال','Fix'],info:['📣','اطلاعیه','News']};
 var chanEl=null,chanTouched=false;
 function chanFmt(o,d){try{return new Intl.DateTimeFormat(EN?'en-US':ARB?'ar-SA':'fa-IR',o).format(d)}catch(e){return ''}}
+/* poll under a post: the choice is kept in state.profile.chPoll[postId] = option index (changeable, saved with the profile) */
+function chanPollHTML(p){
+  var o=chanTx(p,'po'),q=chanTx(p,'pq'),my,i,h;
+  if(!Array.isArray(o)||o.length<2||!q)return '';
+  my=(state.profile.chPoll||{})[p.id];my=(my===0||my>0)?+my:-1;
+  h='<div class="tgq" data-pq="'+esc(p.id)+'"><small>📊 '+__("نظرسنجی","Poll")+'</small><b dir="auto">'+esc(q)+'</b>';
+  for(i=0;i<o.length;i++)h+='<button type="button" class="tgo'+(my===i?' on':'')+'" data-cn="vote" data-id="'+esc(p.id)+'" data-i="'+i+'" aria-pressed="'+(my===i?'true':'false')+'"><i aria-hidden="true">'+(my===i?'✓':'')+'</i><span dir="auto">'+esc(o[i])+'</span></button>';
+  return h+'<em>'+(my>=0?__("پاسخ تو ثبت شد؛ می‌توانی عوضش کنی","Your answer is saved; you can change it"):__("یکی را انتخاب کن","Pick one"))+'</em></div>';
+}
+/* reaction of the person on a post: chRx[id] = an emoji (older versions saved 1 = ❤️) */
+function chanRx(id){var v=(state.profile.chRx||{})[id];return v?(v===1?'❤️':String(v)):''}
+function chanRxHTML(rx){return (rx||'❤️')+(rx?'<b>'+fa(1)+'</b>':'')}
 function chanBubble(p){
-  var k=CHAN_K[p.k]||CHAN_K.info,rx=(state.profile.chRx||{})[p.id]?1:0,meta=[p.v].filter(Boolean).join(' · ');
+  var k=CHAN_K[p.k]||CHAN_K.info,rx=chanRx(p.id),meta=[p.v].filter(Boolean).join(' · ');
   return '<div class="tgr"><article class="tgb" id="cn-'+esc(p.id)+'">'+
     (p.img?'<img class="tgi" src="img/'+esc(p.img)+'" alt="" draggable="false" decoding="async">':'')+
     '<div class="tgx"><span class="tgk k-'+esc(p.k||'info')+'">'+k[0]+' '+__(k[1],k[2])+'</span>'+
-    '<h3 dir="auto">'+esc(chanTx(p,'t'))+'</h3><p dir="auto">'+esc(chanTx(p,'x'))+'</p>'+
-    '<div class="tgf"><button type="button" class="tgh'+(rx?' on':'')+'" data-cn="like" data-id="'+esc(p.id)+'" aria-pressed="'+(rx?'true':'false')+'" aria-label="'+__("پسندیدن","Like")+'">❤️'+(rx?'<b>'+fa(1)+'</b>':'')+'</button><span class="tgm">'+esc(meta)+'</span></div></div></article>'+
+    '<h3 dir="auto">'+esc(chanTx(p,'t'))+'</h3><p dir="auto">'+esc(chanTx(p,'x'))+'</p>'+chanPollHTML(p)+
+    '<div class="tgf"><button type="button" class="tgh'+(rx?' on':'')+'" data-cn="like" data-id="'+esc(p.id)+'" aria-pressed="'+(rx?'true':'false')+'" aria-label="'+__("پسندیدن","Like")+'">'+chanRxHTML(rx)+'</button><span class="tgm">'+esc(meta)+'</span></div></div></article>'+
     '<button type="button" class="tgs2" data-cn="share" data-id="'+esc(p.id)+'" aria-label="'+__("ارسال","Share")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7-7 7v-4c-6 0-9.5 1.6-12 5 1-6 4.5-10 12-11z" fill="currentColor"/></svg></button></div>';
 }
 function chanFeedHTML(un){
@@ -997,10 +1009,10 @@ function chanFeedHTML(un){
   return h;
 }
 function chanMuteTxt(){return state.profile.chMute?__("صدا را باز کن","Unmute"):__("بی‌صدا","Mute")}
-function chanOpenOv(fromRoute){
+function chanOpenOv(fromRoute,toId){
   if(chanEl)return;
   var L=chanPosts(),p=state.profile,un=chanUnread(),el=document.createElement('div');
-  el.id='chanOv';el.className='tg';el.setAttribute('role','dialog');el.setAttribute('aria-label',__("کانال Ario","Ario Channel"));
+  el.id='chanOv';el.className='tg'+(ui.tab==='kcm'?' tg-top':'');el.setAttribute('role','dialog');el.setAttribute('aria-label',__("کانال Ario","Ario Channel"));
   el.innerHTML=
     '<div class="tgs" id="tgScroll"><div class="tgpad">'+(L.length?chanFeedHTML(un):'<div class="tgd"><span>'+__("هنوز پستی نیست","No posts yet")+'</span></div>')+'</div></div>'+
     '<header class="tgh1"><button type="button" class="tgc" data-cn="back" aria-label="'+__("برگشت","Back")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'+
@@ -1012,6 +1024,12 @@ function chanOpenOv(fromRoute){
   sc.addEventListener('touchstart',function(){chanTouched=true},{passive:true});sc.addEventListener('wheel',function(){chanTouched=true},{passive:true});
   /* open at the bottom (newest); pictures change the height when they load, so keep it at the bottom until the person scrolls */
   var down=function(){if(!chanTouched)sc.scrollTop=sc.scrollHeight};
+  var tg=toId?el.querySelector('#cn-'+(window.CSS&&CSS.escape?CSS.escape(toId):toId)):null;
+  if(tg){
+    /* open on the forwarded post (pictures change the height while they load, so keep it in place until the person scrolls) */
+    down=function(){if(!chanTouched)sc.scrollTop=Math.max(0,tg.offsetTop-Math.max(70,(sc.clientHeight-tg.offsetHeight)/2))};
+    tg.classList.add('tgb-fl');setTimeout(function(){tg.classList.remove('tgb-fl')},1800);
+  }
   down();requestAnimationFrame(down);
   el.querySelectorAll('img.tgi').forEach(function(im){if(!im.complete)im.addEventListener('load',down)});
   if(L.length&&p.chSeen!==L[0].id){p.chSeen=L[0].id;persist()}
@@ -1029,21 +1047,107 @@ function chanBackA(){
   try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
   chanCloseOv();
 }
-function chanShare(id){
-  var p=chanPosts().filter(function(x){return x.id===id})[0];if(!p)return;
+/* outside the app: the phone's share sheet, or copy the text */
+function chanShareExt(p){
   var txt=chanTx(p,'t')+'\n\n'+chanTx(p,'x');
   if(navigator.share){navigator.share({title:chanTx(p,'t'),text:txt}).catch(function(){});return}
   try{navigator.clipboard.writeText(txt).then(function(){toast(__("متن پست کپی شد","Post text copied"),null,null,'ok')})}catch(e){}
 }
+/* v347: the post's picture as a file (it is uploaded with the forwarded message so it shows on every phone) */
+async function chanFwdBlob(p){
+  if(!p.img)return null;
+  try{var r=await fetch('img/'+p.img);if(!r.ok)return null;var b=await r.blob();return new Blob([b],{type:'image/webp'})}catch(e){return null}
+}
+/* a forwarded post = a text message with meta {fc:post id, fi:picture file, ft:title}; media = the uploaded picture (for phones that do not have the picture built in) */
+function mcSendChan(l,p,blob){
+  var id=mcNewId(),base=l.id+'/'+CNX.uid+'/'+id,up=[],t=chanTx(p,'t')||'';
+  if(blob)up.push({path:base+'.webp',blob:blob,field:'media'});
+  mcPost(l,{id:id,kind:'t',body:(t+'\n\n'+(chanTx(p,'x')||'')).slice(0,3000),meta:{fc:p.id,fi:p.img||'',ft:t.slice(0,200)}},up);
+  return true;
+}
+/* v347: the bubble of a forwarded channel post */
+function mcFwcHTML(m,me,c,tt){
+  var t=String(me.ft||''),b=String(m.body||''),loc=chanPosts().filter(function(x){return x.id===me.fc})[0],fi=/^[\w.-]+$/.test(me.fi||'')?me.fi:'';
+  if(t&&b.indexOf(t)===0)b=b.slice(t.length).replace(/^\s+/,'');
+  if(loc){t=chanTx(loc,'t')||t;b=chanTx(loc,'x')||b;fi=loc.img||fi}
+  return '<div class="kcx-m '+c+' mc-fwc"><button type="button" class="mc-fwh" data-fch="'+esc(me.fc)+'">'+SVFWD+'<span>'+__('هدایت‌شده از','Forwarded from')+'</span><b>'+__('کانال Ario','Ario Channel')+'</b></button>'+
+    ((fi||m.media)?'<img class="mc-fwi" data-fch="'+esc(me.fc)+'" data-fci="'+esc(m.id)+'"'+(fi?' src="img/'+esc(fi)+'"':'')+' alt="" draggable="false">':'')+
+    (t?'<h4 dir="auto">'+esc(t)+'</h4>':'')+'<p dir="auto">'+emjText(esc(b).replace(/\n/g,'<br>'))+'</p><time>'+tt+'</time></div>';
+}
+/* a tap on «هدایت‌شده از کانال Ario»: the channel opens on that post; Back returns to the same place in the chat (nothing is redrawn) */
+function mcOpenFwc(id){chanOpenOv(false,id)}
+/* v346: «هدایت» / the arrow beside a post: pick friends and groups from the friends chat and the post is sent to each as a message */
+function chanShare(id){
+  var p=chanPosts().filter(function(x){return x.id===id})[0];if(!p)return;
+  var fl=[],gl=[];
+  try{fl=grFriends();gl=mcGroups().map(function(g){return {id:g.id,name:g.name,link:g}})}catch(e){}
+  if(!fl.length&&!gl.length||document.querySelector('.gr-wrap')){if(!document.querySelector('.gr-wrap'))chanShareExt(p);return}
+  var by={};fl.concat(gl).forEach(function(x){by[x.id]=x.link});
+  var sec=function(t,l){return l.length?'<div class="sec-h"><b>'+t+'</b></div><div class="gr-list">'+grPickHTML(l,[])+'</div>':''};
+  var sw=grSheet(__('هدایت پست','Forward post'),'<p class="hint2">'+esc(chanTx(p,'t'))+'</p>'+sec(__('دوستان','Friends'),fl)+sec(__('گروه‌ها','Groups'),gl)+'<button type="button" class="tt-btn" data-gr="ext" style="margin-top:8px">'+__('ارسال بیرون از برنامه','Share outside the app')+'</button>',__('ارسال','Send'));
+  sw.w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    var k=b.dataset.gr;
+    if(k==='close'){sw.close();return}
+    if(k==='ext'){sw.close();chanShareExt(p);return}
+    if(k!=='ok')return;
+    var ids=grChecked(sw.w);
+    if(!ids.length){sw.msg(__('حداقل یک دوست یا گروه را انتخاب کن.','Pick at least one friend or group.'),1);return}
+    /* v347: the picture goes with the text, and the message says «هدایت‌شده از کانال Ario» (tap = the channel opens on that post) */
+    sw.close();
+    chanFwdBlob(p).then(function(bl){
+      var n=0;
+      ids.forEach(function(i){if(by[i]&&mcSendChan(by[i],p,bl))n++});
+      toast(__('پست برای ','Post sent to ')+fa(n)+' '+__('گفتگو فرستاده شد','chats'),null,null,'ok');
+    });
+  });
+}
+function chanSetRx(id,v){
+  var p=state.profile,rx=p.chRx=(p.chRx&&typeof p.chRx==='object')?p.chRx:{};
+  if(v)rx[id]=v;else delete rx[id];persist();
+  var b=chanEl&&chanEl.querySelector('.tgh[data-id="'+id+'"]');if(!b)return;
+  b.classList.toggle('on',!!v);b.setAttribute('aria-pressed',v?'true':'false');b.innerHTML=chanRxHTML(v);
+}
+/* v342: a tap on a post opens ONLY the reaction bar + «هدایت» (Forward); nothing can be selected, copied or deleted in the channel */
+var CHAN_RE=['❤️','👍','👎','🔥','🥰','👏','😁'],CHAN_RE2=['😂','😮','😢','🎉','🤔','💯','🙏','👌','😍','🤯','😎','👀','💪','✅','😴','🤝'];
+function chanMenuClose(){var o=chanEl&&chanEl.querySelector('.kcx-pop');if(!o)return;o.classList.add('out');setTimeout(function(){o.remove()},170)}
+function chanMenu(art){
+  chanMenuClose();
+  var id=art.id.slice(3),cur=chanRx(id),rc=art.getBoundingClientRect(),W=window.innerWidth,H=window.innerHeight;
+  var o=document.createElement('div');o.className='kcx-pop';
+  o.innerHTML='<div class="kcx-pb"></div><div class="kcx-pc"></div>'+
+    '<div class="kcx-pr glass"><div class="kcx-pre">'+CHAN_RE.map(function(e){return '<button type="button" data-re="'+e+'"'+(cur===e?' class="on"':'')+'>'+e+'</button>'}).join('')+'<button type="button" class="kcx-rx" data-rx aria-label="'+__("بیشتر","More")+'">'+icon('chev')+'</button></div><div class="kcx-prm">'+CHAN_RE2.map(function(e){return '<button type="button" data-re="'+e+'">'+e+'</button>'}).join('')+'</div></div>'+
+    '<div class="kcx-pm glass"><button type="button" data-pa="fwd">'+SVFWD+'<b>'+__("هدایت","Forward")+'</b></button></div>';
+  chanEl.appendChild(o);
+  var bb=o.querySelector('.kcx-pr'),mm=o.querySelector('.kcx-pm'),cl=o.querySelector('.kcx-pc'),cp=art.cloneNode(true);
+  cp.removeAttribute('id');cp.style.maxWidth='none';cp.style.width='100%';cp.style.boxShadow='none';cl.appendChild(cp);
+  var bh=bb.offsetHeight||52,mh=mm.offsetHeight,mw=mm.offsetWidth,bw=bb.offsetWidth;
+  var top0=76,bot0=H-12,avail=bot0-top0-bh-mh-20,ch=Math.min(rc.height,Math.max(120,avail));
+  var y=Math.max(top0,Math.min(rc.top-bh-8,bot0-(bh+8+ch+10+mh))),cy=y+bh+8,mid=rc.left+rc.width/2;
+  cl.style.cssText='left:'+rc.left+'px;top:'+cy+'px;width:'+rc.width+'px;max-height:'+ch+'px';
+  bb.style.cssText='left:'+Math.max(8,Math.min(W-bw-8,mid-bw/2))+'px;top:'+y+'px';
+  mm.style.cssText='left:'+Math.max(8,Math.min(W-mw-8,rc.left))+'px;top:'+(cy+ch+10)+'px;transform-origin:left top';
+  o.addEventListener('click',function(e){
+    var re=e.target.closest('[data-re]'),pa=e.target.closest('[data-pa]'),rx=e.target.closest('[data-rx]');
+    if(rx){bb.classList.toggle('open');return}
+    if(re){chanSetRx(id,cur===re.dataset.re?'':re.dataset.re);chanMenuClose();return}
+    if(pa){chanMenuClose();chanShare(id);return}
+    if(e.target.classList.contains('kcx-pb')||e.target===o)chanMenuClose();
+  });
+  requestAnimationFrame(function(){o.classList.add('in')});
+}
 function chanClick(e){
-  var b=e.target.closest('[data-cn]');if(!b)return;
+  var b=e.target.closest('[data-cn]');
+  if(!b){var ar=e.target.closest('.tgb');if(ar&&ar.id&&!e.target.closest('.kcx-pop'))chanMenu(ar);return}
   var a=b.dataset.cn,p=state.profile;
   if(a==='back')chanBackA();
   else if(a==='like'){
-    var rx=p.chRx=(p.chRx&&typeof p.chRx==='object')?p.chRx:{};
-    if(rx[b.dataset.id])delete rx[b.dataset.id];else rx[b.dataset.id]=1;
-    var on=!!rx[b.dataset.id];b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');
-    b.innerHTML='❤️'+(on?'<b>'+fa(1)+'</b>':'');persist();
+    chanSetRx(b.dataset.id,chanRx(b.dataset.id)?'':'❤️');
+  }
+  else if(a==='vote'){
+    var cp=p.chPoll=(p.chPoll&&typeof p.chPoll==='object')?p.chPoll:{},pid=b.dataset.id,pp=chanPosts().filter(function(x){return x.id===pid})[0],bx=b.closest('[data-pq]');
+    cp[pid]=+b.dataset.i;persist();hap('sel');
+    if(pp&&bx){var t=document.createElement('div');t.innerHTML=chanPollHTML(pp);bx.replaceWith(t.firstChild)}
   }
   else if(a==='share')chanShare(b.dataset.id);
   else if(a==='mute'){p.chMute=!p.chMute;b.textContent=chanMuteTxt();persist()}
@@ -1078,8 +1182,60 @@ function charBackA(){
 /* Konkooria sub-pages (rank estimate, textbooks, smart coach): opening pushes a history entry so the phone's Back button returns to Konkooria */
 function subPush(){try{history.pushState({sub:1},'',location.href)}catch(e){}}
 function subBack(){if(history.state&&history.state.sub){history.back();return}ui.tab='kk';render('enter');window.scrollTo(0,0)}
+/* v343: the phone's Back button. Only some pages push a history entry (see subPush / pushState), so on the others Android closed the whole app.
+   Now ONE place decides: (1) close the open pop-up / sheet / dialog / selection, (2) go back through the history entries the app made,
+   (3) go back to the previous section (BK.stack), (4) on «امروز» ask to press Back again to leave the app. */
+var BK={stack:[],last:'today',pop:0,exitAt:0};
+function bkTrack(){
+  var t=ui.tab;if(t===BK.last)return;
+  if(!BK.pop){BK.stack.push(BK.last);if(BK.stack.length>25)BK.stack.shift()}
+  BK.pop=0;BK.last=t;
+}
+function bkVis(el){return !!el&&!el.hidden&&el.getClientRects().length>0}
+function bkCloseOverlay(){
+  if(typeof vcBack==='function'&&vcBack())return true;   /* v344: the voice chat sheet */
+  var q=function(sel){return [].slice.call(document.querySelectorAll(sel))},a,i;
+  /* a long-press selection in a chat */
+  a=q('.kcx.kcx-sel [data-sel="x"]');if(a.length){a[0].click();return true}
+  /* the reaction bar + menu of a chat message / channel post */
+  a=q('.kcx-pop:not(.out) .kcx-pb');if(a.length){a[a.length-1].click();return true}
+  a=q('.cfm-wrap .dim');if(a.length){a[a.length-1].click();return true}
+  a=q('.sheet-wrap.sp-top .dim');if(a.length){a[a.length-1].click();return true}
+  if(bkVis(document.getElementById('tp'))){var d=document.getElementById('tpDim');if(d){d.click();return true}}
+  if(bkVis(document.getElementById('nc'))){var c=document.getElementById('ncClose');if(c){c.click();return true}}
+  a=q('.sheet-wrap:not(.sp-top)');
+  for(i=0;i<a.length;i++)if(bkVis(a[i])){var dm=a[i].querySelector('.dim')||document.getElementById('dim');if(dm){dm.click();return true}}
+  return false;
+}
+function bkExit(){
+  try{var A=capGet('App');if(A&&A.exitApp){A.exitApp();return}}catch(e){}
+  try{if(navigator.app&&navigator.app.exitApp){navigator.app.exitApp();return}}catch(e){}
+  try{history.go(-Math.max(1,history.length-1))}catch(e){}
+}
+function appBackPress(){
+  if(bkCloseOverlay())return;
+  /* entries made by the app itself (sub pages, characters, channel, viewers ...): the popstate handler below does the work */
+  if(history.state&&typeof history.state==='object'){history.back();return}
+  BK.pop=1;setTimeout(function(){BK.pop=0},0);
+  var go=function(){render('enter');window.scrollTo(0,0)};
+  if(ui.tab==='account'&&ui.accPage){ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;if(accDepth>0)accDepth--;go();return}
+  if(ui.tab==='kcm'&&ui.mcl){mcBackA();return}
+  if(ui.tab==='kcm'&&ui.kcsec){ui.kcsec='';go();return}
+  var to=null;
+  while(BK.stack.length&&!to){var x=BK.stack.pop();if(x&&x!==ui.tab)to=x}
+  if(!to&&ui.tab!=='today')to='today';
+  if(to){ui.tab=to;go();return}
+  var n=Date.now();
+  if(n-BK.exitAt<2200){bkExit();return}
+  BK.exitAt=n;toast(__("برای خروج یک بار دیگر برگشت را بزن","Press Back again to exit"),null,null,'info');
+}
+(function(){
+  /* the native Back button needs the Capacitor App plugin (in package.json); without it the old behaviour stays */
+  try{var A=capGet('App');if(A&&A.addListener)A.addListener('backButton',function(){try{appBackPress()}catch(e){bkExit()}})}catch(e){}
+})();
 var accPopSkip=false;
 window.addEventListener('popstate',function(){
+  BK.pop=1;setTimeout(function(){BK.pop=0},0);
   if(accPopSkip){accPopSkip=false;return}
   if(chanEl&&!/^#\/channel/.test(location.hash||'')){chanCloseOv();return}
   if(!chanEl&&/^#\/channel/.test(location.hash||'')){chanOpenOv(true);return}
@@ -1093,7 +1249,9 @@ window.addEventListener('popstate',function(){
   if(typeof kcpvClose==='function'&&kcpvClose())return;
   if(typeof tourEnd==='function'&&tourEnd())return;
   if(ui.tab==='account'&&ui.accPage){ui.accPage=ACC_SUB[ui.accPage]?'prefs':null;if(accDepth>0)accDepth--;render('enter');window.scrollTo(0,0);return}
+  if(ui.gpe){gpeKill();return}
   if(ui.mcp){mcpKill();return}
+  if(ui.gpg){gpgKill();return}
   if(ui.tab==='kcm'&&ui.mcl){mcBackA();return}
   if(ui.tab==='kcm'&&ui.kcsec){ui.kcsec='';render('enter');window.scrollTo(0,0);return}
   if(ui.tab==='kcm'){ui.tab='coach';render('enter');window.scrollTo(0,0);return}
@@ -1207,6 +1365,7 @@ function viewFail(e){
 }
 function render(mode){
   var h;
+  bkTrack();
   if(ui.tab!=='kcm'&&ui.mcl){mcStop();ui.mcl=''}
   try{h=ui.tab==='char'?viewChar():ui.tab==='today'?viewToday():ui.tab==='week'?viewWeek():ui.tab==='kk'?viewKK():ui.tab==='rk'?viewRK():ui.tab==='coach'?viewCoach():ui.tab==='kcm'?viewKcm():ui.tab==='tb'?viewTB():ui.tab==='stats'?viewStats():ui.tab==='account'?viewAccount():viewLists()}
   catch(e){h=viewFail(e)}
@@ -7436,13 +7595,15 @@ async function cnxLoad(){
   var fr=await cnxReq('/rest/v1/friend_links?select=id,code,owner_id,owner_name,friend_id,friend_name,created_at,linked_at,expires_at&order=created_at.desc&limit=100');
   CNX.friends=fr.ok&&Array.isArray(fr.j)?fr.j.map(function(f){return {id:f.id,kind:'friend',code:f.code,counselor_id:f.owner_id,counselor_name:f.owner_name,student_id:f.friend_id,student_name:f.friend_name,created_at:f.created_at,linked_at:f.linked_at,expires_at:f.expires_at}}):[];
   /* v296: groups (if the tables are not in Supabase yet the list is simply empty) */
-  var gq=await cnxReq('/rest/v1/chat_groups?select=id,name,owner_id,created_at,photo&order=created_at.desc&limit=100');
+  var gq=await cnxReq('/rest/v1/chat_groups?select=id,name,owner_id,created_at,photo,description&order=created_at.desc&limit=100');/* v345: the description column may not exist yet */
+  if(!gq.ok)gq=await cnxReq('/rest/v1/chat_groups?select=id,name,owner_id,created_at,photo&order=created_at.desc&limit=100');
   if(!gq.ok)gq=await cnxReq('/rest/v1/chat_groups?select=id,name,owner_id,created_at&order=created_at.desc&limit=100');/* v304: the photo column may not exist yet */
   var
-      gmq=gq.ok&&Array.isArray(gq.j)&&gq.j.length?await cnxReq('/rest/v1/chat_group_members?select=group_id,user_id,name,last_read,joined_at&order=joined_at.asc&limit=3000'):null;
+      gmq=gq.ok&&Array.isArray(gq.j)&&gq.j.length?await cnxReq('/rest/v1/chat_group_members?select=group_id,user_id,name,last_read,joined_at,is_admin&order=joined_at.asc&limit=3000'):null;
+  if(gmq&&!gmq.ok)gmq=await cnxReq('/rest/v1/chat_group_members?select=group_id,user_id,name,last_read,joined_at&order=joined_at.asc&limit=3000');/* v350: the is_admin column may not exist yet */
   CNX.groups=gq.ok&&Array.isArray(gq.j)?gq.j.map(function(g){
     var ms=gmq&&gmq.ok&&Array.isArray(gmq.j)?gmq.j.filter(function(x){return x.group_id===g.id}):[],me=ms.filter(function(x){return x.user_id===s.uid})[0];
-    return {id:g.id,kind:'group',name:g.name,photo:g.photo||'',counselor_id:g.owner_id,student_id:'g',created_at:g.created_at,members:ms,lr:(me&&me.last_read)||g.created_at};
+    return {id:g.id,kind:'group',name:g.name,photo:g.photo||'',description:g.description||'',counselor_id:g.owner_id,student_id:'g',created_at:g.created_at,members:ms,lr:(me&&me.last_read)||g.created_at};
   }):[];
   try{if(CNX.friends.some(function(f){return f.student_id})||CNX.groups.length)localStorage.setItem('ario.fr','1');else localStorage.removeItem('ario.fr')}catch(e){}
   cnxSetStudent(a.j.some(function(l){return l.student_id===s.uid}));
@@ -10633,7 +10794,7 @@ function mcPeer(l){if(mcGr(l))return l.name||__('گروه','Group');if(mcFr(l))r
 function mcIni(l){if(mcGr(l))return Array.from(String(l.name||'گ'))[0]||'گ';if(mcFr(l))return String(mcPeer(l)).trim().charAt(0)||'د';return mcCns(l)?(String(mcPeer(l)).trim().charAt(0)||'د'):'م'}
 /* ----- Telegram-style profile picture beside the other person's bubbles ----- */
 function mcHue(n){var h=0,i;n=String(n||'');for(i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))%360;return h}
-function mcMyAv(){var p=state.profile,n=String(displayName()||'');return {p:okPhoto(p.photo)&&!isVip(p.photo)?p.photo:'',h:isFinite(+p.hue)&&p.hue!=null?+p.hue:mcHue(n),n:Array.from(n)[0]||''}}
+function mcMyAv(){var p=state.profile,n=String(displayName()||'');return {p:okPhoto(p.photo)&&!isVip(p.photo)?p.photo:'',v:okPhoto(p.photo)&&canUse(p.photo)?p.photo:'',h:isFinite(+p.hue)&&p.hue!=null?+p.hue:mcHue(n),n:Array.from(n)[0]||''}}
 /* every message carries the sender's picture (a built-in photo id / colour and first letter), so no extra upload is needed */
 function mcPeerAv(l){
   var a=MC.msgs[l.id]||[],i,nm=String(mcPeer(l)),v;
@@ -10950,7 +11111,7 @@ document.addEventListener('input',function(e){if(e.target&&e.target.id==='frQ'){
    (a gradient whose colour shifts a little; grey once everything is seen). Tap = full-screen viewer (5 s per picture, tap the sides to move,
    hold to pause, swipe down to close). The first circle is mine: tap to see my story, the + badge adds a picture. A story lives 24 hours.
    Server side: public.friend_stories + private bucket "stories" (supabase/setup.sql, v319 block). */
-var STO={list:[],lt:0,busy:0,ok:1,bl:{},gs:[]};
+var STO={list:[],lt:0,busy:0,ok:1,bl:{},gs:[],up:[]};
 function stSess(){var s=sbSess();return s&&s.uid||CNX.uid||''}
 function stIsThumb(d){return typeof d==='string'&&d.length<24000&&/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]{20,}$/.test(d)}
 function stSeenMap(){try{return JSON.parse(localStorage.getItem('ario.stseen')||'{}')||{}}catch(e){return {}}}
@@ -10972,16 +11133,50 @@ function stGroups(){
     if(s.user_id!==me&&!names[s.user_id])return;
     (by[s.user_id]=by[s.user_id]||[]).push(s);
   });
+  /* v348: stories still uploading show up in my story at once (with a spinner) */
+  STO.up.forEach(function(u){
+    if(!stIsThumb(u.sp.thumb))return;
+    (by[me]=by[me]||[]).push({id:'up:'+u.id,user_id:me,media:'',thumb:u.sp.thumb,caption:u.sp.cap||'',created_at:u.at,expires_at:new Date(Date.now()+864e5).toISOString(),kind:u.sp.kind,dur:u.sp.dur||0,allow_reply:u.sp.allow!==false,_up:u});
+  });
   Object.keys(by).forEach(function(u){
     var it=by[u].sort(function(a,b){return mcMs(a.created_at)-mcMs(b.created_at)});
-    out.push({uid:u,mine:u===me,name:u===me?__('استوری من','My story'):names[u],items:it,unseen:it.some(function(s){return !stSeen(s.id)}),last:mcMs(it[it.length-1].created_at)});
+    out.push({uid:u,mine:u===me,name:u===me?__('استوری من','My story'):names[u],items:it,unseen:it.some(function(s){return !s._up&&!stSeen(s.id)||s._up&&s._up.st!=='ok'}),last:mcMs(it[it.length-1].created_at)});
   });
   out.sort(function(a,b){return a.mine?-1:b.mine?1:(b.unseen-a.unseen)||(b.last-a.last)});
   return out;
 }
+/* v348: posting a story no longer keeps the person on the "New story" sheet. The story goes into the queue (STO.up), shows in «استوری من» with a spinner,
+   uploads in the background and the spinner goes away when it is done. u = {id, sp, st:'up'|'fail'|'ok', err, at, url} */
+function stUpState(){var f=0,g=0;STO.up.forEach(function(u){if(u.st==='up')g=1;else if(u.st==='fail')f=1});return g?'up':f?'fail':''}
+function stQueue(sp){
+  var u={id:mcNewId(),sp:sp,st:'up',err:'',at:new Date().toISOString(),url:''};
+  try{u.url=URL.createObjectURL(sp.blob)}catch(e){}
+  STO.up.push(u);stPaint();stRun(u);return u;
+}
+async function stRun(u){
+  u.st='up';u.err='';stPaint();stvUpUpdate();
+  var em=await stUpload(u.sp);
+  if(em){u.st='fail';u.err=em;toast(em,null,null,'warn');stPaint();stvUpUpdate();return}
+  u.st='ok';hap('send');
+  /* the finished story takes the place of the uploading one without a gap, then the list is refreshed from the server */
+  if(u.sp._row)STO.list.push(Object.assign({created_at:u.at,expires_at:new Date(Date.now()+864e5).toISOString()},u.sp._row));
+  STO.up=STO.up.filter(function(x){return x!==u});
+  stPaint();stvUpUpdate();
+  toast(__('استوری گذاشته شد','Story posted'),null,null,'ok');
+  setTimeout(function(){try{if(u.url)URL.revokeObjectURL(u.url)}catch(e){}},60000);
+  try{await stRefresh(true)}catch(e){}
+}
+/* a failed story: try again or throw it away */
+function stFailAsk(){
+  var f=STO.up.filter(function(u){return u.st==='fail'})[0];if(!f)return false;
+  askConfirm({title:__('استوری ارسال نشد','Story not sent'),msg:f.err||__('دوباره امتحان کنم؟','Try again?'),btns:[
+    {t:__('ارسال دوباره','Try again'),fn:function(){stRun(f)}},
+    {t:__('حذف','Delete'),cls:'bad',fn:function(){STO.up=STO.up.filter(function(x){return x!==f});stPaint()}}]});
+  return true;
+}
 function stBarInner(){
   var gs=stGroups(),me=gs.filter(function(g){return g.mine})[0],h='',myav=mcAv0();
-  h+='<div class="st-it me"><button type="button" class="st-b" data-act="'+(me?'stOpen':'stAdd')+'" data-u="'+esc(stSess())+'" aria-label="'+__('استوری من','My story')+'"><span class="st-ring'+(me?(me.unseen?'':' seen'):' none')+'"><i class="st-pic" style="'+(me?'background-image:url('+me.items[0].thumb+')':'')+'">'+(me?'':myav)+'</i></span></button>'+
+  h+='<div class="st-it me"><button type="button" class="st-b" data-act="'+(me?'stOpen':'stAdd')+'" data-u="'+esc(stSess())+'" aria-label="'+__('استوری من','My story')+'"><span class="st-ring'+(me?(me.unseen?'':' seen'):' none')+(stUpState()?' '+stUpState():'')+'"><i class="st-pic" style="'+(me?'background-image:url('+me.items[0].thumb+')':'')+'">'+(me?'':myav)+(stUpState()?'<u class="st-spin">'+(stUpState()==='fail'?'!':'')+'</u>':'')+'</i></span></button>'+
      '<button type="button" class="st-plus" data-act="stAdd" aria-label="'+__('افزودن استوری','Add story')+'">'+icon('plus')+'</button><small>'+__('استوری من','My story')+'</small></div>';
   gs.filter(function(g){return !g.mine}).forEach(function(g){
     h+='<div class="st-it"><button type="button" class="st-b" data-act="stOpen" data-u="'+esc(g.uid)+'" aria-label="'+esc(g.name)+'"><span class="st-ring'+(g.unseen?'':' seen')+'"><i class="st-pic" style="background-image:url('+g.items[0].thumb+')"></i></span></button><small dir="auto">'+esc(g.name)+'</small></div>';
@@ -11111,7 +11306,7 @@ async function stUpload(sp){
   try{
     var t=await mcTok(),r=await fetch(SB.url+'/storage/v1/object/stories/'+mcPathEnc(path),{method:'POST',headers:{apikey:SB.key,Authorization:'Bearer '+t,'Content-Type':sp.ct,'x-upsert':'false'},body:sp.blob});
     if(!r.ok){var tx='';try{tx=await r.text()}catch(x){}throw {ok:false,st:r.status===400&&/bucket/i.test(tx)?404:r.status,j:null}}
-    var row={id:id,user_id:uid,media:path,thumb:sp.thumb,caption:sp.cap||'',kind:sp.kind,dur:sp.dur||0,allow_reply:sp.allow!==false};
+    var row={id:id,user_id:uid,media:path,thumb:sp.thumb,caption:sp.cap||'',kind:sp.kind,dur:sp.dur||0,allow_reply:sp.allow!==false};sp._row=row;
     var q=await cnxReq('/rest/v1/friend_stories','POST',row,{Prefer:'return=minimal'});
     if(!q.ok&&sp.kind==='p'&&q.st===400)q=await cnxReq('/rest/v1/friend_stories','POST',{id:id,user_id:uid,media:path,thumb:sp.thumb,caption:sp.cap||''},{Prefer:'return=minimal'});   /* v320 columns not there yet */
     if(!q.ok)throw q;
@@ -11324,7 +11519,7 @@ function stVoiceThumb(col){
 }
 async function stcSend(){
   var el=STC.el;if(!el||STC.busy)return;
-  var sp,em;
+  var sp;
   STC.busy=1;el.classList.add('busy');
   try{
     if(STC.m==='text'){
@@ -11336,11 +11531,9 @@ async function stcSend(){
       sp={kind:'a',blob:v.blob,thumb:stVoiceThumb(STC_COL[STC.ci]),ct:v.ct,ext:v.ext,dur:v.dur};
     }
     sp.allow=stRepGet();
-    em=await stUpload(sp);
-    if(em){toast(em,null,null,'warn');return}
-    hap('send');toast(__('استوری گذاشته شد','Story posted'),null,null,'ok');
+    stQueue(sp);   /* v348: uploads in the background, the creator closes at once */
+    hap('send');
     stcClose();
-    await stRefresh(true);
   }finally{STC.busy=0;if(STC.el)STC.el.classList.remove('busy')}
 }
 /* ----- voice recording ----- */
@@ -11469,22 +11662,22 @@ function stCompose(pk,n){
     if(k==='addtx'){var ti=sw.w.querySelector('#stTx'),t=(ti.value||'').trim();if(!t)return;items.push({t:'txt',v:t,x:.5,y:.45});ti.value='';paint();return}
     if(k==='emo'){items.push({t:'emo',v:b.dataset.e,x:.3+Math.random()*.4,y:.3+Math.random()*.4});paint();return}
     if(k!=='ok'||busy)return;
-    busy=1;b.disabled=true;sw.msg(__('در حال ارسال…','Posting…'));
-    var cap=(sw.w.querySelector('#stCap').value||'').trim().slice(0,200),allow=sw.w.querySelector('#stRep').checked,sp,em;
+    busy=1;b.disabled=true;sw.msg(__('در حال آماده‌سازی…','Preparing…'));
+    var cap=(sw.w.querySelector('#stCap').value||'').trim().slice(0,200),allow=sw.w.querySelector('#stRep').checked,sp;
     if(vid){var ct=(pk.blob.type&&/^video\//.test(pk.blob.type))?pk.blob.type:'video/mp4';sp={kind:'v',blob:pk.blob,thumb:pk.thumb,ct:ct,ext:/webm/.test(ct)?'webm':/quicktime/.test(ct)?'mov':'mp4',dur:pk.dur}}
     else{var bk=await stBake(pk,items);if(!bk){busy=0;b.disabled=false;sw.msg(cnxNetErr({off:true}),1);return}sp={kind:'p',blob:bk.blob,thumb:bk.thumb,ct:'image/jpeg',ext:'jpg',dur:0}}
     sp.cap=cap;sp.allow=allow;
-    em=await stUpload(sp);
-    if(em){busy=0;b.disabled=false;sw.msg(em,1);return}
+    /* v348: the sheet closes at once; the story uploads in the background and turns in «استوری من» until it is posted */
+    stQueue(sp);
     if(vid)try{URL.revokeObjectURL(pk.url)}catch(x){}
-    sw.close();hap('send');toast(__('استوری گذاشته شد','Story posted'),null,null,'ok');
-    await stRefresh(true);
+    sw.close();hap('send');
   });
 }
 /* ----- the full-screen viewer ----- */
 var STV={on:false,el:null,gs:[],gi:0,i:0,t0:0,dur:5000,raf:0,hold:0,ht:0,pa:0,ready:0,sx:0,sy:0,sd:0,tok:0,fp:0};
 actions.stOpen=function(d){
   if(STV.on)return;
+  if(d.u===stSess()&&stUpState()==='fail'&&!STO.up.some(function(u){return u.st==='up'})){stFailAsk();return}
   var gs=stGroups(),gi=gs.findIndex(function(g){return g.uid===d.u});
   if(gi<0)return;
   var it=gs[gi].items,i=0;
@@ -11550,8 +11743,8 @@ function stvCur(){var g=STV.gs[STV.gi];return g&&g.items[STV.i]}
 function stvVid(){return STV.el&&STV.el.querySelector('.stv-vd')}
 function stvShow(){
   var el=STV.el,g=STV.gs[STV.gi],s=stvCur();if(!el||!g||!s)return;
-  cancelAnimationFrame(STV.raf);clearTimeout(STV.tt);STV.tt=0;STV.ready=0;STV.pa=0;STV.hold=0;STV.pn=0;
-  var tok=++STV.tok,vd=stvVid(),isV=s.kind==='v';
+  cancelAnimationFrame(STV.raf);clearTimeout(STV.tt);STV.tt=0;STV.ready=0;STV.pa=0;STV.hold=0;STV.pn=0;STV.waitUp=0;
+  var tok=++STV.tok,vd=stvVid(),isV=s.kind==='v',pend=s._up;
   try{vd.pause();vd.removeAttribute('src');vd.load()}catch(e){}
   var ad=el.querySelector('.stv-ad'),au=el.querySelector('.stv-au'),isA=s.kind==='a';
   try{ad.pause();ad.removeAttribute('src');ad.load()}catch(e){}
@@ -11560,18 +11753,24 @@ function stvShow(){
   var canRp=!g.mine&&s.allow_reply!==false&&grFriends().some(function(f){return f.id===g.uid});
   el.querySelector('.stv-bt').hidden=!canRp;el.classList.toggle('liked',stLiked(s.id));
   el.classList.toggle('has-ft',canRp||g.mine);
-  var vw=el.querySelector('.stv-vw');vw.hidden=!g.mine;if(g.mine){vw.textContent='👁 …';stvViewCount(s,tok)}
+  var vw=el.querySelector('.stv-vw');vw.hidden=!g.mine||!!pend;if(g.mine&&!pend){vw.textContent='👁 …';stvViewCount(s,tok)}
   el.querySelector('.stv-bars').innerHTML=g.items.map(function(_,k){return '<i><b style="width:'+(k<STV.i?100:0)+'%"></b></i>'}).join('');
   el.querySelector('.stv-av').style.backgroundImage='url('+g.items[0].thumb+')';
   el.querySelector('.stv-nm b').textContent=g.name;
-  el.querySelector('.stv-nm small').textContent=frWhen(s.created_at);
+  el.querySelector('.stv-nm small').textContent=pend?(pend.st==='fail'?__('ارسال نشد','Not sent'):pend.st==='up'?__('در حال ارسال…','Sending…'):frWhen(s.created_at)):frWhen(s.created_at);
   var cap=el.querySelector('.stv-cap');cap.textContent=s.caption||'';cap.hidden=!s.caption;
   var im=el.querySelector('.stv-im'),bg=el.querySelector('.stv-bg'),ld=el.querySelector('.stv-ld');
   im.style.backgroundImage='url('+s.thumb+')';im.style.backgroundSize='contain';im.classList.add('lo');bg.style.backgroundImage='url('+s.thumb+')';ld.classList.add('on');
   if(!g.mine&&!stSeen(s.id))cnxReq('/rest/v1/rpc/story_view','POST',{p_story:s.id});
-  stSeenSet(s.id);
-  function go(ms){if(tok!==STV.tok)return;ld.classList.remove('on');im.classList.remove('lo');STV.ready=1;STV.t0=performance.now();STV.dur=ms||5000;stvTick()}
-  stBlob(s.media).then(function(u){
+  if(!pend)stSeenSet(s.id);
+  function go(ms){
+    if(tok!==STV.tok)return;
+    im.classList.remove('lo');
+    /* still uploading: the story is shown, the spinner keeps turning on it and the timer starts when the upload is done */
+    if(pend&&pend.st!=='ok'){ld.classList.toggle('on',pend.st==='up');STV.waitUp=ms||5000;return}
+    ld.classList.remove('on');STV.ready=1;STV.t0=performance.now();STV.dur=ms||5000;stvTick()
+  }
+  (pend?Promise.resolve(pend.url||''):stBlob(s.media)).then(function(u){
     if(tok!==STV.tok)return;
     if(isA){
       im.style.backgroundImage='none';au.hidden=false;ad.src=u;
@@ -11588,6 +11787,16 @@ function stvShow(){
     }
   },function(){if(tok!==STV.tok)return;go(5000)});
   var nx=g.items[STV.i+1];if(nx&&nx.kind!=='v')stBlob(nx.media).catch(function(){});
+}
+/* the uploading story that is on the screen: spinner while it uploads, the timer starts when it is done */
+function stvUpUpdate(){
+  var el=STV.on&&STV.el,s=el&&stvCur();if(!el||!s||!s._up)return;
+  var u=s._up,ld=el.querySelector('.stv-ld'),sm=el.querySelector('.stv-nm small');
+  if(u.st==='up'){ld.classList.add('on');sm.textContent=__('در حال ارسال…','Sending…');return}
+  ld.classList.remove('on');
+  if(u.st==='fail'){sm.textContent=__('ارسال نشد','Not sent');return}
+  sm.textContent=__('همین الان','Just now');
+  if(!STV.ready&&STV.waitUp){STV.ready=1;STV.t0=performance.now();STV.dur=STV.waitUp;STV.waitUp=0;stvTick()}
 }
 async function stvViewCount(s,tok){
   var r=await cnxReq('/rest/v1/friend_story_views?story_id=eq.'+encodeURIComponent(s.id)+'&select=viewer_id,at&order=at.desc&limit=500');
@@ -11694,6 +11903,13 @@ function stvPrev(){
 }
 function stvDelete(){
   var s=stvCur(),g=STV.gs[STV.gi];if(!s||!g||!g.mine)return;
+  if(s._up){   /* not on the server yet */
+    if(s._up.st==='up'){toast(__('استوری در حال ارسال است؛ کمی صبر کن.','The story is still uploading; wait a moment.'),null,null,'info');return}
+    STO.up=STO.up.filter(function(x){return x!==s._up});g.items=g.items.filter(function(x){return x!==s});stPaint();
+    if(!g.items.length){stvClose();return}
+    if(STV.i>=g.items.length)STV.i=g.items.length-1;
+    stvShow();return;
+  }
   stvPause(1);
   askConfirm({title:__('حذف استوری','Delete story'),msg:__('این استوری برای همه حذف می‌شود.','This story will be removed for everyone.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:async function(){
     var t=await mcTok().catch(function(){return ''});
@@ -11911,7 +12127,7 @@ function grPickHTML(list,on){
 }
 function grChecked(root){return [].map.call(root.querySelectorAll('.gr-list input:checked'),function(i){return i.value})}
 function grErrText(j){
-  var M={name:__('نام گروه را بنویس.','Write a group name.'),members:__('حداقل یک دوست انتخاب کن.','Pick at least one friend.'),notfriend:__('فقط دوستان اتصال‌شده را می‌شود اضافه کرد.','Only linked friends can be added.'),full:__('گروه پر است (حداکثر ۵۰ نفر).','The group is full (50 people at most).'),owner:__('فقط مدیر گروه می‌تواند این کار را بکند.','Only the group owner can do this.'),self:__('خودت را نمی‌شود حذف کرد؛ از «ترک گروه» استفاده کن.','You cannot remove yourself; use “Leave group”.')};
+  var M={name:__('نام گروه را بنویس.','Write a group name.'),members:__('حداقل یک دوست انتخاب کن.','Pick at least one friend.'),notfriend:__('فقط دوستان اتصال‌شده را می‌شود اضافه کرد.','Only linked friends can be added.'),full:__('گروه پر است (حداکثر ۵۰ نفر).','The group is full (50 people at most).'),owner:__('فقط مدیر یا ادمین‌های گروه می‌توانند این کار را بکنند.','Only the group owner or an admin can do this.'),admin:__('ادمین نمی‌تواند ادمین دیگر را حذف کند.','An admin cannot remove another admin.'),member:__('این شخص عضو گروه نیست.','This person is not in the group.'),self:__('خودت را نمی‌شود حذف کرد؛ از «ترک گروه» استفاده کن.','You cannot remove yourself; use “Leave group”.')};
   return M[j&&j.err]||__('انجام نشد. دوباره امتحان کن','That did not work. Try again');
 }
 function grNoTable(r){return r&&r.st===404?__('بخش گروه هنوز در Supabase ساخته نشده (بخش v296 فایل supabase/setup.sql را اجرا کن).','Groups are not in Supabase yet (run the v296 block of supabase/setup.sql).'):''}
@@ -11992,6 +12208,7 @@ function grpInfo(l){
     }).join('')+'</div>';
     h+='<div class="mc-gact">'+(own?'<button type="button" class="tt-btn pri" data-gr="add">'+icon('plus')+__('افزودن عضو','Add member')+'</button>':'')+'<button type="button" class="tt-btn" data-gr="mute">'+(mcMuted(id)?__('صدا را باز کن','Unmute'):__('بی‌صدا','Mute'))+'</button><button type="button" class="tt-btn bad" data-gr="leave">'+__('ترک گروه','Leave group')+'</button></div>';
     box.innerHTML=h;
+    if(window.gpgRefresh)window.gpgRefresh();
   }
   paint();
   async function after(r,okMsg){
@@ -12067,6 +12284,325 @@ function grpInfo(l){
   });
 }
 
+/* ===== v345: Group info page — a full dark page like Telegram's:
+   round photo, name, member count, Message / Mute / Leave, the description card, a tab bar (Members · Media · Voice · Files · Links)
+   and the members list in one rounded card (me first, «مدیر» badge in purple). It opens when the group name at the top of the chat is tapped.
+   Owner tools (rename, photo, add / remove people) stay in the old sheet, reached from the ⋮ menu («ویرایش گروه»). ===== */
+var GPG_I={
+  back:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M20 12H4.5M10.5 5.5 4 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  dots:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="19" r="2" fill="currentColor"/></svg>',
+  msg:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.8c-5.5 0-9.6 3.600-9.600 8.300 0 2.400 1.100 4.500 2.900 6-.2 1.400-.9 2.700-2 3.600a.5.5 0 0 0 .4.9c2.100-.1 3.900-.8 5.200-1.900 1 .3 2 .4 3.100.4 5.500 0 9.600-3.600 9.600-8.300S17.500 2.800 12 2.800z"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.500a6.500 6.500 0 0 0-6.500 6.500v3.700L3.800 16a1 1 0 0 0 .9 1.500h14.600a1 1 0 0 0 .9-1.500l-1.700-3.300V9A6.500 6.500 0 0 0 12 2.500zM9.500 19.200a2.500 2.500 0 0 0 5 0z"/></svg>',
+  bellOff:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.500a6.500 6.500 0 0 0-6.500 6.500v3.700L3.800 16a1 1 0 0 0 .9 1.500h14.600a1 1 0 0 0 .9-1.500l-1.700-3.300V9A6.500 6.500 0 0 0 12 2.500zM9.500 19.200a2.500 2.500 0 0 0 5 0z" opacity=".55"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="2.200" stroke-linecap="round" fill="none"/></svg>',
+  leave:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M10.500 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h3.500M15 8l4 4-4 4M19 12H9.500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+/* ===== v350: group admins + Telegram-style «Edit group» page.
+   The owner («مدیر») and the admins the owner picks can change the name / photo / description and add members; admins can remove ordinary members;
+   only the owner makes or removes admins (supabase/setup.sql, v350 block). ===== */
+GPG_I.pen='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 20h4L19 9a2.100 2.100 0 0 0-3-3L5 17zM14.500 7.500l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+GPG_I.check='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5 12.500l4.500 4.500L19 7.500" fill="none" stroke="currentColor" stroke-width="2.300" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+GPG_I.cam='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 8.500A2.500 2.500 0 0 1 6.500 6h1.600l1.200-1.800h4.400L15.900 6h1.600A2.500 2.500 0 0 1 20 8.500V16a2.500 2.500 0 0 1-2.500 2.500h-11A2.500 2.500 0 0 1 4 16z" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.200" fill="none" stroke="currentColor" stroke-width="1.800"/></svg>';
+GPG_I.shield='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3l7 2.800v5.600c0 4.300-2.900 7.800-7 9.600-4.100-1.800-7-5.300-7-9.600V5.800z" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linejoin="round"/><path d="M12 8.800l1.100 2.300 2.500.3-1.800 1.700.5 2.500-2.300-1.200-2.300 1.200.5-2.500-1.800-1.700 2.500-.3z" fill="currentColor"/></svg>';
+GPG_I.users='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="9" cy="8.500" r="3.200" fill="none" stroke="currentColor" stroke-width="1.800"/><path d="M3 19c.4-3.200 2.900-5 6-5s5.600 1.800 6 5" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linecap="round"/><path d="M15.500 5.600a3 3 0 0 1 0 5.800M17.500 14.300c1.800.6 3.100 2 3.500 4.700" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linecap="round"/></svg>';
+GPG_I.addu='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="10" cy="8.500" r="3.400" fill="none" stroke="currentColor" stroke-width="1.800"/><path d="M3.500 19.500c.5-3.400 3.200-5.300 6.500-5.300 1.300 0 2.500.3 3.500.9" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linecap="round"/><path d="M18.500 13v6M15.500 16h6" fill="none" stroke="currentColor" stroke-width="1.800" stroke-linecap="round"/></svg>';
+function grIsAdm(g,uid){var m=grMember(g,uid);return !!(m&&m.is_admin)}
+/* can I change this group's name / photo / description and add people? (owner or an admin) */
+function grCan(g){return !!g&&(mcCns(g)||grIsAdm(g,CNX.uid))}
+function grBadge(g,m){return m.user_id===g.counselor_id?'<em>'+__('مدیر','Owner')+'</em>':m.is_admin?'<em class="adm">'+__('ادمین','Admin')+'</em>':''}
+function grAfter(done){return cnxLoad().then(function(){mcCardPaint();if(ui.tab==='kcm')render('swap');if(window.gpgRefresh)window.gpgRefresh();if(window.gpeRefresh)window.gpeRefresh();if(done)done()})}
+
+/* add members (owner / admins) */
+function grAddSheet(g,done){
+  var id=g.id;
+  var have=(g.members||[]).map(function(x){return x.user_id}),cand=grFriends().filter(function(f){return have.indexOf(f.id)<0});
+  if(!cand.length){toast(__('همه‌ی دوستانت در گروه هستند.','All your friends are already in the group.'),null,null,'info');return}
+  if(document.querySelector('.gr-wrap'))return;
+  var s2=grSheet(__('افزودن عضو','Add member'),'<div class="gr-list">'+grPickHTML(cand,[])+'</div>',__('افزودن','Add'));
+  s2.w.addEventListener('click',async function(ev){
+    var c=ev.target.closest('[data-gr]');if(!c)return;
+    if(c.dataset.gr==='close'){s2.close();return}
+    if(c.dataset.gr!=='ok')return;
+    var ids=grChecked(s2.w);if(!ids.length){s2.msg(grErrText({err:'members'}),1);return}
+    c.disabled=true;var bad=null,i,r;
+    for(i=0;i<ids.length;i++){r=await cnxReq('/rest/v1/rpc/group_add','POST',{p_group:id,p_user:ids[i]});if(!r.ok||!(r.j&&r.j.ok)){bad=r;break}}
+    c.disabled=false;
+    if(bad){s2.msg(grNoTable(bad)||(bad.ok?grErrText(bad.j):cnxNetErr(bad)),1);return}
+    s2.close();await grAfter(done);
+  });
+}
+
+/* group photo: gallery, one of the built-in avatars, or remove */
+function grPhotoSheet(g,done){
+  var id=g.id;
+  if(document.querySelector('.gr-pick'))return;
+  var s3=grSheet(__('عکس گروه','Group photo'),'<div class="gr-ph2"><button type="button" class="tt-btn" data-gr="gal">'+icon('camera')+__('انتخاب از گالری','Choose from gallery')+'</button>'+(grPhoto(g)?'<button type="button" class="tt-btn bad" data-gr="nophoto">'+__('حذف عکس','Remove photo')+'</button>':'')+'</div><div class="avgrid" id="grAvs">'+Object.keys(AVN).filter(function(a){return !isVip(a)}).map(function(a){return '<button type="button" class="avo" data-av="'+a+'" aria-pressed="'+(grPhoto(g)===a)+'" aria-label="'+AVN[a]+'"><span class="aimg '+a+'"></span></button>'}).join('')+'</div>','');
+  s3.w.classList.add('gr-pick');
+  async function setP(ph){
+    var r=await cnxReq('/rest/v1/rpc/group_set_photo','POST',{p_group:id,p_photo:ph});
+    if(!r.ok&&r.st===404){s3.msg(__('عکس گروه هنوز در Supabase ساخته نشده (بخش v304 فایل supabase/setup.sql را اجرا کن).','Group photos are not in Supabase yet (run the v304 block of supabase/setup.sql).'),1);return false}
+    if(!r.ok){s3.msg(cnxNetErr(r),1);return false}
+    if(!(r.j&&r.j.ok)){s3.msg(grErrText(r.j||{}),1);return false}
+    await grAfter(done);return true;
+  }
+  s3.w.addEventListener('click',async function(ev){
+    var c=ev.target.closest('[data-gr]');
+    if(c){
+      var k=c.dataset.gr;
+      if(k==='close'){s3.close();return}
+      if(k==='nophoto'){if(await setP(''))s3.close();return}
+      if(k==='gal'){var gd=await grPickImage();if(!gd){s3.msg(__('عکس انتخاب نشد.','No photo was picked.'),1);return}s3.msg(__('در حال ذخیره…','Saving…'));if(await setP(gd))s3.close();return}
+    }
+    var a=ev.target.closest('[data-av]');if(!a)return;
+    a.disabled=true;var ok=await setP(a.dataset.av);a.disabled=false;
+    if(ok)s3.close();
+  });
+}
+
+/* the people in the group; the owner removes anyone, an admin removes ordinary members */
+function grMemSheet(g0,done){
+  var id=g0.id;
+  if(document.querySelector('.gr-wrap'))return;
+  var sw=grSheet(__('اعضا','Members'),'<div class="gr-mems"></div>','');
+  var box=sw.w.querySelector('.gr-mems');
+  function canRm(g,m){return grCan(g)&&m.user_id!==CNX.uid&&m.user_id!==g.counselor_id&&(mcCns(g)||!m.is_admin)}
+  function paint(){
+    var g=mcLink(id);if(!g){sw.close();return}
+    box.innerHTML=(g.members||[]).map(function(m){
+      var me=m.user_id===CNX.uid,nm=m.name||__('عضو','Member');
+      return '<div class="gr-mr">'+grMemAvHTML(g,m)+'<span dir="auto">'+esc(nm)+(me?' ('+__('تو','you')+')':'')+'</span>'+grBadge(g,m)+(canRm(g,m)?'<button type="button" class="mc-x" data-gr="rm" data-u="'+esc(m.user_id)+'" aria-label="'+__('حذف از گروه','Remove')+'">'+icon('close')+'</button>':'')+'</div>';
+    }).join('');
+  }
+  paint();
+  sw.w.addEventListener('click',function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    if(b.dataset.gr==='close'){sw.close();return}
+    if(b.dataset.gr!=='rm')return;
+    var g=mcLink(id),mm=grMember(g,b.dataset.u);
+    askConfirm({title:__('حذف از گروه؟','Remove from the group?'),msg:(mm&&mm.name||'')+' '+__('دیگر پیام‌های گروه را نمی‌بیند.','will no longer see the group’s messages.'),btns:[{t:__('حذف','Remove'),cls:'bad',fn:async function(){
+      var r=await cnxReq('/rest/v1/rpc/group_remove','POST',{p_group:id,p_user:b.dataset.u});
+      if(!r.ok||!(r.j&&r.j.ok)){sw.msg(grNoTable(r)||(r.ok?grErrText(r.j):cnxNetErr(r)),1);return}
+      await grAfter(done);paint();
+    }}]});
+  });
+}
+
+/* admins: everybody can see the list; only the owner picks them */
+function grAdmSheet(g0,done){
+  var id=g0.id;
+  if(document.querySelector('.gr-wrap'))return;
+  var sw=grSheet(__('ادمین‌ها','Administrators'),'<p class="hint2">'+__('ادمین‌ها می‌توانند نام، عکس و توضیحات گروه را عوض کنند و عضو اضافه کنند. فقط مدیر گروه ادمین انتخاب می‌کند.','Admins can change the group’s name, photo and description and add members. Only the owner picks admins.')+'</p><div class="gr-mems"></div>','');
+  var box=sw.w.querySelector('.gr-mems');
+  function paint(){
+    var g=mcLink(id);if(!g){sw.close();return}
+    var own=mcCns(g);
+    box.innerHTML=(g.members||[]).filter(function(m){return own||m.user_id===g.counselor_id||m.is_admin}).map(function(m){
+      var me=m.user_id===CNX.uid,nm=m.name||__('عضو','Member'),isO=m.user_id===g.counselor_id;
+      return '<div class="gr-mr">'+grMemAvHTML(g,m)+'<span dir="auto">'+esc(nm)+(me?' ('+__('تو','you')+')':'')+'</span>'+grBadge(g,m)+(own&&!isO?'<button type="button" class="tt-btn'+(m.is_admin?' bad':'')+'" data-gr="adm" data-u="'+esc(m.user_id)+'" data-on="'+(m.is_admin?'0':'1')+'">'+(m.is_admin?__('حذف از ادمین','Remove admin'):__('ادمین کن','Make admin'))+'</button>':'')+'</div>';
+    }).join('');
+  }
+  paint();
+  sw.w.addEventListener('click',async function(e){
+    var b=e.target.closest('[data-gr]');if(!b)return;
+    if(b.dataset.gr==='close'){sw.close();return}
+    if(b.dataset.gr!=='adm')return;
+    b.disabled=true;
+    var r=await cnxReq('/rest/v1/rpc/group_set_admin','POST',{p_group:id,p_user:b.dataset.u,p_on:b.dataset.on==='1'});
+    if(!r.ok&&r.st===404){b.disabled=false;sw.msg(__('ادمین گروه هنوز در Supabase ساخته نشده (بخش v350 فایل supabase/setup.sql را اجرا کن).','Group admins are not in Supabase yet (run the v350 block of supabase/setup.sql).'),1);return}
+    if(!r.ok||!(r.j&&r.j.ok)){b.disabled=false;sw.msg(r.ok?grErrText(r.j):cnxNetErr(r),1);return}
+    await grAfter(done);paint();sw.msg('');
+  });
+}
+
+/* Telegram-style «Edit» page: photo + name + description, then Administrators / Members / Add member. The ✓ saves the name and description. */
+function gpeKill(){var o=document.querySelector('.gpe');if(o)o.remove();ui.gpe=false;window.gpeRefresh=null}
+function grEditPage(l){
+  if(document.querySelector('.gpe'))return;
+  var id=l.id,g0=mcLink(id);
+  if(!g0||!grCan(g0))return;
+  var o=document.createElement('div');o.className='gpe';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-label',__('ویرایش گروه','Edit group'));
+  o.innerHTML='<div class="gpe-top"><button type="button" data-e="back" aria-label="'+__('برگشت','Back')+'">'+GPG_I.back+'</button><h2>'+__('ویرایش','Edit')+'</h2><button type="button" class="gpe-ok" data-e="ok" aria-label="'+__('ذخیره','Save')+'">'+GPG_I.check+'</button></div><div class="gpe-body"></div>';
+  document.body.appendChild(o);
+  var BD=o.querySelector('.gpe-body'),draft={n:null,d:null},busy=0;
+  function G(){return mcLink(id)}
+  function keep(){var a=BD.querySelector('#gpeNm'),b=BD.querySelector('#gpeDs');if(a)draft.n=a.value;if(b)draft.d=b.value}
+  function paint(){
+    var g=G();if(!g||!grCan(g)){gpeKill();return}
+    keep();
+    var own=mcCns(g),nmV=draft.n!=null?draft.n:g.name,dV=draft.d!=null?draft.d:(g.description||''),ms=g.members||[];
+    var adm=ms.filter(function(m){return m.is_admin&&m.user_id!==g.counselor_id}).length+1;
+    BD.innerHTML='<div class="gpe-cd"><div class="gpe-nm"><button type="button" class="gpe-pic" data-e="photo" aria-label="'+__('عکس گروه','Group photo')+'"><i class="gr-av'+(grPhoto(g)?' has-p':'')+'" style="--h:'+grHue(g.name)+'">'+grAvIn(g)+'</i></button><input class="gpe-in" id="gpeNm" maxlength="60" dir="auto" autocomplete="off" placeholder="'+__('نام گروه','Group name')+'" value="'+esc(nmV)+'"></div>'+
+      '<button type="button" class="gpe-row blue" data-e="photo">'+GPG_I.cam+'<span>'+__('انتخاب عکس','Set photo')+'</span></button>'+
+      '<textarea class="gpe-ds" id="gpeDs" rows="2" maxlength="255" dir="auto" placeholder="'+__('توضیحات (اختیاری)','Description (optional)')+'">'+esc(dV)+'</textarea></div>'+
+      '<div class="gpe-cd"><button type="button" class="gpe-row" data-e="adm">'+GPG_I.shield+'<span>'+__('ادمین‌ها','Administrators')+'</span><em>'+fa(adm)+'</em></button><button type="button" class="gpe-row" data-e="mem">'+GPG_I.users+'<span>'+__('اعضا','Members')+'</span><em>'+fa(ms.length)+'</em></button></div>'+
+      '<p class="gpe-hint">'+(own?__('ادمین‌ها را فقط تو، مدیر گروه، انتخاب می‌کنی.','Only you, the owner, can pick the admins.'):__('فقط مدیر گروه ادمین انتخاب می‌کند.','Only the owner picks the admins.'))+'</p>'+
+      '<div class="gpe-cd"><button type="button" class="gpe-row blue" data-e="add">'+GPG_I.addu+'<span>'+__('افزودن عضو','Add member')+'</span></button></div>';
+  }
+  window.gpeRefresh=paint;
+  paint();
+  subPush();ui.gpe=true;
+  function closeThen(){if(history.state&&history.state.sub)history.back();else gpeKill()}
+  async function save(){
+    var g=G();if(!g||busy)return;
+    keep();
+    var nm=String(draft.n!=null?draft.n:g.name).trim(),ds=String(draft.d!=null?draft.d:(g.description||'')).trim();
+    if(!nm){toast(grErrText({err:'name'}),null,null,'warn');return}
+    busy=1;var ok=true,r;
+    if(nm!==g.name){
+      r=await cnxReq('/rest/v1/rpc/group_rename','POST',{p_group:id,p_name:nm});
+      if(!r.ok||!(r.j&&r.j.ok)){ok=false;toast(grNoTable(r)||(r.ok?grErrText(r.j):cnxNetErr(r)),null,null,'warn')}
+    }
+    if(ok&&ds!==String(g.description||'').trim()){
+      r=await cnxReq('/rest/v1/rpc/group_set_desc','POST',{p_group:id,p_desc:ds});
+      if(!r.ok){ok=false;toast(r.st===404?__('توضیحات گروه هنوز در Supabase ساخته نشده (بخش v345 فایل supabase/setup.sql را اجرا کن).','Group descriptions are not in Supabase yet (run the v345 block of supabase/setup.sql).'):cnxNetErr(r),null,null,'warn')}
+      else if(!(r.j&&r.j.ok)){ok=false;toast(grErrText(r.j||{}),null,null,'warn')}
+    }
+    busy=0;
+    if(!ok)return;
+    draft.n=draft.d=null;
+    await grAfter();
+    hap('send');toast(__('تغییرات ذخیره شد','Changes saved'),null,null,'ok');
+    closeThen();
+  }
+  o.addEventListener('click',function(e){
+    var b=e.target.closest('[data-e]');if(!b)return;
+    var k=b.dataset.e,g=G();if(!g){closeThen();return}
+    if(k==='back'){closeThen();return}
+    if(k==='ok'){save();return}
+    keep();
+    if(k==='photo'){grPhotoSheet(g,paint);return}
+    if(k==='adm'){grAdmSheet(g,paint);return}
+    if(k==='mem'){grMemSheet(g,paint);return}
+    if(k==='add'){grAddSheet(g,paint);return}
+  });
+}
+
+function gpgKill(){var o=document.querySelector('.gpg');if(o)o.remove();ui.gpg=false;window.gpgRefresh=null}
+function gpgLastMsg(gid,uid){var a=MC.msgs[gid]||[],i;for(i=a.length-1;i>=0;i--)if(a[i].sender_id===uid&&!a[i].pending&&!a[i].failed)return a[i];return null}
+function gpgStatus(g,m){
+  if(m.user_id===CNX.uid)return {t:__('آنلاین','online'),on:1};
+  var lm=gpgLastMsg(g.id,m.user_id);
+  if(lm)return {t:__('آخرین پیام: ','Last message: ')+kcxDay(mcMs(lm.created_at))+' '+kcxTime(mcMs(lm.created_at))};
+  if(m.joined_at)return {t:__('پیوسته در ','Joined ')+cnxDate(m.joined_at)};
+  return {t:__('عضو گروه','Group member')};
+}
+function grpPage(l){
+  if(document.querySelector('.gpg'))return;
+  var id=l.id,cur='u',menuOn=false;
+  var o=document.createElement('div');o.className='gpg';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-label',l.name||'');
+  o.innerHTML='<div class="gpg-top"><button type="button" data-g="back" aria-label="'+__('برگشت','Back')+'">'+GPG_I.back+'</button><span class="gpg-tr"><button type="button" class="gpg-pen" data-g="edit" hidden aria-label="'+__('ویرایش گروه','Edit group')+'">'+GPG_I.pen+'</button><button type="button" data-g="menu" aria-label="'+__('بیشتر','More')+'">'+GPG_I.dots+'</button></span></div><div class="gpg-menu" hidden></div>'+
+    '<div class="gpg-hd"></div><div class="gpg-acts"></div><div class="gpg-dc"></div><div class="gpg-tabs" role="tablist"></div><div class="gpg-body"></div>';
+  document.body.appendChild(o);
+  var HD=o.querySelector('.gpg-hd'),AC=o.querySelector('.gpg-acts'),DC=o.querySelector('.gpg-dc'),TB=o.querySelector('.gpg-tabs'),BD=o.querySelector('.gpg-body'),MN=o.querySelector('.gpg-menu');
+  function G(){return mcLink(id)}
+  function nameOf(g,uid){var m=grMember(g,uid);return (m&&m.name)||__('عضو','Member')}
+  function paintHead(g){
+    var own=grCan(g),ms=g.members||[];
+    o.querySelector('.gpg-pen').hidden=!own;
+    HD.innerHTML='<button type="button" class="gpg-pic" data-g="pic"'+(own?'':' tabindex="-1"')+' aria-label="'+esc(g.name)+'"><i class="gr-av big'+(grPhoto(g)?' has-p':'')+'" style="--h:'+grHue(g.name)+'">'+grAvIn(g)+'</i></button><h2 class="gpg-nm" dir="auto">'+esc(g.name)+'</h2><p class="gpg-ct">'+fa(ms.length)+' '+__('عضو','members')+'</p>';
+    var mu=mcMuted(id);
+    AC.innerHTML='<button type="button" data-g="msg">'+GPG_I.msg+'<span>'+__('پیام','Message')+'</span></button><button type="button" data-g="mute">'+(mu?GPG_I.bellOff:GPG_I.bell)+'<span>'+(mu?__('باز کردن صدا','Unmute'):__('بی‌صدا','Mute'))+'</span></button><button type="button" data-g="leave">'+GPG_I.leave+'<span>'+__('ترک','Leave')+'</span></button>';
+    var d=String(g.description||'').trim();
+    if(d||own)DC.innerHTML='<'+(own?'button type="button" data-g="desc"':'div')+' class="gpg-d'+(d?'':' empty')+'"><b dir="auto">'+esc(d||__('افزودن توضیحات','Add a description'))+'</b><small>'+__('توضیحات','Description')+'</small></'+(own?'button':'div')+'>';
+    else DC.innerHTML='';
+    var own2=own;
+    MN.innerHTML=(own2?'<button type="button" data-g="edit" dir="auto">'+__('ویرایش گروه','Edit group')+'</button><button type="button" data-g="add" dir="auto">'+__('افزودن عضو','Add member')+'</button>':'')+'<button type="button" data-g="leave" class="bad" dir="auto">'+__('ترک گروه','Leave group')+'</button>';
+  }
+  function tabs(){return [['u',__('اعضا','Members')],['m',__('رسانه','Media')],['a',__('صدا','Voice')],['f',__('فایل‌ها','Files')],['l',__('لینک‌ها','Links')]]}
+  function paintTabs(){TB.innerHTML=tabs().map(function(t){return '<button type="button" role="tab" aria-selected="'+(t[0]===cur)+'" data-gt="'+t[0]+'">'+t[1]+'</button>'}).join('')}
+  function items(k){
+    var A=(MC.msgs[id]||[]).filter(function(m){return !m.pending&&!m.failed});
+    if(k==='m')return A.filter(function(m){return m.kind==='p'||m.kind==='v'||m.kind==='r'});
+    if(k==='f')return A.filter(function(m){return m.kind==='f'});
+    if(k==='a')return A.filter(function(m){return m.kind==='a'});
+    var out=[];A.forEach(function(m){if(m.kind==='t')mcpUrls(m.body).forEach(function(u){out.push({id:m.id,url:u,created_at:m.created_at,sender_id:m.sender_id})})});return out;
+  }
+  function paintBody(g){
+    var h='';
+    if(cur==='u'){
+      var ms=(g.members||[]).slice().sort(function(a,b){return (b.user_id===CNX.uid)-(a.user_id===CNX.uid)});
+      h='<div class="gpg-cd">'+(grCan(g)?'<button type="button" class="gpg-mr gpg-add" data-g="addm"><span class="gpg-ai">'+GPG_I.addu+'</span><span class="gpg-mt"><b dir="auto">'+__('افزودن عضو','Add Members')+'</b></span></button>':'')+ms.map(function(m){
+        var st=gpgStatus(g,m),nm=m.name||__('عضو','Member');
+        return '<button type="button" class="gpg-mr" data-g="mp" data-u="'+esc(m.user_id)+'">'+grMemAvHTML(g,m)+'<span class="gpg-mt"><b dir="auto">'+esc(nm)+'</b><small dir="auto"'+(st.on?' class="on"':'')+'>'+esc(st.t)+'</small></span>'+grBadge(g,m)+'</button>';
+      }).join('')+'</div>';
+      BD.innerHTML=h;return;
+    }
+    var it=items(cur).slice().reverse();
+    if(!it.length){BD.innerHTML='<p class="gpg-e">'+__('هنوز چیزی در این بخش نیست.','Nothing here yet.')+'</p>';return}
+    if(cur==='m'){
+      h='<div class="mcp-grid gpg-grid">'+it.map(function(m){return '<button type="button" class="mcp-g" data-mcpm="'+esc(m.id)+'" aria-label="'+(m.kind==='p'?__('عکس','Photo'):__('ویدیو','Video'))+'"><img alt="" data-mcpi="'+esc(m.id)+'" draggable="false">'+(m.kind!=='p'?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button>'}).join('')+'</div>';
+    }else if(cur==='f'){
+      h='<div class="gpg-cd">'+it.map(function(m){return '<button type="button" class="gpg-r" data-mcf="'+esc(m.id)+'"><span class="mc-fi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg></span><span class="mc-ft"><b dir="auto">'+esc(m.mname||__('فایل','File'))+'</b><small dir="auto">'+esc(nameOf(g,m.sender_id))+' · '+mcSize(m.msize)+' · '+kcxDay(mcMs(m.created_at))+'</small></span></button>'}).join('')+'</div>';
+    }else if(cur==='a'){
+      h='<div class="gpg-cd">'+it.map(function(m){var d=Math.round(+(m.meta&&m.meta.d)||0);return '<button type="button" class="gpg-r" data-mcpj="'+esc(m.id)+'"><span class="mc-fi">🎤</span><span class="mc-ft"><b dir="auto">'+(m.sender_id===CNX.uid?__('تو','You'):esc(nameOf(g,m.sender_id)))+'</b><small>'+(d?fa(Math.floor(d/60))+':'+fa(('0'+d%60).slice(-2))+' · ':'')+kcxDay(mcMs(m.created_at))+' '+kcxTime(mcMs(m.created_at))+'</small></span></button>'}).join('')+'</div>';
+    }else{
+      h='<div class="gpg-cd">'+it.map(function(x){return '<button type="button" class="gpg-r" data-mcpj="'+esc(x.id)+'"><span class="mc-fi">🔗</span><span class="mc-ft"><b dir="ltr" style="text-align:start">'+esc(x.url.replace(/^https?:\/\//,'').slice(0,60))+'</b><small dir="auto">'+esc(nameOf(g,x.sender_id))+' · '+kcxDay(mcMs(x.created_at))+'</small></span></button>'}).join('')+'</div>';
+    }
+    BD.innerHTML=h;
+    if(cur==='m')it.forEach(function(m){
+      var im=BD.querySelector('img[data-mcpi="'+m.id+'"]');if(!im)return;
+      var pth=m.thumb||(m.kind==='p'?m.media:'');
+      if(SP.mem['spt_'+m.id]){im.src=SP.mem['spt_'+m.id];return}
+      if(VN.mem['vnp_'+m.id]){im.src=VN.mem['vnp_'+m.id];return}
+      if(pth)mcBlob(pth).then(function(x){im.src=x.u}).catch(function(){});
+    });
+  }
+  function refresh(){var g=G();if(!g){gpgKill();return}paintHead(g);paintTabs();paintBody(g)}
+  window.gpgRefresh=refresh;
+  refresh();
+  subPush();ui.gpg=true;
+  function closeThen(fn,wait){if(history.state&&history.state.sub){history.back();if(fn)setTimeout(fn,wait||350)}else{gpgKill();if(fn)fn()}}
+  function menuSet(on){menuOn=on;MN.hidden=!on}
+  function leaveAsk(){
+    askConfirm({title:__('ترک گروه؟','Leave the group?'),msg:__('دیگر پیام‌های این گروه را نمی‌بینی.','You will no longer see this group’s messages.'),btns:[{t:__('ترک گروه','Leave'),cls:'bad',fn:async function(){
+      var r=await cnxReq('/rest/v1/rpc/group_leave','POST',{p_group:id});
+      if(!r.ok||!(r.j&&r.j.ok)){toast(grNoTable(r)||(r.ok?grErrText(r.j):cnxNetErr(r)),null,null,'warn');return}
+      delete MC.msgs[id];delete MC.sum[id];delete MC.un[id];delete MC.last[id];
+      await cnxLoad();
+      closeThen(function(){mcStop();ui.mcl='#f';ui.mcFrom='';render('enter');window.scrollTo(0,0)},150);
+    }}]});
+  }
+  function descEdit(){
+    var g=G();if(!g||!grCan(g)||document.querySelector('.gr-wrap'))return;
+    var sw=grSheet(__('توضیحات گروه','Group description'),'<textarea class="field" id="grDesc" rows="4" maxlength="255" dir="auto" placeholder="'+__('درباره‌ی این گروه بنویس…','Write about this group…')+'"></textarea>',__('ذخیره','Save'));
+    var ta=sw.w.querySelector('#grDesc');ta.value=String(g.description||'');
+    sw.w.addEventListener('click',async function(e){
+      var b=e.target.closest('[data-gr]');if(!b)return;
+      if(b.dataset.gr==='close'){sw.close();return}
+      if(b.dataset.gr!=='ok')return;
+      b.disabled=true;
+      var r=await cnxReq('/rest/v1/rpc/group_set_desc','POST',{p_group:id,p_desc:ta.value.trim()});
+      b.disabled=false;
+      if(!r.ok){sw.msg(r.st===404?__('توضیحات گروه هنوز در Supabase ساخته نشده (بخش v345 فایل supabase/setup.sql را اجرا کن).','Group descriptions are not in Supabase yet (run the v345 block of supabase/setup.sql).'):cnxNetErr(r),1);return}
+      if(!(r.j&&r.j.ok)){sw.msg(grErrText(r.j||{}),1);return}
+      await cnxLoad();sw.close();refresh();
+    });
+  }
+  o.addEventListener('click',function(e){
+    var b;
+    if(menuOn&&!e.target.closest('.gpg-menu')&&!e.target.closest('[data-g="menu"]'))menuSet(false);
+    if((b=e.target.closest('[data-gt]'))){cur=b.dataset.gt;paintTabs();var g0=G();if(g0)paintBody(g0);return}
+    if((b=e.target.closest('[data-mcpm]'))){mcShowMedia(b.dataset.mcpm);return}
+    if((b=e.target.closest('[data-mcf]'))){mcSaveMsg(b.dataset.mcf);return}
+    if((b=e.target.closest('[data-mcpj]'))){
+      var jid=b.dataset.mcpj;
+      closeThen(function(){var r=document.querySelector('.kcx-row[data-mid="'+jid+'"]');if(r){r.scrollIntoView({block:'center',behavior:'smooth'});r.classList.remove('mc-flash');void r.offsetWidth;r.classList.add('mc-flash')}},380);
+      return;
+    }
+    if(!(b=e.target.closest('[data-g]')))return;
+    var k=b.dataset.g,g=G();if(!g&&k!=='back')return;
+    if(k==='back'){closeThen();return}
+    if(k==='menu'){menuSet(!menuOn);return}
+    if(k==='msg'){closeThen(function(){var t=document.getElementById('mcT');if(t)t.focus()});return}
+    if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);paintHead(g);toast(on?__('اعلان‌های این گروه بی‌صدا شد','Notifications of this group are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info');return}
+    if(k==='leave'){menuSet(false);leaveAsk();return}
+    if(k==='desc'){descEdit();return}
+    if(k==='pic'){if(grCan(g))grPhotoSheet(g,refresh);return}
+    if(k==='edit'){menuSet(false);grEditPage(g);return}
+    if(k==='add'||k==='addm'){menuSet(false);grAddSheet(g,refresh);return}
+    if(k==='mp'){var pm=grMember(g,b.dataset.u);mcpOpen(g,{uid:b.dataset.u,name:pm&&pm.name});return}
+  });
+}
+
 /* ----- opening / closing ----- */
 /* ----- chat scroll: open exactly where I left (or at the newest message), with NO sliding from the top ----- */
 MC.sp={};MC.spHold=0;MC.spT=0;
@@ -12093,7 +12629,7 @@ actions.mcCard=function(){
   subPush();ui.tab='kcm';ui.kcsec='';ui.mcl='*';ui.mcFrom='';render('enter');window.scrollTo(0,0);
 };
 actions.mcOpen=function(d){mcOpenChat(d.id,d.from||'*')};
-function mcStop(){clearInterval(MC.poll);MC.poll=0;clearInterval(MC.prT);MC.prT=0;MC.typAt=0;mcpKill()}
+function mcStop(){clearInterval(MC.poll);MC.poll=0;clearInterval(MC.prT);MC.prT=0;MC.typAt=0;mcpKill();if(typeof gpeKill==='function')gpeKill();if(typeof gpgKill==='function')gpgKill()}
 /* ---------- v281: the other person's profile page (like Telegram's, without phone / call) ---------- */
 function mcMutedMap(){try{return JSON.parse(localStorage.getItem('ario.mcmute')||'{}')||{}}catch(e){return {}}}
 function mcMuted(id){return kcMuted('lk:'+id)}
@@ -12117,14 +12653,14 @@ function grMemAvHTML(g,m){var v=grMemAv(g,m.user_id,m.name||'');return '<i class
 function mcpOpen(l,mem){
   var gm=null;
   if(mcGr(l)){
-    if(!mem){grpInfo(l);return}
+    if(!mem){grpPage(l);return}
     var gmm=grMember(l,mem.uid);
     gm={uid:mem.uid,name:(gmm&&gmm.name)||mem.name||__('عضو','Member'),joined:gmm&&gmm.joined_at};
   }
   if(document.querySelector('.mcp'))return;
   var id=l.id,av=gm?grMemAv(l,gm.uid,gm.name):mcPeerAv(l),nm=gm?gm.name:mcPeer(l),fr=mcFr(l),cn=mcCns(l);
   var gmMe=gm&&gm.uid===CNX.uid,gmFr=gm&&!gmMe?mcFriends().filter(function(f){return (mcCns(f)?f.student_id:f.counselor_id)===gm.uid})[0]:null;
-  var role=gm?(gm.uid===l.counselor_id?__('مدیر گروه','Group owner'):__('عضو گروه','Group member')):fr?__('دوست تو','Your friend'):cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor');
+  var role=gm?(gm.uid===l.counselor_id?__('مدیر گروه','Group owner'):(gmm&&gmm.is_admin)?__('ادمین گروه','Group admin'):__('عضو گروه','Group member')):fr?__('دوست تو','Your friend'):cn?__('دانش‌آموز تو','Your student'):__('مشاور تو','Your advisor');
   var base=function(){var A=MC.msgs[id]||[];return gm?A.filter(function(m){return m.sender_id===gm.uid}):A};
   var a=base(),last=null,i;
   for(i=a.length-1;i>=0;i--)if(a[i].sender_id!==CNX.uid||gmMe){last=a[i];break}
@@ -12252,6 +12788,445 @@ function mcBackA(){
 }
 actions.mcBack=function(){if(history.state&&history.state.sub){history.back();return}mcBackA()};
 actions.mcDash=function(){var l=mcLink(ui.mcl);if(l)cdOpen(l.id)};
+
+/* ---------- v343: voice chat (گفتگوی صوتی) in group and friend chats ----------
+   The sound goes phone-to-phone (WebRTC, one connection to every other person, up to 8 people).
+   Supabase only carries the small connection messages and the list of who is in (see the v343 and v344 blocks of supabase/setup.sql):
+   voice_sync is called about once a second while someone is in the voice chat, voice_who every few seconds while a chat is open.
+   To make it work on every mobile network a TURN server can be added: put it in VC_TURN, e.g. {urls:'turn:host:3478',username:'u',credential:'p'}. */
+var VC_TURN=[];
+var VC={on:0,id:'',stream:null,pc:{},q:{},au:{},an:{},ctx:null,peers:[],out:[],muted:false,ns:true,t:0,m:0,busy:0,fails:0,rejoin:0,who:{},whoAt:0,whoBusy:0,w:null,pill:null,lv:{},title:'',wt:{},routes:[],route:'',rt:0,rtBusy:0,joinAt:0,intro:null,invAt:0};
+var VC_ICON={
+  mic:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>',
+  off:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M4 4l16 16"/></svg>',
+  end:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 14.5c5-4.2 13-4.2 18 0l-2.1 3-3.6-1.6v-3a12 12 0 0 0-6.6 0v3L5.1 17.5z"/></svg>',
+  ns:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 12h2.5l2-5 3 10 3-13 2.5 8H21"/></svg>',
+  nsx:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 12h2.5l2-5 3 10 3-13 2.5 8H21M4 4l16 16"/></svg>',
+  bars:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5 10v4M9 6v12M13 9v6M17 7v10M21 11v2"/></svg>',
+  min:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  pip:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M20.5 11V8.5a3 3 0 0 0-3-3h-11a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3H12"/><circle cx="18" cy="17.5" r="2.3" fill="currentColor" stroke="none"/></svg>',
+  dots:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.8" fill="currentColor" stroke="none"/></svg>',
+  pen:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  link:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8"/></svg>',
+  stop:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+  chk:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5.5 12.5l4.5 4.5 8.5-9.5"/></svg>',
+  phone:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>',
+  spk:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18.3 6.3a8 8 0 0 1 0 11.4"/></svg>',
+  bt:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9"/></svg>',
+  hp:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>'
+};
+/* two ducks with headphones and microphones (the picture on the «start the voice chat» sheet) */
+var VC_DUCKS='<svg viewBox="0 0 220 132" aria-hidden="true"><g class="vcw" fill="#6b727b"><rect x="14" y="40" width="3" height="14" rx="1.5"/><rect x="21" y="32" width="3" height="30" rx="1.5"/><rect x="28" y="44" width="3" height="10" rx="1.5"/><rect x="35" y="26" width="3" height="42" rx="1.5"/><rect x="42" y="38" width="3" height="18" rx="1.5"/><rect x="49" y="30" width="3" height="34" rx="1.5"/><rect x="56" y="42" width="3" height="12" rx="1.5"/><rect x="63" y="34" width="3" height="26" rx="1.5"/><rect x="154" y="34" width="3" height="26" rx="1.5"/><rect x="161" y="42" width="3" height="12" rx="1.5"/><rect x="168" y="30" width="3" height="34" rx="1.5"/><rect x="175" y="38" width="3" height="18" rx="1.5"/><rect x="182" y="26" width="3" height="42" rx="1.5"/><rect x="189" y="44" width="3" height="10" rx="1.5"/><rect x="196" y="32" width="3" height="30" rx="1.5"/><rect x="203" y="40" width="3" height="14" rx="1.5"/></g>'+
+  '<ellipse cx="110" cy="116" rx="86" ry="11" fill="#8a6a43"/><ellipse cx="110" cy="111" rx="86" ry="10" fill="#b58a55"/>'+
+  '<g><ellipse cx="76" cy="100" rx="25" ry="20" fill="#ffd23c"/><circle cx="76" cy="70" r="23" fill="#ffd93f"/><path d="M92 74c8-2 14 0 15 4-2 5-9 6-17 4z" fill="#ff9f1a"/><circle cx="82" cy="65" r="3" fill="#2b2b2b"/><path d="M52 66a24 24 0 0 1 48 0" fill="none" stroke="#2b2b2b" stroke-width="4.5" stroke-linecap="round"/><rect x="47" y="62" width="10" height="17" rx="5" fill="#53585f"/><rect x="95" y="62" width="10" height="17" rx="5" fill="#53585f"/><rect x="70" y="100" width="12" height="3" rx="1.5" fill="#2b2b2b"/><rect x="74.5" y="100" width="3" height="14" fill="#2b2b2b"/><ellipse cx="76" cy="97" rx="5.5" ry="7" fill="#3a3f46"/></g>'+
+  '<g><ellipse cx="144" cy="100" rx="25" ry="20" fill="#ffd23c"/><circle cx="144" cy="70" r="23" fill="#ffd93f"/><path d="M128 74c-8-2-14 0-15 4 2 5 9 6 17 4z" fill="#ff9f1a"/><circle cx="138" cy="65" r="3" fill="#2b2b2b"/><path d="M120 66a24 24 0 0 1 48 0" fill="none" stroke="#2b2b2b" stroke-width="4.5" stroke-linecap="round"/><rect x="115" y="62" width="10" height="17" rx="5" fill="#53585f"/><rect x="163" y="62" width="10" height="17" rx="5" fill="#53585f"/><path d="M122 56c4-12 14-16 22-16s17 4 22 15z" fill="#2b2b2b"/><rect x="138" y="100" width="12" height="3" rx="1.5" fill="#2b2b2b"/><rect x="142.5" y="100" width="3" height="14" fill="#2b2b2b"/><ellipse cx="144" cy="97" rx="5.5" ry="7" fill="#3a3f46"/></g></svg>';
+function vcIce(){
+  var a=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'},{urls:'stun:stun.cloudflare.com:3478'}].concat(VC_TURN);
+  try{var t=JSON.parse(localStorage.getItem('ario.turn')||'null');if(t&&t.urls)a.push(t)}catch(e){}
+  return a;
+}
+function vcSupported(){return !!(window.RTCPeerConnection&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)}
+function vcLink(){return VC.id?mcLink(VC.id):null}
+function vcName(l,uid){
+  if(uid===CNX.uid)return displayName()||__('تو','You');
+  if(l&&mcGr(l)){var m=grMember(l,uid);return (m&&m.name)||__('عضو','Member')}
+  return l?mcPeer(l):__('عضو','Member');
+}
+function vcAv(l,uid){
+  var v=uid===CNX.uid?mcMyAv():(l&&mcGr(l)?grMemAv(l,uid,vcName(l,uid)):(l?mcPeerAv(l):{p:'',h:200,n:'؟'}));
+  return '<i class="gr-av'+(v.p?' has-p':'')+'" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':esc(v.n||'ع'))+'</i>';
+}
+/* in a group only its owner can end the voice chat for everybody; in a friend chat both friends can */
+function vcCanEnd(l){return !!l&&(mcGr(l)?l.counselor_id===CNX.uid:mcFr(l))}
+/* ----- where the sound comes out: phone / speaker / Bluetooth / headphones (Android plugin ArioAudio) ----- */
+function vcAN(){try{var C=window.Capacitor;if(C&&C.isNativePlatform&&C.isNativePlatform())return (C.Plugins&&C.Plugins.ArioAudio)||(C.registerPlugin&&C.registerPlugin('ArioAudio'))||null}catch(e){}return null}
+function vcRouteName(r){
+  var k=r&&r.id||r;
+  if(k==='phone')return __('گوشی','Phone');
+  if(k==='speaker')return __('بلندگو','Speaker');
+  if(k==='wired')return __('هدفون','Headphones');
+  if(k==='bluetooth')return (r&&r.name)||__('بلوتوث','Bluetooth');
+  return '';
+}
+function vcRouteIcon(k){return k==='phone'?VC_ICON.phone:k==='bluetooth'?VC_ICON.bt:k==='wired'?VC_ICON.hp:VC_ICON.spk}
+function vcRouteCur(){var i;for(i=0;i<VC.routes.length;i++)if(VC.routes[i].id===VC.route)return VC.routes[i];return {id:VC.route||'speaker',name:''}}
+async function vcRouteLoad(){
+  var A=vcAN();if(!A||!VC.on||VC.rtBusy)return;
+  VC.rtBusy=1;
+  try{
+    var r=await A.routes();
+    if(!VC.on||!r||!Array.isArray(r.routes))return;
+    var s=JSON.stringify([r.routes,r.current]);
+    if(s!==VC.rs){VC.rs=s;VC.routes=r.routes;VC.route=r.current||'speaker';vcPaint()}
+  }catch(e){}finally{VC.rtBusy=0}
+}
+async function vcSetRoute(id){
+  var A=vcAN();if(!A)return;
+  try{var r=await A.setRoute({route:id});VC.route=(r&&r.current)||id;VC.rs='';hap('tick');vcPaint();vcRouteLoad()}
+  catch(e){toast(__('این خروجی صدا الان در دسترس نیست','This audio output is not available right now'),null,null,'warn')}
+}
+function vcRouteTap(){
+  vcMenuClose();
+  var rs=VC.routes;if(!rs.length)return;
+  if(rs.length<=2){var o=rs.filter(function(x){return x.id!==VC.route})[0];if(o)vcSetRoute(o.id);return}
+  vcMenuOpen('up');
+}
+/* ----- the screen ----- */
+function vcPaint(){
+  var w=VC.w,l=vcLink();if(!w||!l)return;
+  var L=w.querySelector('#vcL'),ps=VC.peers.slice(),me=CNX.uid,i,h='';
+  ps.sort(function(a,b){return (a.user_id===me?-1:0)-(b.user_id===me?-1:0)});
+  var live=0,others=0;
+  for(i=0;i<ps.length;i++){
+    var p=ps[i],mine=p.user_id===me,c=VC.pc[p.user_id],st=mine?'ok':(c&&c.pc.connectionState==='connected'?'ok':'wait');
+    if(!mine)others++;
+    if(st==='ok'&&!mine)live++;
+    var muted=mine?VC.muted:!!p.muted,sub=st==='ok'?__('در حال گوش دادن','Listening'):__('در حال اتصال…','Connecting…');
+    h+='<div class="vc-p'+(muted?' mu':'')+'" data-u="'+esc(p.user_id)+'" data-s="'+esc(sub)+'"><span class="vc-av">'+vcAv(l,p.user_id)+'</span><span class="vc-nm"><b dir="auto">'+esc(vcName(l,p.user_id))+'</b><small>'+sub+'</small></span><span class="vc-mi">'+(muted?VC_ICON.off:VC_ICON.mic)+'</span></div>';
+  }
+  if(L&&L.dataset.h!==h){L.innerHTML=h;L.dataset.h=h}
+  var ti=w.querySelector('#vcTi');if(ti){var tt=VC.title||__('گفتگوی صوتی','Voice chat');if(ti.textContent!==tt)ti.textContent=tt}
+  var cn=!VC.t||(others>0&&!live&&Date.now()-VC.joinAt<15000);
+  var mb=w.querySelector('[data-vc="mute"]');
+  if(mb){
+    mb.classList.toggle('cn',cn);mb.classList.toggle('on',!VC.muted&&!cn);
+    var lab=cn?__('در حال اتصال…','Connecting…'):(VC.muted?__('روشن کردن','Unmute'):__('بی‌صدا','Mute'));
+    var ic=(VC.muted||cn)?VC_ICON.off:VC_ICON.mic,k=ic+'|'+lab;
+    if(mb.dataset.k!==k){mb.dataset.k=k;mb.innerHTML='<i>'+ic+'<svg class="vc-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"/></svg></i><span>'+lab+'</span>'}
+  }
+  var ab=w.querySelector('[data-vc="route"]');
+  if(ab){ab.hidden=!VC.routes.length;if(VC.routes.length){var cr=vcRouteCur(),k2=cr.id+'|'+cr.name;if(ab.dataset.k!==k2){ab.dataset.k=k2;ab.innerHTML='<i>'+vcRouteIcon(cr.id)+'</i><span>'+esc(vcRouteName(cr))+'</span>'}}}
+  vcPillPaint();
+}
+function vcPillPaint(){
+  var p=VC.pill;if(!p)return;
+  var hidden=!!(VC.w&&!VC.w.classList.contains('min'));
+  p.hidden=hidden;
+  var t=p.querySelector('b');if(t)t.textContent=(VC.title||__('گفتگوی صوتی','Voice chat'))+' · '+fa(VC.peers.length)+' '+__('نفر','people');
+  p.classList.toggle('mu',VC.muted);
+}
+function vcDrag(w,hd,close){
+  var y0=0,dy=0,on=0,sh=w.querySelector('.vc-sheet'),bd=w.querySelector('.vc-bd');
+  hd.addEventListener('pointerdown',function(e){if(e.target.closest('button,input'))return;on=1;y0=e.clientY;dy=0;try{hd.setPointerCapture(e.pointerId)}catch(x){}sh.style.transition='none';bd.style.transition='none'});
+  hd.addEventListener('pointermove',function(e){if(!on)return;dy=Math.max(0,e.clientY-y0);sh.style.transform='translateY('+dy+'px)';bd.style.opacity=String(Math.max(0,1-dy/420))});
+  var up=function(){if(!on)return;on=0;var go=dy>90;sh.style.transition='';bd.style.transition='';sh.style.transform='';bd.style.opacity='';if(go)close()};
+  hd.addEventListener('pointerup',up);hd.addEventListener('pointercancel',up);
+}
+function vcBuild(){
+  var l=vcLink();if(!l)return;
+  var w=document.createElement('div');w.className='vc-wrap';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');w.setAttribute('aria-label',__('گفتگوی صوتی','Voice chat'));
+  w.innerHTML='<div class="vc-bd" data-vc="min"></div><div class="vc-sheet">'+
+    '<div class="vc-hd"><b id="vcTi" dir="auto"></b><button type="button" class="vc-ib" data-vc="min" aria-label="'+__('کوچک کردن','Minimize')+'">'+VC_ICON.pip+'</button><button type="button" class="vc-ib" data-vc="menu" aria-haspopup="menu" aria-label="'+__('بیشتر','More')+'">'+VC_ICON.dots+'</button></div>'+
+    '<div class="vc-card"><div class="vc-list" id="vcL"></div><button type="button" class="vc-inv" data-vc="invite">'+VC_ICON.link+'<span>'+__('ارسال دعوت در چت','Send an invite in the chat')+'</span></button></div>'+
+    '<div class="vc-sp"></div>'+
+    '<div class="vc-bar"><button type="button" class="vc-b" data-vc="route" hidden></button><button type="button" class="vc-b mic" data-vc="mute"></button><button type="button" class="vc-b end" data-vc="leave"><i>'+VC_ICON.end+'</i><span>'+__('خروج','Leave')+'</span></button></div></div>';
+  w.addEventListener('click',vcClick);
+  document.body.appendChild(w);VC.w=w;
+  vcDrag(w,w.querySelector('.vc-hd'),vcMin);
+  var p=document.createElement('button');p.type='button';p.className='vc-pill';p.hidden=true;p.innerHTML=VC_ICON.bars+'<b></b><span>'+__('بازگشت','Return')+'</span>';
+  p.addEventListener('click',vcShow);document.body.appendChild(p);VC.pill=p;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){w.classList.add('open')})});
+  vcPaint();
+}
+function vcShow(){if(!VC.w)return;VC.w.classList.remove('min');vcPillPaint()}
+function vcMin(){if(!VC.w)return;vcMenuClose();var d=VC.w.querySelector('.vc-dlg');if(d)d.remove();VC.w.classList.add('min');vcPillPaint()}
+/* the phone's Back button: close what is open on top, else tuck the voice chat away (called from bkCloseOverlay) */
+function vcBack(){
+  if(VC.intro){vcIntroClose();return true}
+  var w=VC.w;if(!w||!w.classList.contains('open')||w.classList.contains('min'))return false;
+  var d=w.querySelector('.vc-dlg');if(d){d.remove();return true}
+  if(w.querySelector('.vc-menu')){vcMenuClose();return true}
+  vcMin();return true;
+}
+function vcClick(e){
+  var w=VC.w;
+  var b=e.target.closest('[data-vc]');
+  if(w&&w.querySelector('.vc-menu')&&!e.target.closest('.vc-menu')){vcMenuClose();return}   /* a tap outside the open menu only closes it */
+  if(!b)return;
+  var k=b.dataset.vc;
+  if(k==='min'){vcMin();return}
+  if(k==='mute'){vcMute(!VC.muted);return}
+  if(k==='route'){vcRouteTap();return}
+  if(k==='menu'){vcMenuOpen('top');return}
+  if(k==='ns'){vcMenuClose();vcNoise(!VC.ns);return}
+  if(k==='rt'){vcMenuClose();vcSetRoute(b.dataset.r);return}
+  if(k==='title'){vcMenuClose();vcAskTitle();return}
+  if(k==='invite'){vcMenuClose();vcInvite();return}
+  if(k==='endAll'){vcMenuClose();vcAskLeave(true);return}
+  if(k==='leave'){vcAskLeave(false);return}
+  if(k==='no'){var d=w&&w.querySelector('.vc-dlg');if(d)d.remove();return}
+  if(k==='yes'){var ck=w&&w.querySelector('#vcEndCk');if(ck&&ck.checked)vcEndAll();else vcEnd();return}
+  if(k==='tsave'){var inp=w&&w.querySelector('#vcTin');vcSetTitle(inp?inp.value:'');return}
+}
+/* ----- the «⋮» menu (and the audio-output list) ----- */
+function vcMenuClose(){var m=VC.w&&VC.w.querySelector('.vc-menu');if(m)m.remove()}
+function vcMenuOpen(kind){
+  var w=VC.w,l=vcLink();if(!w||!l)return;
+  if(w.querySelector('.vc-menu')){vcMenuClose();return}
+  var m=document.createElement('div');m.className='vc-menu'+(kind==='up'?' up':'');m.setAttribute('role','menu');
+  var it=function(ic,t,s,k,cls,extra){return '<button type="button" role="menuitem" class="vc-mt'+(cls?' '+cls:'')+'" data-vc="'+k+'"'+(extra||'')+'>'+ic+'<span><b>'+t+'</b>'+(s?'<small>'+esc(s)+'</small>':'')+'</span></button>'};
+  var h='';
+  if(kind==='up'){
+    VC.routes.forEach(function(r){h+=it(vcRouteIcon(r.id),esc(vcRouteName(r)),'','rt',r.id===VC.route?'cur':'',' data-r="'+esc(r.id)+'"')});
+  }else{
+    h+='<div class="vc-mt me"><span class="vc-av">'+vcAv(l,CNX.uid)+'</span><span><b>'+__('نمایش من به‌صورت…','Display me as…')+'</b><small dir="auto">'+esc(vcName(l,CNX.uid))+'</small></span></div>';
+    if(VC.routes.length>1){var cr=vcRouteCur();h+=it(vcRouteIcon(cr.id),__('صدا','Audio'),vcRouteName(cr),'route')}
+    h+=it(VC.ns?VC_ICON.ns:VC_ICON.nsx,__('حذف نویز','Noise suppression'),VC.ns?__('روشن','Enabled'):__('خاموش','Disabled'),'ns');
+    h+='<div class="vc-mdv"></div>'+it(VC_ICON.pen,__('ویرایش عنوان گفتگوی صوتی','Edit voice chat title'),'','title')+it(VC_ICON.link,__('ارسال دعوت در چت','Send an invite in the chat'),'','invite');
+    if(vcCanEnd(l))h+=it(VC_ICON.stop,__('پایان گفتگوی صوتی','End voice chat'),'','endAll','bad');
+  }
+  m.innerHTML=h;w.querySelector('.vc-sheet').appendChild(m);
+}
+/* ----- dialogs ----- */
+function vcDlg(html){
+  var w=VC.w;if(!w)return null;
+  var o=w.querySelector('.vc-dlg');if(o)o.remove();
+  var d=document.createElement('div');d.className='vc-dlg';d.innerHTML=html;w.appendChild(d);return d;
+}
+function vcAskLeave(endMode){
+  var l=vcLink(),can=vcCanEnd(l);
+  vcDlg('<div class="vc-dc" role="alertdialog"><b>'+__('خروج از گفتگوی صوتی','Leave voice chat')+'</b><p>'+__('می‌خواهی از این گفتگوی صوتی خارج شوی؟','Do you want to leave this voice chat?')+'</p>'+
+    (can?'<label class="vc-ck"><input type="checkbox" id="vcEndCk"'+(endMode?' checked':'')+'><i>'+VC_ICON.chk+'</i><span>'+__('پایان گفتگوی صوتی برای همه','End the voice chat for everyone')+'</span></label>':'')+
+    '<div><button type="button" data-vc="no">'+__('انصراف','Cancel')+'</button><button type="button" class="bad" data-vc="yes">'+__('خروج','Leave')+'</button></div></div>');
+}
+function vcAskTitle(){
+  var d=vcDlg('<div class="vc-dc" role="dialog"><b>'+__('عنوان گفتگوی صوتی','Voice chat title')+'</b><input class="vc-tin" id="vcTin" type="text" maxlength="60" dir="auto" autocomplete="off" placeholder="'+__('گفتگوی صوتی','Voice chat')+'"><div><button type="button" data-vc="no">'+__('انصراف','Cancel')+'</button><button type="button" data-vc="tsave">'+__('ذخیره','Save')+'</button></div></div>');
+  var i=d&&d.querySelector('#vcTin');if(i){i.value=VC.title||'';setTimeout(function(){try{i.focus();i.select()}catch(e){}},60);i.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();vcSetTitle(i.value)}})}
+}
+async function vcSetTitle(t){
+  t=String(t||'').trim().slice(0,60);
+  var d=VC.w&&VC.w.querySelector('.vc-dlg');if(d)d.remove();
+  var id=VC.id,old=VC.title;VC.title=t;vcPaint();
+  var r=await cnxReq('/rest/v1/rpc/voice_title','POST',{p_link:id,p_title:t});
+  if(!VC.on||VC.id!==id)return;
+  if(!r.ok||!r.j||!r.j.ok){VC.title=old;vcPaint();toast(r.st===404?__('عنوان گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v344 فایل supabase/setup.sql را اجرا کن).','Voice chat titles are not in Supabase yet (run the v344 block of supabase/setup.sql).'):cnxNetErr(r),null,null,'warn')}
+}
+function vcInvite(){
+  var l=vcLink();if(!l)return;
+  if(Date.now()-VC.invAt<30000){toast(__('دعوت همین الان فرستاده شد','The invite was just sent'),null,null,'info',1);return}
+  VC.invAt=Date.now();
+  if(mcSendText(l,__('🎙 گفتگوی صوتی روشن است؛ بیا بپیوند!','🎙 The voice chat is on — come and join!')))toast(__('دعوت در چت فرستاده شد','The invite was sent in the chat'),null,null,'info',1);
+}
+async function vcEndAll(){
+  var id=VC.id;
+  var r=await cnxReq('/rest/v1/rpc/voice_end','POST',{p_link:id});
+  if(r.ok&&r.j&&r.j.ok){vcEnd();return}
+  var d=VC.w&&VC.w.querySelector('.vc-dlg');if(d)d.remove();
+  toast(r.j&&r.j.err==='owner'?__('فقط سازنده‌ی گروه می‌تواند گفتگوی صوتی را برای همه تمام کند','Only the group owner can end the voice chat for everyone'):r.st===404?__('پایان گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v344 فایل supabase/setup.sql را اجرا کن).','Ending is not in Supabase yet (run the v344 block of supabase/setup.sql).'):cnxNetErr(r),null,null,'warn');
+}
+function vcMute(m){
+  VC.muted=!!m;
+  if(VC.stream)VC.stream.getAudioTracks().forEach(function(t){t.enabled=!VC.muted});
+  hap('tick');vcPaint();
+}
+function vcNoise(on){
+  VC.ns=!!on;
+  try{if(VC.stream)VC.stream.getAudioTracks().forEach(function(t){t.applyConstraints({echoCancellation:true,noiseSuppression:VC.ns,autoGainControl:true}).catch(function(){})})}catch(e){}
+  vcPaint();
+}
+/* ----- the «start the voice chat» sheet (shown when nobody is in yet) ----- */
+function vcIntro(id){
+  var l=mcLink(id);if(!l||VC.intro)return;
+  var gr=mcGr(l),w=document.createElement('div');w.className='vc-wrap vc-in';w.setAttribute('role','dialog');w.setAttribute('aria-modal','true');w.setAttribute('aria-label',__('گفتگوی صوتی','Voice chat'));
+  w.innerHTML='<div class="vc-bd" data-vc="inx"></div><div class="vc-sheet vc-ish">'+
+    '<div class="vc-art">'+VC_DUCKS+'</div><b class="vc-it">'+__('گفتگوی صوتی','Voice chat')+'</b>'+
+    '<p class="vc-ip">'+(gr?__('اعضای گروه با نوار «گفتگوی صوتی فعال است» بالای چت می‌توانند به آن بپیوندند و با هم صحبت کنید.','Group members can join with the «Voice chat is live» bar at the top of the chat, and you talk together.'):__('دوستت با نوار «گفتگوی صوتی فعال است» بالای چت می‌تواند به آن بپیوندد و با هم صحبت کنید.','Your friend can join with the «Voice chat is live» bar at the top of the chat, and you talk together.'))+'</p>'+
+    '<div class="vc-as">'+__('نمایش تو به‌صورت','You will be displayed as')+'</div>'+
+    '<div class="vc-ar"><span class="vc-av">'+vcAv(l,CNX.uid)+'<em>'+VC_ICON.chk+'</em></span><span><b dir="auto">'+esc(vcName(l,CNX.uid))+'</b><small>'+__('حساب شخصی','personal account')+'</small></span></div>'+
+    '<button type="button" class="vc-go" data-vc="ingo">'+__('شروع گفتگوی صوتی','Start voice chat')+'</button></div>';
+  w.addEventListener('click',function(e){var b=e.target.closest('[data-vc]');if(!b)return;if(b.dataset.vc==='inx')vcIntroClose();else if(b.dataset.vc==='ingo'){vcIntroClose(1);vcStart(id)}});
+  document.body.appendChild(w);VC.intro=w;
+  vcDrag(w,w.querySelector('.vc-sheet'),vcIntroClose);
+  requestAnimationFrame(function(){requestAnimationFrame(function(){w.classList.add('open')})});
+}
+function vcIntroClose(fast){
+  var w=VC.intro;if(!w)return;VC.intro=null;
+  w.classList.remove('open');setTimeout(function(){w.remove()},fast?30:340);
+}
+/* ----- connections between phones ----- */
+function vcSend(uid,kind,payload){VC.out.push({to:uid,kind:kind,payload:payload})}
+function vcDrop(uid){
+  var c=VC.pc[uid];
+  if(c){try{c.pc.onicecandidate=c.pc.ontrack=c.pc.onconnectionstatechange=null;c.pc.close()}catch(e){}}
+  delete VC.pc[uid];
+  var a=VC.au[uid];if(a){try{a.pause();a.srcObject=null;a.remove()}catch(e){}delete VC.au[uid]}
+  delete VC.an[uid];delete VC.lv[uid];
+}
+function vcPc(uid,make){
+  var c=VC.pc[uid];if(c)return c;
+  var pc=new RTCPeerConnection({iceServers:vcIce()});
+  c={pc:pc,at:Date.now(),make:!!make,offered:0};VC.pc[uid]=c;
+  VC.stream.getTracks().forEach(function(t){pc.addTrack(t,VC.stream)});
+  pc.onicecandidate=function(e){if(e.candidate)vcSend(uid,'ice',JSON.stringify(e.candidate))};
+  pc.ontrack=function(e){vcAttach(uid,e.streams&&e.streams[0]?e.streams[0]:new MediaStream([e.track]))};
+  pc.onconnectionstatechange=function(){
+    if(pc.connectionState==='failed'&&VC.pc[uid]&&VC.pc[uid].pc===pc){vcDrop(uid)}   /* the offering side starts again by itself on the next tick */
+    vcPaint();
+  };
+  return c;
+}
+function vcAttach(uid,stream){
+  var a=VC.au[uid];
+  if(!a){a=document.createElement('audio');a.autoplay=true;a.setAttribute('playsinline','');a.className='vc-au';document.body.appendChild(a);VC.au[uid]=a}
+  a.srcObject=stream;
+  var pr=a.play();if(pr&&pr.catch)pr.catch(function(){});
+  try{
+    if(!VC.ctx)VC.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    var an=VC.ctx.createAnalyser();an.fftSize=256;VC.ctx.createMediaStreamSource(stream).connect(an);
+    VC.an[uid]={an:an,d:new Uint8Array(an.frequencyBinCount)};
+  }catch(e){}
+  vcPaint();
+}
+async function vcOffer(uid){
+  var c=vcPc(uid,true);if(c.offered)return;c.offered=1;
+  try{
+    var o=await c.pc.createOffer({offerToReceiveAudio:true});
+    await c.pc.setLocalDescription(o);
+    vcSend(uid,'offer',JSON.stringify(c.pc.localDescription));
+  }catch(e){vcDrop(uid)}
+}
+async function vcOnOffer(uid,payload){
+  vcDrop(uid);
+  var c=vcPc(uid,false);
+  try{
+    await c.pc.setRemoteDescription(JSON.parse(payload));
+    await vcFlushIce(uid);
+    var a=await c.pc.createAnswer();
+    await c.pc.setLocalDescription(a);
+    vcSend(uid,'answer',JSON.stringify(c.pc.localDescription));
+  }catch(e){vcDrop(uid)}
+}
+async function vcOnAnswer(uid,payload){
+  var c=VC.pc[uid];if(!c||c.pc.signalingState!=='have-local-offer')return;
+  try{await c.pc.setRemoteDescription(JSON.parse(payload));await vcFlushIce(uid)}catch(e){vcDrop(uid)}
+}
+async function vcOnIce(uid,payload){
+  var c=VC.pc[uid];
+  if(!c||!c.pc.remoteDescription){(VC.q[uid]=VC.q[uid]||[]).push(payload);return}
+  try{await c.pc.addIceCandidate(JSON.parse(payload))}catch(e){}
+}
+async function vcFlushIce(uid){
+  var c=VC.pc[uid],q=VC.q[uid]||[];VC.q[uid]=[];
+  if(!c||!c.pc.remoteDescription)return;
+  for(var i=0;i<q.length;i++){try{await c.pc.addIceCandidate(JSON.parse(q[i]))}catch(e){}}
+}
+/* ----- the once-a-second round trip ----- */
+async function vcTick(){
+  if(!VC.on||VC.busy)return;
+  VC.busy=1;
+  var out=VC.out.splice(0),rank={offer:0,answer:1,ice:2};
+  out.sort(function(a,b){return rank[a.kind]-rank[b.kind]});   /* an offer / answer always travels before its candidates */
+  var join=!!VC.rejoin;VC.rejoin=0;
+  try{
+    var r=await cnxReq('/rest/v1/rpc/voice_sync','POST',{p_link:VC.id,p_join:join,p_muted:VC.muted,p_out:out});
+    if(!VC.on)return;
+    if(!r.ok||!r.j||!r.j.ok){
+      VC.out=out.concat(VC.out);
+      if(r.j&&r.j.err==='member'){vcEnd();toast(__('دیگر عضو این گفتگو نیستی','You are no longer in this chat'),null,null,'warn');return}
+      if(++VC.fails>12){vcEnd();toast(__('ارتباط قطع شد؛ از گفتگوی صوتی خارج شدی','Connection lost; you left the voice chat'),null,null,'warn')}
+      return;
+    }
+    VC.fails=0;VC.t=1;
+    var j=r.j;
+    if(j.dropped){
+      if(j.ended){vcEnd();toast(__('گفتگوی صوتی تمام شد','The voice chat was ended'),null,null,'info');return}
+      VC.rejoin=1;return;
+    }
+    VC.title=j.title||'';
+    VC.peers=Array.isArray(j.peers)?j.peers:[];
+    var me=CNX.uid,ids={},i;
+    VC.peers.forEach(function(p){ids[p.user_id]=1});
+    (j.signals||[]).forEach(function(s){
+      if(s.kind==='offer')vcOnOffer(s.from,s.payload);
+      else if(s.kind==='answer')vcOnAnswer(s.from,s.payload);
+      else if(s.kind==='ice')vcOnIce(s.from,s.payload);
+    });
+    VC.peers.forEach(function(p){
+      if(p.user_id===me)return;
+      var c=VC.pc[p.user_id];
+      if(c&&c.pc.connectionState!=='connected'&&Date.now()-c.at>25000)vcDrop(p.user_id);   /* stuck: start over */
+      else if(!c&&me>p.user_id)vcOffer(p.user_id);   /* the person with the bigger id always makes the offer, so two phones never offer at once */
+    });
+    Object.keys(VC.pc).forEach(function(u){if(!ids[u])vcDrop(u)});
+    vcPaint();
+  }finally{VC.busy=0}
+}
+function vcMeter(){
+  if(!VC.on||!VC.w)return;
+  var rows=VC.w.querySelectorAll('.vc-p'),i;
+  for(i=0;i<rows.length;i++){
+    var u=rows[i].dataset.u,a=VC.an[u],lv=0;
+    if(u===CNX.uid){if(VC.an[u]&&!VC.muted)lv=vcLevel(VC.an[u])}
+    else if(a)lv=vcLevel(a);
+    var sp=lv>14&&!(u===CNX.uid&&VC.muted),sm=rows[i].querySelector('small');
+    if(rows[i].classList.contains('sp')!==sp){
+      rows[i].classList.toggle('sp',sp);
+      if(sm)sm.textContent=sp?__('صحبت می‌کند','Speaking'):rows[i].dataset.s;
+    }
+  }
+}
+function vcLevel(a){try{a.an.getByteFrequencyData(a.d);var s=0,i;for(i=0;i<a.d.length;i++)s+=a.d[i];return s/a.d.length}catch(e){return 0}}
+/* ----- start / leave ----- */
+async function vcStart(id){
+  if(VC.on){if(VC.id===id){vcShow();return}toast(__('اول از گفتگوی صوتی دیگر خارج شو','Leave your other voice chat first'),null,null,'warn');return}
+  if(!cnxOn()){toast(__('برای گفتگوی صوتی باید وارد حساب شوی و اینترنت داشته باشی','Sign in and be online to use voice chat'),null,null,'warn');return}
+  if(!vcSupported()){toast(__('گفتگوی صوتی روی این دستگاه ممکن نیست','Voice chat is not available on this device'),null,null,'warn');return}
+  var l=mcLink(id);if(!l)return;
+  VC.on=1;VC.id=id;VC.t=0;VC.fails=0;VC.muted=false;VC.out=[];VC.peers=[];VC.pc={};VC.q={};VC.title='';VC.routes=[];VC.route='';VC.rs='';VC.joinAt=Date.now();
+  var st;
+  try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:VC.ns,autoGainControl:true}})}
+  catch(e){VC.on=0;VC.id='';toast(__('اجازهٔ میکروفون داده نشد؛ از تنظیمات گوشی برای Ario روشنش کن','Microphone permission was not granted; enable it for Ario in your phone settings'),null,null,'warn');return}
+  VC.stream=st;
+  vcBuild();
+  var r=await cnxReq('/rest/v1/rpc/voice_sync','POST',{p_link:id,p_join:true,p_muted:false,p_out:[]});
+  if(!r.ok||!r.j||!r.j.ok){
+    var msg=r.st===404?__('گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v343 و v344 فایل supabase/setup.sql را اجرا کن).','Voice chat is not in Supabase yet (run the v343 and v344 blocks of supabase/setup.sql).'):
+      (r.j&&r.j.err==='full'?__('گفتگوی صوتی پر است (حداکثر ۸ نفر)','The voice chat is full (8 people at most)'):cnxNetErr(r));
+    vcEnd(1);toast(msg,null,null,'warn');return;
+  }
+  VC.fails=0;VC.t=1;VC.peers=r.j.peers||[];VC.title=r.j.title||'';
+  try{if(VC.ctx&&VC.ctx.state==='suspended')VC.ctx.resume()}catch(e){}
+  try{VC.ctx=VC.ctx||new (window.AudioContext||window.webkitAudioContext)();var an=VC.ctx.createAnalyser();an.fftSize=256;VC.ctx.createMediaStreamSource(st).connect(an);VC.an[CNX.uid]={an:an,d:new Uint8Array(an.frequencyBinCount)}}catch(e){}
+  clearInterval(VC.timer);clearInterval(VC.mt);clearInterval(VC.rt);
+  VC.timer=setInterval(vcTick,1000);VC.mt=setInterval(vcMeter,160);
+  VC.rt=setInterval(vcRouteLoad,3500);vcRouteLoad();
+  hap('done');vcTick();vcPaint();vcWhoPaint();
+}
+function vcEnd(quiet){
+  var id=VC.id;
+  clearInterval(VC.timer);clearInterval(VC.mt);clearInterval(VC.rt);VC.timer=VC.mt=VC.rt=0;
+  Object.keys(VC.pc).forEach(vcDrop);
+  if(VC.stream){VC.stream.getTracks().forEach(function(t){try{t.stop()}catch(e){}});VC.stream=null}
+  try{if(VC.ctx){VC.ctx.close();VC.ctx=null}}catch(e){}
+  try{var A=vcAN();if(A&&A.release)A.release()}catch(e){}
+  if(VC.w){var w=VC.w;w.classList.remove('open');setTimeout(function(){w.remove()},340);VC.w=null}
+  if(VC.pill){VC.pill.remove();VC.pill=null}
+  VC.an={};VC.au={};VC.peers=[];VC.out=[];VC.q={};VC.on=0;VC.id='';VC.t=0;VC.title='';VC.routes=[];VC.route='';VC.rs='';
+  if(id&&cnxOn())cnxReq('/rest/v1/rpc/voice_leave','POST',{p_link:id});
+  if(!quiet)hap('tick');
+  vcWhoPaint();
+}
+/* ----- «گفتگوی صوتی فعال است» bar inside the chat ----- */
+async function vcWhoTick(){
+  var id=ui.mcl;
+  if(!mcOpenNow()||!document.getElementById('mcVcB')||document.hidden||!cnxOn()||VC.whoBusy||VC.whoOff)return;
+  var l=mcLink(id);if(!l||!(mcGr(l)||mcFr(l)))return;
+  VC.whoBusy=1;
+  try{
+    var r=await cnxReq('/rest/v1/rpc/voice_who','POST',{p_link:id});
+    if(r.st===404){VC.whoOff=1;return}
+    if(r.ok&&r.j&&r.j.ok){VC.who[id]=r.j.users||[];VC.whoAt=Date.now();vcWhoPaint()}
+  }finally{VC.whoBusy=0}
+}
+function vcWhoPaint(){
+  var b=document.getElementById('mcVcB'),id=ui.mcl;if(!b||!id)return;
+  var u=(VC.on&&VC.id===id?VC.peers.map(function(p){return p.user_id}):VC.who[id])||[],n=u.length,inn=VC.on&&VC.id===id;
+  if(!n&&!inn){b.hidden=true;return}
+  b.hidden=false;
+  b.innerHTML=VC_ICON.bars+'<span><b>'+__('گفتگوی صوتی فعال است','Voice chat is live')+'</b><small>'+fa(n)+' '+__('نفر در گفتگو','in the voice chat')+'</small></span><em>'+(inn?__('بازگشت','Return'):__('پیوستن','Join'))+'</em>';
+}
+actions.vcOpen=function(){var l=mcLink(ui.mcl);if(!l)return;if(VC.on&&VC.id===l.id){vcShow();return}if(VC.on||(VC.who[l.id]||[]).length)vcStart(l.id);else vcIntro(l.id)};   /* someone is already in: join at once; nobody yet: show the «start» sheet */
+actions.vcBan=function(){var l=mcLink(ui.mcl);if(l)vcStart(l.id)};
 
 /* ----- the open chat ----- */
 /* ---------- v311: «آنلاین» / «آخرین بازدید» و «در حال نوشتن…» ----------
@@ -12394,13 +13369,17 @@ function mcView(){
   return '<div class="kcx mcx'+(kcMuted(wk)?' muted':'')+(kcWpGet(wk)?' haswp':'')+'" data-lk="'+esc(l.id)+'"'+(kcWpGet(wk)?' data-wp="'+kcWpGet(wk)+'"':'')+(mcCt(l.id)?' data-ct="'+mcCt(l.id)+'"':'')+'>'+kcWpHTML(wk)+'<div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="mcBack" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button>'+
     '<div class="kcx-pill glass"><div class="kcx-av'+(gr&&grPhoto(l)?' has-p':'')+'" style="background:'+(gr?'linear-gradient(145deg,#34d399,#0f9d6e)':fr?'linear-gradient(145deg,#f472b6,#e11d48)':'linear-gradient(145deg,#38bdf8,#2563eb)')+'">'+(gr?grAvIn(l):esc(mcIni(l)))+'</div><div class="kcx-ti"><b>'+esc(mcPeer(l))+'<svg class="ic kcx-mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg></b><small id="mcSub">'+mcSubHTML(l)+'</small></div></div>'+
     (cn&&!fr&&!gr?'<button type="button" class="kcx-rb glass" data-act="mcDash" aria-label="'+__('داشبورد','Dashboard')+'">'+icon('stats')+'</button>':'')+
+    (gr||fr?'<button type="button" class="kcx-rb glass vc-hb" data-act="vcOpen" aria-label="'+__('گفتگوی صوتی','Voice chat')+'">'+VC_ICON.bars+'</button>':'')+
     '<button type="button" class="kcx-rb glass" id="mcCtB" aria-label="'+__('رنگ گفتگو','Chat colour')+'">'+icon('palette')+'</button>'+
-    '<button type="button" class="kcx-rb glass" data-act="kcMenu" aria-haspopup="menu" aria-expanded="false" aria-label="'+__('بیشتر','More')+'">'+dots+'</button></div>'+
+    '<button type="button" class="kcx-rb glass" data-act="kcMenu" aria-haspopup="menu" aria-expanded="false" aria-label="'+__('بیشتر','More')+'">'+dots+'</button>'+
+    '<div class="kcx-st"><button type="button" class="kcx-rb glass" data-sel="x" aria-label="'+__('لغو انتخاب','Cancel selection')+'">'+icon('close')+'</button><div class="kcx-pill glass"><b id="mcSc"></b></div><div class="kcx-duo glass"><button type="button" data-sel="copy" aria-label="'+__('کپی','Copy')+'">'+icon('copy')+'</button><button type="button" class="del" data-sel="del" aria-label="'+__('حذف','Delete')+'">'+icon('trash')+'</button></div></div></div>'+
     '<div class="mc-ctp glass" id="mcCtP" hidden>'+CT_L.map(function(c){return '<button type="button" data-ct="'+c[0]+'" style="--c:'+c[1]+'" aria-label="'+c[1]+'"></button>'}).join('')+'</div>'+
+    (gr||fr?'<button type="button" class="mc-vcb glass" id="mcVcB" data-act="vcBan" hidden></button>':'')+
     (fr?'<div class="mc-ch glass" id="mcCh" hidden></div>':'')+
     '<div class="kcx-l" id="mcL"><div class="kcx-th" id="mcTh">'+mcThreadHTML(l)+'</div></div>'+
     '<div class="kcx-em glass" id="mcEm" aria-hidden="true"></div>'+
     '<div class="kcx-em mc-stt glass" id="mcSt" aria-hidden="true"></div>'+
+    '<div class="kcx-sb"><button type="button" class="kcx-sbb glass" data-sel="reply">'+SVREPLY+'<span>'+__('پاسخ','Reply')+'</span></button><button type="button" class="kcx-sbb glass" data-sel="fwd">'+SVFWD+'<span>'+__('هدایت','Forward')+'</span></button></div>'+
     '<form class="kcx-in" id="mcF" autocomplete="off"><div class="kcx-box glass"><textarea id="mcT" rows="1" maxlength="3000" enterkeyhint="send" placeholder="'+__('پیام','Message')+'" aria-label="'+__('پیام','Message')+'"></textarea>'+
     (gr||cn&&!fr?'':'<button type="button" class="kcx-ib" id="mcE" aria-label="'+__('ارسال گزارش‌کار','Send a daily report')+'" aria-expanded="false">'+rep+'</button>')+
     '<button type="button" class="kcx-ib" id="mcSk" aria-label="'+__('ایموجی و استیکر','Emoji & stickers')+'" aria-expanded="false"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M20 12a8 8 0 1 1-8-8h1.5a6.5 6.5 0 0 0 6.5 6.5z"/><path d="M8.5 13.5c1 1.6 2.3 2.3 3.5 2.3s2.5-.7 3.5-2.3M9 9.5h.01M13.5 8.5h.01"/></svg></button>'+
@@ -12419,7 +13398,8 @@ function mcThreadHTML(l){
 function mcTk(m){if(m.failed)return '<i class="mc-tk bad">!</i>';if(m.pending)return '<i class="mc-tk">…</i>';var sn=m.seen_at&&!mcGr(mcLink(m.link_id));return '<i class="mc-tk'+(sn?' on':'')+'">'+(sn?'✓✓':'✓')+'</i>'}
 function mcRow(m){
   var mine=m.sender_id===CNX.uid,c=mine?'u':'a',tm=kcxTime(mcMs(m.created_at)),tt=tm+(mine?' '+mcTk(m):''),h,me=m.meta||{};
-  if(m.kind==='t')h='<div class="kcx-m '+c+mcBigEm(m,me)+'">'+(me.sr&&stIsThumb(me.sr.th)?'<div class="mc-sq"><i style="background-image:url('+me.sr.th+')"></i><span><b>'+__('پاسخ به استوری','Story reply')+'</b>'+(me.sr.c?'<small dir="auto">'+esc(String(me.sr.c).slice(0,60))+'</small>':'')+'</span></div>':'')+'<p dir="auto">'+emjText(esc(m.body||'').replace(/\n/g,'<br>'))+'</p><time>'+tt+'</time></div>';
+  if(m.kind==='t'&&me.fc)h=mcFwcHTML(m,me,c,tt);
+  else if(m.kind==='t')h='<div class="kcx-m '+c+mcBigEm(m,me)+'">'+(me.sr&&stIsThumb(me.sr.th)?'<div class="mc-sq"><i style="background-image:url('+me.sr.th+')"></i><span><b>'+__('پاسخ به استوری','Story reply')+'</b>'+(me.sr.c?'<small dir="auto">'+esc(String(me.sr.c).slice(0,60))+'</small>':'')+'</span></div>':'')+'<p dir="auto">'+emjText(esc(m.body||'').replace(/\n/g,'<br>'))+'</p><time>'+tt+'</time></div>';
   else if(m.kind==='p'||m.kind==='v'){
     var v=m.kind==='v';
     h='<div class="kcx-m '+c+' sp-m" data-spid="'+esc(m.id)+'" data-spk="'+m.kind+'" data-spd="'+(+me.d||0)+'"><button type="button" class="sp-pv" data-spo="'+esc(m.id)+'" aria-label="'+(v?__('پخش ویدیو','Play video'):__('دیدن عکس','View photo'))+'"><img alt="" data-spimg="'+esc(m.id)+'" draggable="false">'+(v?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button><time>'+tt+'</time></div>';
@@ -12444,7 +13424,7 @@ function mcRow(m){
   if(rx)h=h.replace('class="kcx-m ','class="kcx-m hre ').replace(/<\/div>$/,'<span class="kcx-re mc-rxp">'+rx+'</span></div>');
   var lk=mine?null:mcLink(m.link_id),gp=lk&&mcGr(lk),sn='';
   if(gp){sn=mcSnd(lk,m);h=h.replace(/^(<div[^>]*>)/,'$1<b class="mc-sn" dir="auto" style="color:hsl('+mcHue(m.sender_id)+',62%,52%)">'+esc(sn)+'</b>')}
-  return '<div class="kcx-row'+(m.failed?' mc-failed':'')+(lk?' mc-hasav':'')+'" data-mid="'+esc(m.id)+'" data-snd="'+esc(m.sender_id)+'" data-t="'+mcMs(m.created_at)+'" data-mine="'+(mine?1:0)+'">'+(lk?(gp?mcAvHTMLv(mcMsgAv(m,sn)):mcAvHTML(lk)):'')+h+'</div>';
+  return '<div class="kcx-row'+(m.failed?' mc-failed':'')+(lk?' mc-hasav':'')+'" data-mid="'+esc(m.id)+'" data-snd="'+esc(m.sender_id)+'" data-t="'+mcMs(m.created_at)+'" data-mine="'+(mine?1:0)+'"><span class="kcx-ck"></span>'+(lk?(gp?mcAvHTMLv(mcMsgAv(m,sn)):mcAvHTML(lk)):'')+h+'</div>';
 }
 /* thumbnails, pictures of round videos and voice files arrive after the bubble is on the screen */
 function mcHydrate(list){
@@ -12456,6 +13436,17 @@ function mcHydrate(list){
       if(SP.mem['spt_'+id]){set(SP.mem['spt_'+id]);return}
       var pth=m.thumb||(m.kind==='p'?m.media:'');if(!pth)return;
       mcBlob(pth).then(function(x){SP.mem['spt_'+id]=x.u;set(x.u)}).catch(function(){var b=document.querySelector('[data-spid="'+id+'"]');if(b)b.classList.add('gone')});
+    }else if(m.kind==='t'&&m.meta&&m.meta.fc){
+      var fim=document.querySelector('img[data-fci="'+id+'"]');
+      if(fim&&!fim.dataset.fb){
+        fim.dataset.fb=1;
+        var fld=function(){
+          if(SP.mem['fc_'+id]){fim.src=SP.mem['fc_'+id];return}
+          if(!m.media){fim.remove();return}
+          mcBlob(m.media).then(function(x){SP.mem['fc_'+id]=x.u;fim.src=x.u}).catch(function(){fim.remove()});
+        };
+        if(!fim.getAttribute('src'))fld();else fim.addEventListener('error',fld,{once:true});
+      }
     }else if(m.kind==='a'){
       if(VN.mem['vn_'+id]||!m.media)return;
       mcBlob(m.media).then(function(x){VN.mem['vn_'+id]=x.u}).catch(function(){});
@@ -12916,6 +13907,56 @@ function mcSwEnd(){
 document.addEventListener('pointerup',mcSwEnd,true);
 document.addEventListener('pointercancel',mcSwEnd,true);
 document.addEventListener('click',function(e){if(Date.now()<MSW.sup&&e.target.closest&&e.target.closest('.mcx .kcx-row')){e.preventDefault();e.stopPropagation()}},true);
+/* v342: selection mode of the friend / group / advisor chats (same look as the advisor chat): hold = select, tap = reactions + menu */
+function mcSelInit(root,L,th,l){
+  var tm=0,sx=0,sy=0,sup=0,Sc=document.getElementById('mcSc');
+  function rows(){return [].slice.call(th.querySelectorAll('.kcx-row[data-mid]'))}
+  function on(){return root.classList.contains('kcx-sel')}
+  function exit(){root.classList.remove('kcx-sel');rows().forEach(function(r){r.classList.remove('sel')})}
+  function picked(){return rows().filter(function(r){return r.classList.contains('sel')}).map(function(r){return mcMsg(r.dataset.mid)}).filter(Boolean)}
+  function upd(){
+    var n=th.querySelectorAll('.kcx-row.sel').length;if(!n){exit();return}
+    if(Sc)Sc.textContent=fa(n)+' '+__('انتخاب','selected');
+    var rb=root.querySelector('[data-sel=reply]'),pk=picked();if(rb)rb.disabled=n!==1||!pk[0]||!!pk[0].failed||!!pk[0].pending;
+  }
+  function start(r){try{window.getSelection().removeAllRanges()}catch(x){}root.classList.add('kcx-sel');r.classList.add('sel');upd()}
+  root._mcSel=start;
+  function stop(){if(tm){clearTimeout(tm);tm=0}}
+  L.addEventListener('pointerdown',function(e){
+    if(e.button>0||on()||e.target.closest('input,textarea'))return;
+    var r=e.target.closest('.kcx-row[data-mid]');if(!r)return;
+    sx=e.clientX;sy=e.clientY;stop();
+    tm=setTimeout(function(){tm=0;sup=1;start(r);try{navigator.vibrate&&navigator.vibrate(12)}catch(x){}},420);
+  });
+  L.addEventListener('pointermove',function(e){if(tm&&(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10))stop()});
+  ['pointerup','pointercancel','pointerleave'].forEach(function(n){L.addEventListener(n,function(){stop();if(sup)setTimeout(function(){sup=0},350)})});
+  L.addEventListener('scroll',stop,{passive:true});
+  L.addEventListener('click',function(e){
+    if(sup){sup=0;e.stopPropagation();e.preventDefault();return}
+    var r=e.target.closest('.kcx-row[data-mid]');
+    if(on()){e.stopPropagation();e.preventDefault();if(r){r.classList.toggle('sel');upd()}return}
+    /* buttons keep their own job (play, open a photo, vote ...); a tap on the rest of the bubble opens the reaction bar + menu */
+    if(!r||e.target.closest('button,a,video,input,textarea,[data-spo],[data-fch]'))return;
+    var m=mcMsg(r.dataset.mid);if(!m||m.failed)return;
+    e.stopPropagation();e.preventDefault();mcMenu(root,l,r,m);
+  },true);
+  root.addEventListener('click',function(e){
+    var b=e.target.closest('[data-sel]');if(!b||!on())return;
+    var k=b.dataset.sel,ms=picked(),t=ms.map(mcTextOf).filter(Boolean).join('\n\n');
+    if(k==='x'){exit();return}
+    if(k==='reply'){if(ms.length===1&&!ms[0].failed&&!ms[0].pending){exit();mcReplyTo(ms[0])}return}
+    if(k==='copy'){if(t){mcCopy(t);exit()}else toast(__('پیام انتخاب‌شده متن ندارد','The selected messages have no text'),null,null,'info');return}
+    if(k==='fwd'){
+      if(!t){toast(__('پیام انتخاب‌شده متن ندارد','The selected messages have no text'),null,null,'info');return}
+      exit();try{if(navigator.share){navigator.share({text:t}).catch(function(){});return}}catch(er){}mcCopy(t);return;
+    }
+    if(k==='del'){
+      var mine=ms.filter(function(m){return m.sender_id===CNX.uid});
+      if(!mine.length){toast(__('فقط پیام‌های خودت را می‌توانی حذف کنی','You can only delete your own messages'),null,null,'info');return}
+      exit();mcDeleteMany(l,mine);
+    }
+  });
+}
 function mcMenuClose(root){var p=root.querySelector('.kcx-pop');if(!p)return;p.classList.add('out');setTimeout(function(){p.remove()},170)}
 function mcMenu(root,l,r,m){
   mcMenuClose(root);
@@ -12929,6 +13970,7 @@ function mcMenu(root,l,r,m){
     (txt?'<button type="button" data-pa="copy">'+icon('copy')+'<b>'+__('کپی','Copy')+'</b></button>':'')+
     (txt?'<button type="button" data-pa="fwd">'+SVFWD+'<b>'+__('هدایت','Forward')+'</b></button>':'')+
     (m.kind==='f'&&m.media&&!m.failed&&!m.pending?'<button type="button" data-pa="fsv">'+icon('download')+'<b>'+__('ذخیره یا ارسال فایل','Save or share the file')+'</b></button>':'')+
+    (m.failed||m.pending?'':'<button type="button" data-pa="sel">'+icon('check')+'<b>'+__('انتخاب','Select')+'</b></button>')+
     ((m.kind==='p'||m.kind==='v')&&m.media&&!m.failed&&!m.pending?'<button type="button" data-pa="gal">'+icon('download')+'<b>'+__('ذخیره در گالری','Save to gallery')+'</b></button>':'')+
     (mine?'<button type="button" class="del" data-pa="del">'+icon('trash')+'<b>'+__('حذف','Delete')+'</b></button>':'')+'</div>';
   p.innerHTML='<div class="kcx-pb"></div><div class="kcx-pc"></div>'+bar+mn;
@@ -12956,6 +13998,7 @@ function mcMenu(root,l,r,m){
       if(k==='reply')mcReplyTo(m);
       else if(k==='copy')mcCopy(txt);
       else if(k==='fwd'){try{if(navigator.share){navigator.share({text:txt}).catch(function(){});return}}catch(er){}mcCopy(txt)}
+      else if(k==='sel'){if(root._mcSel)root._mcSel(r)}
       else if(k==='gal')mcGallery(m);
       else if(k==='fsv')mcSaveFile(m);
       else if(k==='del')setTimeout(function(){mcDelete(l,m)},180);
@@ -12981,18 +14024,23 @@ async function mcGallery(m){
     await mcSave(x.b,name);
   }catch(e){toast(__('ذخیره نشد','Could not save'),null,null,'warn')}
 }
+async function mcDelOne(l,m){
+  var a=MC.msgs[l.id]||[],i=a.indexOf(m);
+  if(m.failed||m.pending&&!m.media){if(i>=0)a.splice(i,1);mcSync(false);return}
+  var r=await cnxReq('/rest/v1/link_messages?id=eq.'+encodeURIComponent(m.id),'DELETE',null,{Prefer:'return=minimal'});
+  if(!r.ok){toast(cnxNetErr(r),null,null,'warn');return}
+  var ps=[m.media,m.thumb].filter(Boolean);
+  if(ps.length)sbReq('/storage/v1/object/chat','DELETE',{prefixes:ps}).catch(function(){});
+  i=a.indexOf(m);if(i>=0)a.splice(i,1);
+  mcSync(false);
+  var last=a[a.length-1];if(last)MC.sum[l.id]=last;else delete MC.sum[l.id];
+}
 function mcDelete(l,m){
-  askConfirm({title:__('حذف پیام','Delete message'),msg:__('این پیام برای هر دو نفر پاک می‌شود.','This message is deleted for both of you.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:async function(){
-    var a=MC.msgs[l.id]||[],i=a.indexOf(m);
-    if(m.failed||m.pending&&!m.media){if(i>=0)a.splice(i,1);mcSync(false);return}
-    var r=await cnxReq('/rest/v1/link_messages?id=eq.'+encodeURIComponent(m.id),'DELETE',null,{Prefer:'return=minimal'});
-    if(!r.ok){toast(cnxNetErr(r),null,null,'warn');return}
-    var ps=[m.media,m.thumb].filter(Boolean);
-    if(ps.length)sbReq('/storage/v1/object/chat','DELETE',{prefixes:ps}).catch(function(){});
-    i=a.indexOf(m);if(i>=0)a.splice(i,1);
-    mcSync(false);
-    var last=a[a.length-1];if(last)MC.sum[l.id]=last;else delete MC.sum[l.id];
-  }}]});
+  askConfirm({title:__('حذف پیام','Delete message'),msg:__('این پیام برای هر دو نفر پاک می‌شود.','This message is deleted for both of you.'),btns:[{t:__('حذف','Delete'),cls:'bad',fn:function(){return mcDelOne(l,m)}}]});
+}
+function mcDeleteMany(l,ms){
+  if(ms.length===1){mcDelete(l,ms[0]);return}
+  askConfirm({title:__('حذف پیام‌ها','Delete messages'),msg:__('این پیام‌ها برای همه پاک می‌شوند.','These messages are deleted for everyone.'),btns:[{t:__('حذف','Delete')+' ('+fa(ms.length)+')',cls:'bad',fn:async function(){for(var i=0;i<ms.length;i++)await mcDelOne(l,ms[i])}}]});
 }
 /* picture / video / file chooser */
 var MC_MULTI=10;
@@ -13333,6 +14381,7 @@ function mcInit(){
       mcViewMedia(sm);
       return;
     }
+    if((b=e.target.closest('[data-fch]'))){e.stopPropagation();mcOpenFwc(b.dataset.fch);return}
     if((b=e.target.closest('[data-mcf]'))){
       mcSaveMsg(b.dataset.mcf);
       return;
@@ -13343,16 +14392,8 @@ function mcInit(){
       askConfirm({title:__('ارسال نشد','Not sent'),msg:__('دوباره بفرستم؟','Send it again?'),btns:[{t:__('ارسال دوباره','Send again'),fn:function(){mcSend(l,fm2)}},{t:__('حذف','Delete'),cls:'bad',fn:function(){mcDelete(l,fm2)}}]});
     }
   });
-  /* keeping a finger on a message: Telegram-style reaction bar + menu (reply, copy, forward, delete for your own) */
-  var lp=0,lx=0,ly=0,lpDone=0;
-  L.addEventListener('pointerdown',function(e){
-    clearTimeout(lp);lp=0;var r=e.target.closest('.kcx-row');if(!r||e.target.closest('button,a,video,input'))return;
-    lx=e.clientX;ly=e.clientY;
-    lp=setTimeout(function(){lp=0;var m=mcMsg(r.dataset.mid);if(m){lpDone=Date.now();try{navigator.vibrate&&navigator.vibrate(12)}catch(x){}try{window.getSelection().removeAllRanges()}catch(x){}mcMenu(root,l,r,m)}},420);
-  });
-  L.addEventListener('pointermove',function(e){if(lp&&(Math.abs(e.clientX-lx)>10||Math.abs(e.clientY-ly)>10)){clearTimeout(lp);lp=0}});
-  ['pointerup','pointercancel','scroll'].forEach(function(n){L.addEventListener(n,function(){clearTimeout(lp);lp=0},true)});
-  L.addEventListener('click',function(e){if(Date.now()-lpDone<500){e.stopPropagation();e.preventDefault()}},true);
+  /* v342: keeping a finger on ANY message (text, photo, sticker, voice, file, poll) = selection mode; a tap on a message = reaction bar + menu */
+  mcSelInit(root,L,th,l);
   L.addEventListener('contextmenu',function(e){if(e.target.closest('.kcx-row'))e.preventDefault()});
   /* show what we have at once, then ask the server */
   mcAvFix();
@@ -13362,8 +14403,8 @@ function mcInit(){
   mcStop();
   mcPull();
   MC.poll=setInterval(function(){if(!document.getElementById('mcTh')){mcStop();return}mcPull()},4000);
-  clearInterval(MC.prT);MC.prT=setInterval(function(){if(!document.getElementById('mcTh')){clearInterval(MC.prT);MC.prT=0;return}mcPulseTick()},2500);
-  mcPulseTick();
+  clearInterval(MC.prT);MC.prT=setInterval(function(){if(!document.getElementById('mcTh')){clearInterval(MC.prT);MC.prT=0;return}mcPulseTick();MC.vcN=((MC.vcN||0)+1)%2;if(!MC.vcN)vcWhoTick()},2500);
+  mcPulseTick();vcWhoPaint();vcWhoTick();
 }
 /* ---- small preview of an advisor group (Telegram style): press and hold the round picture of a group in "من و مشاور".
    It only LOOKS at the chat: nothing is marked as read (the red number stays) until the person really opens the group.

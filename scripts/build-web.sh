@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ESB="npx --no-install esbuild"
+node scripts/check-channel-posts.mjs   # every channel post needs a picture and a poll
 # English and Arabic dictionaries + language core + Konkoria English texts + Arabic screen-text translator + the app are joined into one script
 # channel-posts.js = the posts of the in-app Ario Channel (see scripts/add-channel-post.mjs)
 # names are kept (no --minify-identifiers) so an error shown on screen says which function failed
