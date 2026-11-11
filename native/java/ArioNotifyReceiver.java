@@ -7,7 +7,7 @@ import android.content.Intent;
 
 import org.json.JSONObject;
 
-/** Fires scheduled Ario notifications, handles the snooze / done buttons, and re-arms alarms after a reboot. */
+/** Fires scheduled Ario notifications, handles the snooze / done buttons and the chat reply / mark-as-read buttons, and re-arms alarms after a reboot. */
 public class ArioNotifyReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
@@ -36,6 +36,22 @@ public class ArioNotifyReceiver extends BroadcastReceiver {
                 NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
                 nm.cancel(id);
                 ArioNotifyCore.addAction(c, "done", i.getStringExtra("tid"), System.currentTimeMillis());
+            } else if ("ario.chat.read".equals(a) || "ario.chat.reply".equals(a)) {
+                // "Mark as read" / "Reply" on a chat notification: needs the network, so it runs off the main thread
+                final PendingResult pr = goAsync();
+                final Context ctx = c.getApplicationContext();
+                final Intent in = i;
+                new Thread(new Runnable() {
+                    public void run() {
+                        try {
+                            ArioChatNotify.handleAction(ctx, in);
+                        } catch (Throwable t) {
+                            // ignore
+                        } finally {
+                            pr.finish();
+                        }
+                    }
+                }).start();
             } else if (Intent.ACTION_BOOT_COMPLETED.equals(a) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(a)) {
                 ArioNotifyCore.rescheduleAll(c);
                 FocusGuardService.ensure(c);

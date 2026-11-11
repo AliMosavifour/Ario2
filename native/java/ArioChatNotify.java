@@ -5,6 +5,12 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -18,12 +24,17 @@ import android.service.notification.StatusBarNotification;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
+import androidx.core.app.RemoteInput;
 import androidx.core.graphics.drawable.IconCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.UUID;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -94,6 +105,7 @@ public class ArioChatNotify {
             String from = group ? meta.optString("nm", "").trim() : peer;
             if (from.isEmpty()) from = ArioLang.t(c, "عضو", "Member");
             String p = av == null ? "" : av.optString("p", "");
+            if (p.isEmpty() && av != null) p = av.optString("v", "");   // v = the sender's real profile photo (also the VIP ones), only used here
             int hue = av == null ? hueOf(from) : av.optInt("h", hueOf(from));
             String letter = av == null ? "" : av.optString("n", "");
             if (letter.isEmpty() && from.length() > 0) letter = from.substring(0, from.offsetByCodePoints(0, 1));
@@ -218,6 +230,11 @@ public class ArioChatNotify {
 
     /** One notification per chat; it keeps the last few messages so a burst reads like a conversation. */
     static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter) {
+        post(c, link, groupTitle, from, text, when, p, hue, letter, false);
+    }
+
+    /** mine = a reply sent from the notification itself: shown as "me", silent, no new sound. */
+    static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter, boolean mine) {
         try {
             ensureChannel(c);
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -235,11 +252,12 @@ public class ArioChatNotify {
                 if (!shown) hist = new JSONArray();   // the earlier ones were read or swiped away
             }
             JSONObject h = new JSONObject();
-            h.put("n", from).put("t", text).put("w", when > 0 ? when : System.currentTimeMillis()).put("p", p).put("h", hue).put("l", letter);
+            h.put("n", from).put("me", mine ? 1 : 0).put("t", text).put("w", when > 0 ? when : System.currentTimeMillis()).put("p", p).put("h", hue).put("l", letter);
             hist.put(h);
             JSONArray keep = new JSONArray();
             for (int i = Math.max(0, hist.length() - 6); i < hist.length(); i++) keep.put(hist.get(i));
-            sp.edit().putString("h_" + link, keep.toString()).apply();
+            sp.edit().putString("h_" + link, keep.toString())
+                    .putString("i_" + link, new JSONObject().put("g", groupTitle).put("t", groupTitle.isEmpty() ? from : groupTitle).toString()).apply();
 
             Person me = new Person.Builder().setName(ArioLang.t(c, "من", "Me")).build();
             NotificationCompat.MessagingStyle st = new NotificationCompat.MessagingStyle(me);
@@ -251,6 +269,10 @@ public class ArioChatNotify {
             Bitmap last = null;
             for (int i = 0; i < keep.length(); i++) {
                 JSONObject o = keep.getJSONObject(i);
+                if (o.optInt("me", 0) == 1) {
+                    st.addMessage(o.optString("t", ""), o.optLong("w", System.currentTimeMillis()), (Person) null);
+                    continue;
+                }
                 Bitmap bm = avatar(c, o.optString("p", ""), o.optInt("h", 0), o.optString("l", ""));
                 last = bm;
                 Person sender = new Person.Builder().setName(o.optString("n", "")).setKey(o.optString("n", "")).setIcon(IconCompat.createWithBitmap(bm)).build();
@@ -261,19 +283,173 @@ public class ArioChatNotify {
                     .setSmallIcon(small != 0 ? small : android.R.drawable.ic_dialog_email)
                     .setColor(Color.parseColor("#f47b3a"))
                     .setContentTitle(group ? groupTitle : from)
-                    .setContentText(group ? from + ": " + text : text)
+                    .setContentText(mine ? ArioLang.t(c, "شما: ", "You: ") + text : (group ? from + ": " + text : text))
                     .setStyle(st)
                     .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setDefaults(Notification.DEFAULT_ALL)
+                    .setDefaults(mine ? 0 : Notification.DEFAULT_ALL)
+                    .setOnlyAlertOnce(mine)
                     .setAutoCancel(true)
                     .setWhen(when > 0 ? when : System.currentTimeMillis())
                     .setShowWhen(true)
                     .setContentIntent(ArioNotifyCore.openPi(c, id, "chat:" + link));
             if (last != null) b.setLargeIcon(last);
+            b.addAction(replyAction(c, id, link));
+            b.addAction(readAction(c, id, link));
             nm.notify(id, b.build());
         } catch (Throwable t) {
             // never crash the worker
+        }
+    }
+
+    /* ---------- buttons on the notification: reply + mark as read ---------- */
+    static final String KEY_REPLY = "ario_reply";
+
+    static PendingIntent actionPi(Context c, String act, int nid, String link, boolean mutable) {
+        Intent i = new Intent(c, ArioNotifyReceiver.class);
+        i.setAction(act);
+        i.setData(Uri.parse("ario://chat/" + act + "/" + link));
+        i.putExtra("nid", nid);
+        i.putExtra("link", link);
+        int fl = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) fl |= mutable ? PendingIntent.FLAG_MUTABLE : PendingIntent.FLAG_IMMUTABLE;
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !mutable) fl |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getBroadcast(c, nid + (mutable ? 1 : 2), i, fl);
+    }
+
+    static NotificationCompat.Action replyAction(Context c, int nid, String link) {
+        RemoteInput ri = new RemoteInput.Builder(KEY_REPLY).setLabel(ArioLang.t(c, "پیام…", "Message…")).build();
+        return new NotificationCompat.Action.Builder(0, ArioLang.t(c, "پاسخ", "Reply"), actionPi(c, "ario.chat.reply", nid, link, true))
+                .addRemoteInput(ri)
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                .setShowsUserInterface(false)
+                .setAllowGeneratedReplies(true)
+                .build();
+    }
+
+    static NotificationCompat.Action readAction(Context c, int nid, String link) {
+        return new NotificationCompat.Action.Builder(0, ArioLang.t(c, "خوانده شد", "Mark as read"), actionPi(c, "ario.chat.read", nid, link, false))
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+                .setShowsUserInterface(false)
+                .build();
+    }
+
+    static void toast(final Context c, final String m) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            public void run() {
+                try {
+                    Toast.makeText(c, m, Toast.LENGTH_SHORT).show();
+                } catch (Throwable t) {
+                    // ignore
+                }
+            }
+        });
+    }
+
+    /** A valid access token for the background calls, or "" when there is no usable sign-in. */
+    static String token(Context c) {
+        SharedPreferences s = ArioCounselorWorker.sp(c);
+        if (!s.getBoolean("on", false)) return "";
+        if (s.getLong("exp", 0) < System.currentTimeMillis() / 1000 + 120) {
+            if (!ArioCounselorWorker.refresh(c)) return "";
+        }
+        return s.getString("at", "");
+    }
+
+    /** POST json to Supabase; renews the sign-in once on 401. Returns the HTTP status (0 = no connection). */
+    static int postJson(Context c, String path, JSONObject body, boolean wantBody) {
+        SharedPreferences s = ArioCounselorWorker.sp(c);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                String tok = token(c);
+                if (tok.isEmpty()) return 401;
+                HttpURLConnection h = (HttpURLConnection) new URL(s.getString("url", "") + path).openConnection();
+                h.setRequestMethod("POST");
+                h.setConnectTimeout(15000);
+                h.setReadTimeout(20000);
+                h.setRequestProperty("apikey", s.getString("key", ""));
+                h.setRequestProperty("Authorization", "Bearer " + tok);
+                h.setRequestProperty("Content-Type", "application/json");
+                h.setRequestProperty("Prefer", "return=minimal");
+                h.setDoOutput(true);
+                OutputStream os = h.getOutputStream();
+                os.write(body.toString().getBytes("UTF-8"));
+                os.close();
+                int code = h.getResponseCode();
+                if (code == 401 && attempt == 0) {
+                    if (!ArioCounselorWorker.refresh(c)) return 401;
+                    continue;
+                }
+                return code;
+            } catch (Throwable t) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    static void markSeen(Context c, String link) {
+        try {
+            postJson(c, "/rest/v1/rpc/mark_chat_seen", new JSONObject().put("p_link", link), false);
+        } catch (Throwable t) {
+            // ignore
+        }
+    }
+
+    /** Runs on a background thread from ArioNotifyReceiver: \"mark as read\" and \"reply\" taken straight from the notification. */
+    static void handleAction(Context c, Intent in) {
+        try {
+            String act = in.getAction(), link = in.getStringExtra("link");
+            if (link == null || link.isEmpty()) return;
+            int nid = 2100001000 + (Math.abs(link.hashCode()) % 90000);
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            SharedPreferences sp = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            if ("ario.chat.read".equals(act)) {
+                nm.cancel(nid);
+                sp.edit().remove("h_" + link).apply();
+                markSeen(c, link);
+                return;
+            }
+            Bundle r = RemoteInput.getResultsFromIntent(in);
+            CharSequence cs = r == null ? null : r.getCharSequence(KEY_REPLY);
+            String text = cs == null ? "" : cs.toString().trim();
+            if (text.isEmpty()) return;
+            if (text.length() > 3000) text = text.substring(0, 3000);
+
+            JSONObject inf;
+            try {
+                inf = new JSONObject(sp.getString("i_" + link, "{}"));
+            } catch (Throwable t) {
+                inf = new JSONObject();
+            }
+            String groupTitle = inf.optString("g", ""), title = inf.optString("t", "");
+            boolean group = !groupTitle.isEmpty();
+
+            JSONObject me;
+            try {
+                me = new JSONObject(ArioCounselorWorker.sp(c).getString("me", "{}"));
+            } catch (Throwable t) {
+                me = new JSONObject();
+            }
+            JSONObject meta = new JSONObject();
+            JSONObject av = me.optJSONObject("av");
+            if (av != null) meta.put("av", av);
+            if (group && !me.optString("nm", "").isEmpty()) {
+                String nm0 = me.optString("nm", "");
+                meta.put("nm", nm0.length() > 80 ? nm0.substring(0, 80) : nm0);
+            }
+            JSONObject row = new JSONObject().put("id", UUID.randomUUID().toString()).put("link_id", link)
+                    .put("sender_id", ArioCounselorWorker.sp(c).getString("uid", "")).put("kind", "t").put("body", text).put("meta", meta);
+            int code = postJson(c, "/rest/v1/link_messages", row, false);
+            if (code >= 200 && code < 300) {
+                markSeen(c, link);
+                post(c, link, groupTitle, title, text, System.currentTimeMillis(), "", 0, "", true);   // the notification now shows your reply
+            } else {
+                post(c, link, groupTitle, title, ArioLang.t(c, "⚠️ ارسال نشد: ", "⚠️ Not sent: ") + text, System.currentTimeMillis(), "", 0, "", true);
+                toast(c, ArioLang.t(c, "پیام ارسال نشد؛ اینترنت را بررسی کن", "Message not sent - check your connection"));
+            }
+        } catch (Throwable t) {
+            // never crash the receiver
         }
     }
 }

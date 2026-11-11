@@ -38,6 +38,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FocusGuardPlugin.class);
         registerPlugin(ArioNotifyPlugin.class);
         registerPlugin(ArioTtsPlugin.class);
+        registerPlugin(ArioAudioPlugin.class);
         super.onCreate(savedInstanceState);
         // opened by tapping a notification: remember which section it was for
         ArioNotifyCore.stashGo(this, getIntent());

@@ -75,6 +75,9 @@ public class ArioCounselorWorker extends Worker {
             if (!same) e.remove("nat");
         }
         e.putString("mu", d.optString("mu", "")).putBoolean("cn", d.optBoolean("cn", true));
+        // my own name + picture, so a reply sent from a chat notification looks like any other message from me
+        JSONObject me = d.optJSONObject("me");
+        if (me != null) e.putString("me", me.toString());
         long rn = Math.max(d.optLong("rn", 0), same ? s.getLong("rn", 0) : 0);
         if (rn <= 0) rn = System.currentTimeMillis();   // first time: only reports that arrive from now on
         e.putLong("rn", rn).apply();
