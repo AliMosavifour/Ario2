@@ -3713,6 +3713,12 @@ body.frlist .ao-fab{display:none}
 #frList{padding-bottom:96px}
 .fr-sw{position:relative;overflow:hidden;border-bottom:1px solid var(--field)}
 .fr-sw:last-child{border-bottom:0}
+.fr-ch{position:relative;display:flex;align-items:center;border-bottom:1px solid var(--field);background:linear-gradient(var(--glass),var(--glass)),var(--bg)}
+.fr-ch.un{background:linear-gradient(color-mix(in srgb,var(--accent) 8%,transparent),color-mix(in srgb,var(--accent) 8%,transparent)),linear-gradient(var(--glass),var(--glass)),var(--bg)}
+.fr-row .kc-ph.fr-chav{background:linear-gradient(145deg,#6a4cff,#9b7bff)}
+.fr-chav img{width:36px;height:36px;object-fit:contain}
+.fr-l1 em.fr-cm{opacity:.9}
+
 .fr-sw.in{animation:frIn .55s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(var(--i,0)*45ms)}
 @keyframes frIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 .fr-acts{position:absolute;inset-block:0;inset-inline-end:0;width:var(--fw,222px);display:flex}
@@ -3788,8 +3794,12 @@ html[dir=ltr] .mcx .kcx-row.g-p .kcx-m.u:not(.vn-v){border-top-left-radius:20px;
 
 /* v313: stickers, study challenge, confetti, chat colours */
 .mc-stk{background:none!important;border:0!important;box-shadow:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;padding:2px 4px!important}
-.mc-stki{display:block;width:124px;height:124px;object-fit:contain;pointer-events:none}
-.mc-stk time{display:block;opacity:.6}
+.mc-stki{display:block;width:124px;height:124px;object-fit:contain;pointer-events:none;background:transparent!important;border:0!important;border-radius:0!important;box-shadow:none!important;outline:0!important}
+.mc-stk{padding:0!important;margin:2px 0}
+.mc-stk time{display:block;opacity:.6;text-align:end;padding:0 4px}
+/* v356: video stickers (own cut-out, transparent) float on the chat page with no frame, no border and no control bar */
+video.mc-stki::-webkit-media-controls{display:none!important}
+.stk-g video{width:100%;height:100%;object-fit:contain;background:transparent;pointer-events:none}
 .mc-stt.open{max-height:250px!important;overflow:auto}
 /* desktop: emoji / sticker panel floats above the button (set in JS: left, bottom, width) */
 #mcSt.mc-stt.mc-pop{position:absolute;margin:0;z-index:70;transform-origin:bottom center;border-radius:20px;border:1px solid var(--edge);background:color-mix(in srgb,var(--glass2) 96%,#fff);box-shadow:0 12px 36px rgba(20,30,60,.22)}
@@ -3801,6 +3811,16 @@ html[dir=ltr] .mcx .kcx-row.g-p .kcx-m.u:not(.vn-v){border-top-left-radius:20px;
 .stk-g{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
 .kcx-em .stk-g button{width:100%;height:auto;aspect-ratio:1;padding:3px;border-radius:14px;font-size:0}
 .stk-g img{width:100%;height:100%;object-fit:contain}
+/* v353: «+» of the sticker panel */
+.stk-tabs{align-items:center}
+.stk-tabs .stk-my,.stk-tabs .stk-plus{display:grid;place-items:center;color:var(--fg)}
+.stk-tabs .stk-my .ic,.stk-tabs .stk-plus .ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.stk-tabs .stk-plus{background:var(--ct1,var(--accent,#34d399));color:#fff;border-radius:50%;width:34px;height:34px;padding:0;transition:transform .18s}
+.stk-tabs .stk-plus:active{transform:scale(.88)}
+.kcx-em .stk-g .stk-addt{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:2px dashed color-mix(in srgb,var(--fg) 30%,transparent);background:none;color:var(--fg);opacity:.8}
+.stk-addt .ic{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.stk-addt small{font-size:11px}
+.stk-empty{text-align:center;font-size:12.5px;opacity:.65;margin:8px 0 2px}
 .mc-ch{margin:0 12px 6px;padding:10px 12px;border-radius:18px;display:grid;gap:5px;font-size:12.5px}
 .mc-ch[hidden]{display:none}
 .mc-ch b{font-size:13px}
@@ -4361,3 +4381,105 @@ body:has(.gpg) .toast{z-index:100}
 .gpe~.sheet-wrap{z-index:96}
 .gpe~.toast,body:has(.gpe) .toast{z-index:100}
 .gr-ph2{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+
+/* ---- v351: reply to a message like Telegram (quote block in the bubble, bar above the text box, flash on the original) ---- */
+.mc-rq{display:flex;align-items:center;gap:8px;max-width:100%;margin:-2px 0 6px;padding:4px 8px;border-radius:10px;background:rgba(0,0,0,.10);border-inline-start:3px solid var(--accent,#38bdf8);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:filter .15s}
+.mc-rq:active{filter:brightness(.9)}
+.kcx-m.u .mc-rq{border-inline-start-color:#0f9d74;background:rgba(15,157,116,.14)}
+.mc-rqt{display:grid;min-width:0;flex:1;font-size:12px;line-height:1.55;text-align:start}
+.mc-rqt b{font-weight:800;color:var(--accent,#2563eb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kcx-m.u .mc-rqt b{color:#0b7a5a}
+.mc-rqt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+.mc-rqi{flex:none;width:36px;height:36px;border-radius:8px;background:#444 center/cover no-repeat}
+.mc-rqi[hidden]{display:none}
+.mcx .kcx-row.mc-hl{background:color-mix(in srgb,var(--accent) 26%,transparent);border-radius:16px}
+.mc-rpb{flex:none;display:flex;align-items:center;gap:10px;margin:0 10px -2px;padding:7px 8px 7px 12px;border-radius:18px;border-inline-start:3px solid var(--accent,#38bdf8);cursor:pointer}
+.mc-rpb[hidden]{display:none}
+.mc-rpb>.ic{flex:none;width:22px;height:22px;color:var(--accent,#38bdf8)}
+.mc-rpx{flex:none;width:32px;height:32px;display:grid;place-items:center;border:0;background:none;color:var(--fg2);border-radius:50%;cursor:pointer}
+.mc-rpx .ic{width:18px;height:18px}
+.kcx-sel .mc-rpb{display:none}
+/* swiping to the right: the arrow appears on the left */
+.mcx .kcx-row.msw-r::after{right:auto;left:-46px}
+
+/* ===== v351: chat header + message box like Telegram (back | profile pill | actions pill ; emoji | text | clip | round button) ===== */
+.mcx .kcx-top{direction:ltr}
+.mcx .kcx-top .kcx-rb .ic{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transform:none}
+.mcx .kcx-top .kcx-pill{padding:0 14px 0 8px;gap:10px}
+.mcx .kcx-ti{text-align:left;min-width:0;flex:1}
+.mcx .kcx-ti small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.mcx .kcx-ti b{display:flex;align-items:center;min-width:0;overflow:visible;text-overflow:clip}
+.kcx-nm{position:relative;display:block;flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap}
+.kcx-nt{display:inline-block;white-space:nowrap;unicode-bidi:plaintext}
+.mcx .kcx-mi{flex:none;margin-inline-start:6px;vertical-align:baseline}
+/* long name: soft fade on both edges + a very slow ticker (right → left, re-enters from the right) */
+.kcx-nm.mq{display:flex;flex:1 1 auto;gap:44px;-webkit-mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%);mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%)}
+.kcx-nm.mq .kcx-nt{flex:none;animation:kcxNm var(--d,12s) linear infinite;will-change:transform}
+@keyframes kcxNm{0%,16%{transform:translateX(var(--a,0px))}100%{transform:translateX(var(--b,-100px))}}
+@media (prefers-reduced-motion:reduce){.kcx-nm.mq .kcx-nt{animation:none;transform:translateX(var(--a,0px))}}
+/* the actions share one pill */
+.kcx-acts{flex:none;display:flex;align-items:center;gap:0;height:56px;padding:0 6px;border-radius:30px}
+.kcx-acts .kcx-rb{width:42px;height:44px;border:0;background:none;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;border-radius:50%}
+.kcx-acts .kcx-rb .ic{width:22px;height:22px}
+.kcx-acts .vc-hb .ic{width:22px;height:22px}
+/* message box: emoji on the left, text, paperclip on the right (they hide while typing, like Telegram) */
+.mcx .kcx-box{padding:2px 6px 2px 6px}
+.mcx .kcx-box #mcSk{order:-1}
+.mcx .kcx-box textarea{order:0}
+.mcx .kcx-box #mcE{order:1}
+.mcx .kcx-box #mcA{order:2}
+.mcx .kcx-in.tx #mcE,.mcx .kcx-in.tx #mcA{display:none}
+.mcx .kcx-box #mcSk .ic{width:26px;height:26px;stroke-width:1.8}
+
+/* v351: box colours exactly like the Telegram screenshots (dark boxes, white icons, blue round button) — in every theme */
+.mcx .kcx-top .kcx-rb.glass{background:#141414;border:0;box-shadow:none;color:#fff;-webkit-backdrop-filter:none;backdrop-filter:none}
+.mcx .kcx-top .kcx-pill.glass,.mcx .kcx-top .kcx-acts.glass{background:rgba(80,80,80,.92);border:0;box-shadow:none;color:#fff;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.mcx .kcx-top .kcx-ti b{color:#fff}
+.mcx .kcx-top .kcx-ti small,.mcx .kcx-top .kcx-ti small .mc-st{color:#9a9a9f}
+.mcx .kcx-top .kcx-ti small .mc-st.on{color:#5da4dc}
+.mcx .kcx-top .kcx-acts .kcx-rb,.mcx .kcx-top .kcx-acts .kcx-rb .ic{color:#fff}
+.mcx .kcx-in .kcx-box.glass{background:#171717;border:1px solid #2a2a2a;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.mcx .kcx-box textarea{color:#fff;caret-color:#5da4dc}
+.mcx .kcx-box textarea::placeholder{color:#8e8e93;opacity:1}
+.mcx .kcx-box .kcx-ib{color:#8e8e93}
+.mcx .kcx-box .kcx-ib.on{color:#5da4dc}
+.mcx .kcx-in .kcx-s,.mcx .kcx-in .kcx-vn{background:#5da4dc;color:#fff;box-shadow:none}
+
+/* v351: back button and message box use the same #505050 (slightly see-through) as the profile pill */
+.mcx .kcx-top .kcx-rb.glass{background:rgba(80,80,80,.92);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.mcx .kcx-in .kcx-box.glass{background:rgba(80,80,80,.92);border:0;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.mcx .kcx-box .kcx-ib{color:#c4c4c8}
+.mcx .kcx-box textarea::placeholder{color:#c4c4c8}
+
+/* v355: long name in a profile box (account page, other person's profile page): soft fade on both edges + a very slow ticker (right → left, re-enters from the right) */
+.tk{display:block;max-width:100%;min-width:0;overflow:hidden;white-space:nowrap}
+.tk .tkt{display:inline-block;white-space:nowrap;unicode-bidi:plaintext}
+.tk.mq{display:flex;direction:ltr;gap:44px;-webkit-mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%);mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%)}
+.tk.mq .tkt{flex:none;animation:kcxNm var(--d,12s) linear infinite;will-change:transform}
+@media (prefers-reduced-motion:reduce){.tk.mq .tkt{animation:none;transform:translateX(var(--a,0px))}}
+.pid h2.vipn .vnm{flex:0 1 auto}
+
+/* v357: smooth, soft animations — tabs of the group page / media page, member list, voice chat */
+.gpg-tabs button,.mcp-tabs button{transition:background-color .28s ease,color .28s ease,opacity .28s ease,transform .18s ease}
+.gpg-tabs button:active,.mcp-tabs button:active{transform:scale(.95)}
+.tsw-l,.tsw-r{animation:tswIn .34s cubic-bezier(.22,1,.36,1) both}
+.tsw-r{--tx:18px}.tsw-l{--tx:-18px}
+@keyframes tswIn{from{opacity:0;transform:translateX(var(--tx,0))}to{opacity:1;transform:none}}
+.gpg.fresh .gpg-hd,.gpg.fresh .gpg-acts,.gpg.fresh .gpg-dc,.gpg.fresh .gpg-tabs{animation:gpgUp .5s cubic-bezier(.22,1,.36,1) both}
+.gpg.fresh .gpg-acts{animation-delay:.05s}.gpg.fresh .gpg-dc{animation-delay:.1s}.gpg.fresh .gpg-tabs{animation-delay:.15s}
+.gpg.fresh .gpg-mr{animation:gpgUp .45s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(.18s + var(--i,0)*.035s)}
+.gpg.fresh .gpg-mr:nth-child(1){--i:0}.gpg.fresh .gpg-mr:nth-child(2){--i:1}.gpg.fresh .gpg-mr:nth-child(3){--i:2}.gpg.fresh .gpg-mr:nth-child(4){--i:3}.gpg.fresh .gpg-mr:nth-child(5){--i:4}.gpg.fresh .gpg-mr:nth-child(6){--i:5}.gpg.fresh .gpg-mr:nth-child(n+7){--i:6}
+@keyframes gpgUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.gpg-mr,.gpg-r,.mcp-r{transition:background-color .2s ease}
+.gpg-menu:not([hidden]),.mcp-menu:not([hidden]){animation:vcPop .2s ease}
+.vc-p.vc-new{animation:vcRowIn .5s cubic-bezier(.22,1,.36,1) both}
+@keyframes vcRowIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+.vc-av{transition:box-shadow .28s ease,transform .28s ease}
+.vc-p.sp .vc-av{transform:scale(1.04)}
+.vc-nm small,.vc-mi{transition:color .25s ease,opacity .25s ease}
+.vc-wrap.open:not(.min) .vc-card{animation:gpgUp .5s .08s cubic-bezier(.22,1,.36,1) both}
+.vc-wrap.open:not(.min) .vc-b{animation:gpgUp .5s cubic-bezier(.22,1,.36,1) both}
+.vc-wrap.open:not(.min) .vc-b:nth-child(2){animation-delay:.06s}.vc-wrap.open:not(.min) .vc-b:nth-child(3){animation-delay:.12s}
+.vc-pill:not([hidden]){animation:vcPillIn .35s cubic-bezier(.22,1,.36,1) both}
+@keyframes vcPillIn{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.tsw-l,.tsw-r,.gpg.fresh *,.vc-p.vc-new,.vc-wrap .vc-card,.vc-wrap .vc-b,.vc-pill{animation:none!important}}

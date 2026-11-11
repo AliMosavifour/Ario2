@@ -15,6 +15,16 @@ Object.assign(__AR,{
 });
 var CHAN_POSTS=[
 /*POSTS*/
+{id:'2026-11-11-dqpg',d:'2026-11-11',v:"v353",k:'new',img:'chn-2026-11-11-dqpg.webp',
+ t:"دکمهٔ + در استیکرها",
+ x:"حالا در بخش استیکر یک دکمهٔ + هست؛ هر عکسی را انتخاب کن تا استیکر خودت شود، در «استیکرهای من» می‌ماند و می‌توانی برای دوستانت بفرستی.",
+ pq:"اولین استیکر خودت را از چه عکسی می‌سازی؟",po:["عکس خودم","عکس دوستم","یک تصویر بامزه","عکس از گالری"],
+ en:{t:"A + button in stickers",x:"The sticker panel now has a + button: pick any picture to make your own sticker. It stays in «My stickers» and you can send it to friends.",pq:"What will your first sticker be made from?",po:["My photo","A friend's photo","A funny picture","Something from the gallery"]}},
+{id:'2026-11-11-eafp',d:'2026-11-11',v:"v351",k:'imp',img:'chn-2026-11-11-eafp.webp',
+ t:"ظاهر جدید هدر و باکس پیام",
+ x:"بالای چت حالا مثل تلگرام سه بخش جدا دارد: دکمه برگشت، کارت پروفایل و کارت دکمه‌ها. باکس پیام هم ایموجی را سمت چپ و گیره فایل را سمت راست دارد. اگر اسم کسی بلند باشد، لبه‌هایش محو می‌شود و خیلی آرام از راست به چپ حرکت می‌کند.",
+ pq:"کدام قسمت جدید چت را بیشتر می‌پسندی؟",po:["کارت پروفایل و دکمه‌ها","باکس پیام","حرکت آرام اسم بلند"],
+ en:{t:"New chat header and message box",x:"The top of the chat now has three separate parts like Telegram: back, a profile card and an actions card. The message box keeps emoji on the left and the paperclip on the right. A long name fades at the edges and drifts very slowly from right to left.",pq:"Which new part of the chat do you like most?",po:["Profile and actions cards","Message box","Slowly moving long name"]}},
 {id:'2026-11-11-su48',d:'2026-11-11',v:"v348",k:'imp',img:'chn-2026-11-11-su48.webp',
  t:"استوری در پس‌زمینه آپلود می‌شود",
  x:"حالا با زدن «اشتراک‌گذاری» صفحه‌ی ساخت استوری بسته می‌شود و استوری همان لحظه در «استوری من» می‌آید؛ چرخنده روی خود استوری می‌چرخد و آپلود پشت صحنه انجام می‌شود. هر وقت کامل شد، چرخنده برداشته می‌شود. اگر ارسال نشود، حلقه قرمز می‌شود و با لمس آن می‌توانی دوباره بفرستی.",
