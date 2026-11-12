@@ -35,6 +35,14 @@ jobs:
           done
           if [ -f index.html ]; then mv -f index.html www/index.html; fi
 
+      - name: Collect media files into www
+        run: |
+          mkdir -p www/img/st
+          find . -type f \( -name 'chn-*.webp' -o -name 'music-cover.webp' \) -not -path './node_modules/*' -not -path './www/*' -exec cp -f {} www/img/ \;
+          find . -type f -name '*.webm' -not -path './node_modules/*' -not -path './www/*' -exec cp -f {} www/img/st/ \;
+          echo "stickers:"; ls www/img/st
+          echo "found chn files:"; ls www/img | grep -c '^chn-' || true
+
       - name: Build the small web files
         run: npm run build:web
 
