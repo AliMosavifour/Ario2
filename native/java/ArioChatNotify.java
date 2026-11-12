@@ -25,6 +25,8 @@ import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
+import androidx.core.content.pm.ShortcutInfoCompat;
+import androidx.core.content.pm.ShortcutManagerCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
 import org.json.JSONArray;
@@ -37,6 +39,7 @@ import java.net.URL;
 import java.util.UUID;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
@@ -109,11 +112,12 @@ public class ArioChatNotify {
             int hue = av == null ? hueOf(from) : av.optInt("h", hueOf(from));
             String letter = av == null ? "" : av.optString("n", "");
             if (letter.isEmpty() && from.length() > 0) letter = from.substring(0, from.offsetByCodePoints(0, 1));
-            post(c, link, group ? peer : "", from, textOf(c, r), ArioCounselorWorker.parseIso(r.optString("created_at", "")), p, hue, letter);
+            String kind = inf != null && inf.length() > 2 ? inf[2] : (group ? "g" : "f");
+            post(c, link, group ? peer : "", from, textOf(c, r), ArioCounselorWorker.parseIso(r.optString("created_at", "")), p, hue, letter, false, kind);
         }
     }
 
-    /** chat id -> {title, "1" when it is a group}. Missing tables or errors just leave the map smaller. */
+    /** chat id -> {title, "1" when it is a group, kind: a = advisor, f = friend, g = group}. Missing tables or errors just leave the map smaller. */
     static Map<String, String[]> chatInfo(Context c, String url, String key, String uid) {
         Map<String, String[]> m = new HashMap<String, String[]>();
         String tok = ArioCounselorWorker.sp(c).getString("at", "");
@@ -124,7 +128,7 @@ public class ArioChatNotify {
                 for (int i = 0; i < a.length(); i++) {
                     JSONObject o = a.getJSONObject(i);
                     String n = uid.equals(o.optString("counselor_id")) ? o.optString("student_name", "") : o.optString("counselor_name", "");
-                    m.put(o.optString("id"), new String[]{n, "0"});
+                    m.put(o.optString("id"), new String[]{n, "0", "a"});
                 }
             }
         } catch (Throwable t) {
@@ -137,7 +141,7 @@ public class ArioChatNotify {
                 for (int i = 0; i < a.length(); i++) {
                     JSONObject o = a.getJSONObject(i);
                     String n = uid.equals(o.optString("owner_id")) ? o.optString("friend_name", "") : o.optString("owner_name", "");
-                    m.put(o.optString("id"), new String[]{n, "0"});
+                    m.put(o.optString("id"), new String[]{n, "0", "f"});
                 }
             }
         } catch (Throwable t) {
@@ -150,7 +154,7 @@ public class ArioChatNotify {
                 for (int i = 0; i < a.length(); i++) {
                     JSONObject o = a.getJSONObject(i);
                     String n = o.optString("name", "");
-                    m.put(o.optString("id"), new String[]{n.isEmpty() ? ArioLang.t(c, "گروه", "Group") : n, "1"});
+                    m.put(o.optString("id"), new String[]{n.isEmpty() ? ArioLang.t(c, "گروه", "Group") : n, "1", "g"});
                 }
             }
         } catch (Throwable t) {
@@ -162,6 +166,7 @@ public class ArioChatNotify {
     static String textOf(Context c, JSONObject r) {
         String k = r.optString("kind", "t"), b = r.optString("body", "").trim();
         if ("t".equals(k)) {
+            b = b.replaceAll("\\[\\[st:[A-Za-z0-9-]{3,40}\\]\\]", "\uD83E\uDDF8");   // v386: a sticker inside the text
             if (b.length() > 400) b = b.substring(0, 400) + "…";
             return b.isEmpty() ? ArioLang.t(c, "پیام جدید", "New message") : b;
         }
@@ -230,11 +235,63 @@ public class ArioChatNotify {
 
     /** One notification per chat; it keeps the last few messages so a burst reads like a conversation. */
     static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter) {
-        post(c, link, groupTitle, from, text, when, p, hue, letter, false);
+        post(c, link, groupTitle, from, text, when, p, hue, letter, false, "");
+    }
+
+    static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter, boolean mine) {
+        post(c, link, groupTitle, from, text, when, p, hue, letter, mine, "");
+    }
+
+    /** The round app icon (advisor chats and Ario's own messages show it instead of a person's photo). */
+    static Bitmap appIcon(Context c) {
+        try {
+            int large = c.getResources().getIdentifier("ic_notif_large", "drawable", c.getPackageName());
+            Bitmap raw = large != 0 ? BitmapFactory.decodeResource(c.getResources(), large) : null;
+            if (raw == null) return null;
+            int S = 128;
+            Bitmap sq = Bitmap.createScaledBitmap(raw, S, S, true);
+            Bitmap out = Bitmap.createBitmap(S, S, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(out);
+            Paint pt = new Paint(Paint.ANTI_ALIAS_FLAG);
+            pt.setShader(new BitmapShader(sq, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            cv.drawCircle(S / 2f, S / 2f, S / 2f, pt);
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    static String firstLetter(String n) {
+        return n == null || n.isEmpty() ? "؟" : n.substring(0, n.offsetByCodePoints(0, 1));
+    }
+
+    /** Android 11+: a long-lived conversation shortcut makes the system show the chat's picture as the notification's main icon (instead of only the app's coloured icon). */
+    static void pushShortcut(Context c, String link, String title, Bitmap icon) {
+        try {
+            if (icon == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
+            Intent i = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
+            if (i == null) return;
+            i = new Intent(i);
+            i.setAction(Intent.ACTION_VIEW);
+            i.putExtra("ario_go", "chat:" + link);
+            IconCompat ic = IconCompat.createWithBitmap(icon);
+            Person who = new Person.Builder().setName(title).setKey("c_" + link).setIcon(ic).build();
+            ShortcutInfoCompat sc = new ShortcutInfoCompat.Builder(c, "chat_" + link)
+                    .setShortLabel(title.isEmpty() ? "Ario" : title)
+                    .setLongLived(true)
+                    .setIntent(i)
+                    .setPerson(who)
+                    .setIcon(ic)
+                    .setCategories(Collections.singleton("androidx.core.content.pm.SHORTCUT_CATEGORY_CONVERSATION"))
+                    .build();
+            ShortcutManagerCompat.pushDynamicShortcut(c, sc);
+        } catch (Throwable t) {
+            // the notification still works without it
+        }
     }
 
     /** mine = a reply sent from the notification itself: shown as "me", silent, no new sound. */
-    static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter, boolean mine) {
+    static void post(Context c, String link, String groupTitle, String from, String text, long when, String p, int hue, String letter, boolean mine, String kind) {
         try {
             ensureChannel(c);
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -257,7 +314,7 @@ public class ArioChatNotify {
             JSONArray keep = new JSONArray();
             for (int i = Math.max(0, hist.length() - 6); i < hist.length(); i++) keep.put(hist.get(i));
             sp.edit().putString("h_" + link, keep.toString())
-                    .putString("i_" + link, new JSONObject().put("g", groupTitle).put("t", groupTitle.isEmpty() ? from : groupTitle).toString()).apply();
+                    .putString("i_" + link, new JSONObject().put("g", groupTitle).put("t", groupTitle.isEmpty() ? from : groupTitle).put("k", kind == null ? "" : kind).toString()).apply();
 
             Person me = new Person.Builder().setName(ArioLang.t(c, "من", "Me")).build();
             NotificationCompat.MessagingStyle st = new NotificationCompat.MessagingStyle(me);
@@ -266,6 +323,8 @@ public class ArioChatNotify {
                 st.setConversationTitle(groupTitle);
                 st.setGroupConversation(true);
             }
+            boolean advisor = "a".equals(kind);
+            Bitmap appBm = advisor ? appIcon(c) : null;   // advisor chat = the app icon
             Bitmap last = null;
             for (int i = 0; i < keep.length(); i++) {
                 JSONObject o = keep.getJSONObject(i);
@@ -273,15 +332,25 @@ public class ArioChatNotify {
                     st.addMessage(o.optString("t", ""), o.optLong("w", System.currentTimeMillis()), (Person) null);
                     continue;
                 }
-                Bitmap bm = avatar(c, o.optString("p", ""), o.optInt("h", 0), o.optString("l", ""));
+                Bitmap bm = appBm != null ? appBm : avatar(c, o.optString("p", ""), o.optInt("h", 0), o.optString("l", ""));
                 last = bm;
                 Person sender = new Person.Builder().setName(o.optString("n", "")).setKey(o.optString("n", "")).setIcon(IconCompat.createWithBitmap(bm)).build();
                 st.addMessage(o.optString("t", ""), o.optLong("w", System.currentTimeMillis()), sender);
             }
+            // the picture of the chat: advisor = app icon, group = the group's round letter picture, friend = the friend's profile picture
+            String chatName = group ? groupTitle : from;
+            int chatHue = hueOf(chatName);
+            Bitmap chatBm;
+            if (advisor && appBm != null) chatBm = appBm;
+            else if (group) chatBm = avatar(c, "", chatHue, firstLetter(groupTitle));
+            else chatBm = last != null ? last : avatar(c, p, hue, letter.isEmpty() ? firstLetter(from) : letter);
+            pushShortcut(c, link, chatName, chatBm);
+            int accent = advisor ? Color.parseColor("#3D63F0") : Color.HSVToColor(new float[]{chatHue, 0.55f, 0.62f});   // no fixed orange any more
             int small = ArioNotifyCore.iconRes(c, "ic_stat_adv");
             NotificationCompat.Builder b = new NotificationCompat.Builder(c, CH)
                     .setSmallIcon(small != 0 ? small : android.R.drawable.ic_dialog_email)
-                    .setColor(Color.parseColor("#f47b3a"))
+                    .setColor(accent)
+                    .setShortcutId("chat_" + link)
                     .setContentTitle(group ? groupTitle : from)
                     .setContentText(mine ? ArioLang.t(c, "شما: ", "You: ") + text : (group ? from + ": " + text : text))
                     .setStyle(st)
@@ -293,7 +362,7 @@ public class ArioChatNotify {
                     .setWhen(when > 0 ? when : System.currentTimeMillis())
                     .setShowWhen(true)
                     .setContentIntent(ArioNotifyCore.openPi(c, id, "chat:" + link));
-            if (last != null) b.setLargeIcon(last);
+            b.setLargeIcon(chatBm);
             b.addAction(replyAction(c, id, link));
             b.addAction(readAction(c, id, link));
             nm.notify(id, b.build());
@@ -422,7 +491,7 @@ public class ArioChatNotify {
             } catch (Throwable t) {
                 inf = new JSONObject();
             }
-            String groupTitle = inf.optString("g", ""), title = inf.optString("t", "");
+            String groupTitle = inf.optString("g", ""), title = inf.optString("t", ""), kind = inf.optString("k", "");
             boolean group = !groupTitle.isEmpty();
 
             JSONObject me;
@@ -443,9 +512,9 @@ public class ArioChatNotify {
             int code = postJson(c, "/rest/v1/link_messages", row, false);
             if (code >= 200 && code < 300) {
                 markSeen(c, link);
-                post(c, link, groupTitle, title, text, System.currentTimeMillis(), "", 0, "", true);   // the notification now shows your reply
+                post(c, link, groupTitle, title, text, System.currentTimeMillis(), "", 0, "", true, kind);   // the notification now shows your reply
             } else {
-                post(c, link, groupTitle, title, ArioLang.t(c, "⚠️ ارسال نشد: ", "⚠️ Not sent: ") + text, System.currentTimeMillis(), "", 0, "", true);
+                post(c, link, groupTitle, title, ArioLang.t(c, "⚠️ ارسال نشد: ", "⚠️ Not sent: ") + text, System.currentTimeMillis(), "", 0, "", true, kind);
                 toast(c, ArioLang.t(c, "پیام ارسال نشد؛ اینترنت را بررسی کن", "Message not sent - check your connection"));
             }
         } catch (Throwable t) {
