@@ -72,7 +72,7 @@ function sample(){
 }
 
 var LS='barnameyar.v1';
-var APP={ver:'1.1',date:'2026-11-05',author:(__("سید علی موسوی والا"))};
+var APP={ver:'1.2',date:'2026-11-05',author:(__("سید علی موسوی والا"))};
 function readCache(){try{var j=JSON.parse(localStorage.getItem(LS));return j&&Array.isArray(j.tasks)?j:null}catch(e){return null}}
 var wcT=0;
 function writeCache(){clearTimeout(wcT);wcT=0;try{localStorage.setItem(LS,JSON.stringify({tasks:state.tasks,profile:state.profile,cats:CATS,hist:state.hist,notifs:state.notifs,nseen:state.nseen}))}catch(e){}}
@@ -83,11 +83,13 @@ function cleanNotifs(a){
 }
 /*RK-ENGINE-START*/
 /* ---------- Konkooria: rank estimation (تخمین رتبه) ---------- */
-/* Lessons + approximate coefficients per group. The curve and candidate counts are APPROXIMATE and editable (settings sheet). */
+/* Lessons + coefficients per group. tj / ri follow the official Sanjesh coefficients (tj: biology 12, chemistry 9, physics 7, maths 7; ri: maths 12, physics 9, chemistry 7).
+   NOT verified against an official source (kept provisional): geology 2 in tj, and every humanities / art / language coefficient.
+   The curve and candidate counts are APPROXIMATE and editable (settings sheet). */
 var RK_G={
-  tj:{n:'تجربی',N:340000,L:[['زمین‌شناسی',1],['ریاضی',3],['زیست‌شناسی',6],['فیزیک',3],['شیمی',4]]},
-  ri:{n:'ریاضی',N:150000,L:[['ریاضی',6],['فیزیک',4],['شیمی',3]]},
-  en:{n:'انسانی',N:210000,L:[['عربی',3],['ریاضی و آمار',2],['علوم و فنون',2],['تاریخ و جغرافیا',3],['فلسفه و منطق',2],['اقتصاد',2],['علوم اجتماعی',2]]},
+  tj:{n:'تجربی',N:340000,L:[['زمین‌شناسی',2],['ریاضی',7],['زیست‌شناسی',12],['فیزیک',7],['شیمی',9]]},
+  ri:{n:'ریاضی',N:150000,L:[['ریاضی',12],['فیزیک',9],['شیمی',7]]},
+  en:{n:'انسانی',N:210000,L:[['عربی',3],['ریاضی و آمار',2],['ادبیات فارسی',3],['تاریخ و جغرافیا',3],['فلسفه و منطق',2],['اقتصاد',2],['علوم اجتماعی',2],['روان‌شناسی',2]]},
   ho:{n:'هنر',N:30000,L:[['ریاضی',1],['هنر عمومی',3],['دروس اختصاصی هنر',4]]},
   zb:{n:'زبان',N:35000,L:[['زبان تخصصی',8]]}
 };
@@ -142,6 +144,32 @@ function rkComp(x){
   RK_G[x.g].L.forEach(function(l){var p=rkPct(x,l[0]);if(p!==null){s+=p*l[1];w+=l[1];n++}});
   return w?{p:s/w,cov:w/rkSumCoef(x.g),n:n}:null;
 }
+/* ---- final GPA (معدل نهایی) of 11th + 12th grade: official weights of the national exam score (Sanjesh, konkur 1406):
+   main groups (tajrobi / riazi / ensani): records 60% = 12th 43% + 11th 17%, konkur 40%.  art + foreign languages: records 30% = 12th 20% + 11th 10%, konkur 70%.
+   The blend works in z-scores: the konkur percent -> share of candidates above (the curve) -> z; GPA -> z with an editable mean / sd of the candidates' GPA;
+   the weighted sum is re-standardised (components are only partly correlated, r=.5) and turned back into a share -> an "effective percent" that the old curve converts to a rank. */
+var RK_W={m:{k:.4,a:.17,b:.43},h:{k:.7,a:.1,b:.2}};
+var RK_GM=16.5,RK_GS=2.5,RK_GR=.5;
+function rkWt(g){return (g==='ho'||g==='zb')?RK_W.h:RK_W.m}
+function rkPhi(z){var t=1/(1+.2316419*Math.abs(z)),d=.3989423*Math.exp(-z*z/2),p=d*t*(.3193815+t*(-.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return z>0?1-p:p}
+function rkPhiInv(p){var lo=-8,hi=8,i;p=Math.min(1-1e-9,Math.max(1e-9,p));for(i=0;i<60;i++){var m=(lo+hi)/2;if(rkPhi(m)<p)lo=m;else hi=m}return(lo+hi)/2}
+function rkInvCurve(sh){var lo=RK_CURVE[0][0],hi=RK_CURVE[RK_CURVE.length-1][0],i;if(sh>=rkCurve(lo))return lo;if(sh<=rkCurve(hi))return hi;for(i=0;i<50;i++){var m=(lo+hi)/2;if(rkCurve(m)>sh)lo=m;else hi=m}return(lo+hi)/2}
+function rkGp(v){return typeof v==='number'&&isFinite(v)&&v>=0&&v<=20?v:null}
+function rkGpa(){var g=rkD().gpa||{};return{a:rkGp(g.a),b:rkGp(g.b)}}
+function rkCfgGm(){var c=rkD().cfg.gm;return c>=8&&c<=19?c:RK_GM}
+function rkCfgGs(){var c=rkD().cfg.gs;return c>=1&&c<=5?c:RK_GS}
+function rkHasGpa(){var g=rkGpa();return g.a!==null||g.b!==null}
+/* konkur percent P (of the group's weighted lessons) -> effective percent once the 11th / 12th GPA is counted (same P when no GPA is entered) */
+function rkMix(g,P){
+  var q=rkGpa(),a=q.a,b=q.b;
+  if(a===null&&b===null)return P;
+  if(a===null)a=b;if(b===null)b=a;
+  var W=rkWt(g),m=rkCfgGm(),s=rkCfgGs();
+  var zk=rkPhiInv(1-rkCurve(P)),za=(a-m)/s,zb=(b-m)/s,r=RK_GR;
+  var zc=W.k*zk+W.a*za+W.b*zb;
+  var v=W.k*W.k+W.a*W.a+W.b*W.b+2*r*(W.k*W.a+W.k*W.b+W.a*W.b);
+  return rkInvCurve(1-rkPhi(zc/Math.sqrt(v)));
+}
 function rkEst(x,exams){
   var cp=rkComp(x);if(!cp)return null;
   var arr=[cp.p+RK_DF[x.df].sh],ws=[.5,.3,.2],pool=[];
@@ -156,10 +184,11 @@ function rkEst(x,exams){
   var n=arr.length;
   var d=Math.max(2.5,5-Math.min(2,(n-1)*.7)+Math.min(3,sd*.4)+(cp.cov<.7?1:0)+(x.df==='mid'?0:.8));
   var conf=Math.round(Math.max(15,Math.min(72,30+Math.min(30,(n-1)*14)+(cp.cov>=.95?8:0)-Math.min(18,sd*2)-(cp.cov<.6?10:0))));
-  var o=P+d,pp=P-d;
-  return {cp:cp,P:P,d:d,n:n,sd:sd,conf:conf,
-    nat:{o:rkNatRank(x.g,o),m:rkNatRank(x.g,P),p:rkNatRank(x.g,pp)},
-    q:{o:rkQuotaRank(x,o),m:rkQuotaRank(x,P),p:rkQuotaRank(x,pp)}};
+  var o=P+d,pp=P-d,mo=rkMix(x.g,o),mm=rkMix(x.g,P),mp=rkMix(x.g,pp);
+  return {cp:cp,P:P,d:d,n:n,sd:sd,conf:conf,gp:rkHasGpa(),PE:mm,
+    kn:{o:rkNatRank(x.g,o),m:rkNatRank(x.g,P),p:rkNatRank(x.g,pp)},
+    nat:{o:rkNatRank(x.g,mo),m:rkNatRank(x.g,mm),p:rkNatRank(x.g,mp)},
+    q:{o:rkQuotaRank(x,mo),m:rkQuotaRank(x,mm),p:rkQuotaRank(x,mp)}};
 }
 function rkConfLbl(c){return c<40?'کم':c<58?'متوسط':'خوب'}
 function rkUni(x,e){
@@ -176,15 +205,23 @@ function rkLessons(x,e){
   var tot=rkSumCoef(x.g),rows=[];
   RK_G[x.g].L.forEach(function(l){
     var p=rkPct(x,l[0]);if(p===null)return;
-    var g10=Math.min(10,100-p)*l[1]/tot,base=rkNatRank(x.g,e.P),up=rkNatRank(x.g,e.P+Math.max(0,g10));
+    var g10=Math.min(10,100-p)*l[1]/tot,base=rkNatRank(x.g,rkMix(x.g,e.P)),up=rkNatRank(x.g,rkMix(x.g,e.P+Math.max(0,g10)));
     rows.push({n:l[0],c:l[1],p:p,gain:Math.max(0,base-up),pot:Math.max(0,100-p)*l[1]});
   });
   return rows;
 }
 /*RK-ENGINE-END*/
 var RK_ALL={};Object.keys(RK_G).forEach(function(g){RK_G[g].L.forEach(function(l){RK_ALL[l[0]]=1})});
+/* exams saved before the 1405 booklet used the lesson «علوم و فنون»; the booklet has «ادبیات فارسی» instead, so the saved values move to it */
+function rkOldLes(m){
+  if(!m||typeof m!=='object'||m['علوم و فنون']===undefined)return m;
+  var c=Object.assign({},m);
+  if(c['ادبیات فارسی']===undefined)c['ادبیات فارسی']=c['علوم و فنون'];
+  delete c['علوم و فنون'];return c;
+}
 function rkOne(x){
   x=(x&&typeof x==='object')?x:{};
+  if(x.pc||x.cn){x=Object.assign({},x);x.pc=rkOldLes(x.pc);x.cn=rkOldLes(x.cn)}
   var o={g:RK_G[x.g]?x.g:'tj',yr:RK_YEARS.indexOf(+x.yr)>-1?+x.yr:1406,rg:RK_QS[x.rg]?String(x.rg):'3',sq:RK_SQ[x.sq]?x.sq:'',ty:x.ty==='real'?'real':'mock',sy:x.sy==='old'?'old':'new',df:RK_DF[x.df]?x.df:'mid',mode:x.mode==='cnt'?'cnt':'pct',nm:String(x.nm||'').replace(/[<>&"']/g,'').slice(0,30),pc:{},cn:{},eid:String(x.eid||'').replace(/[^\w-]/g,'').slice(0,24),id:String(x.id||'').replace(/[^\w-]/g,'').slice(0,24),ts:Number(x.ts)||0};
   if(x.pc&&typeof x.pc==='object')Object.keys(x.pc).forEach(function(k){var v=x.pc[k];if(RK_ALL[k]&&typeof v==='number'&&v>=-34&&v<=100)o.pc[k]=Math.round(v*100)/100});
   if(x.cn&&typeof x.cn==='object')Object.keys(x.cn).forEach(function(k){
@@ -195,11 +232,13 @@ function rkOne(x){
   return o;
 }
 function rkClean(k){
-  var o={cur:rkOne(null),exams:[],cfg:{N:{},qs:{}}};
+  var o={cur:rkOne(null),exams:[],gpa:{a:null,b:null},cfg:{N:{},qs:{}}};
   if(!k||typeof k!=='object')return o;
   o.cur=rkOne(k.cur);o.cur.id='';o.cur.ts=0;
   if(Array.isArray(k.exams))o.exams=k.exams.map(rkOne).filter(function(e){return e.id&&e.ts>0}).slice(0,40);
+  if(k.gpa&&typeof k.gpa==='object')['a','b'].forEach(function(f){var r=k.gpa[f];if(r===null||r===undefined||r==='')return;var v=+r;if(isFinite(v)&&v>=0&&v<=20)o.gpa[f]=Math.round(v*100)/100});
   if(k.cfg&&typeof k.cfg==='object'){
+    var gm=+k.cfg.gm,gs=+k.cfg.gs;if(gm>=8&&gm<=19)o.cfg.gm=gm;if(gs>=1&&gs<=5)o.cfg.gs=gs;
     if(k.cfg.N&&typeof k.cfg.N==='object')Object.keys(RK_G).forEach(function(g){var v=Math.round(+k.cfg.N[g]);if(v>=1000&&v<=3000000)o.cfg.N[g]=v});
     if(k.cfg.qs&&typeof k.cfg.qs==='object')Object.keys(RK_QS).forEach(function(r){var v=+k.cfg.qs[r];if(v>=.01&&v<=.9)o.cfg.qs[r]=v});
   }
@@ -338,7 +377,7 @@ function cleanHabits(a){
 }
 function plainObj(x){return x&&typeof x==='object'&&!Array.isArray(x)?x:{}}
 function P(p){var o=Object.assign({},DEFP,p);o.habits=cleanHabits(o.habits);o.medals=plainObj(o.medals);o.bnGot=plainObj(o.bnGot);o.rp=rpClean(o.rp);if(!o.sndv){o.sndv=1;o.sound=true}o.ttp=ttpClean(o.ttp);if(typeof o.ttCur!=='string')o.ttCur=null;o.kk=kkClean(o.kk);o.ns=nsClean(o.ns);o.rpd=rpdClean(o.rpd);o.rk=rkClean(o.rk);o.tbk=tbClean(o.tbk);o.kc=kcClean(o.kc);o.pins=pnClean(o.pins);o.un=unClean(o.un);o.gr=grClean(o.gr);o.sr=srClean(o.sr);o.md=mdClean(o.md);o.mo=/^\d{4}-\d{2}-\d{2}$/.test(o.mo||'')?o.mo:'';return o}
-var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,tour:false,advTone:'formal',goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,chSeen:'',chRx:{},chMute:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],un:null,gr:null,sr:{},md:{},mo:''};
+var DEFP={msum:'08:00',mev:'20:00',hbanner:true,sort:'auto',name:'',handle:'',hue:215,theme:'auto',showOver:true,fx:true,sound:true,sndv:0,photo:'',welcomed:false,tour:false,advTone:'formal',goal:5,fgoal:60,notif:false,vip:false,vipCode:false,vipSeen:false,chSeen:'',chDiv:'',chDivAt:0,chRx:{},chMute:false,email:'',via:'',banner:'auto',wrev:true,tt:null,ttp:[],ttCur:null,kk:null,rp:null,ns:null,rpd:null,rk:null,kc:null,pins:[],un:null,gr:null,sr:{},md:{},mo:''};
 var state={tasks:cached?cleanTasks(cached.tasks):sample(),profile:P(cached&&cached.profile),hist:(cached&&cached.hist&&typeof cached.hist==='object')?cleanHist(cached.hist):null,notifs:cleanNotifs(cached&&cached.notifs),nseen:Number(cached&&cached.nseen)||0};
 var ui={sel:null,pnOpen:{},pnAll:false,tab:'today',filter:'all',cat:null,day:todayKey(),loading:false,fcats:[],fpri:[],ftags:[],q:''};
 var acctName='',userId=null,storeReadyRes,storeReady=new Promise(function(r){storeReadyRes=r});
@@ -977,13 +1016,75 @@ var CHAN_K={new:['✨','ویژگی تازه','New'],imp:['⚡','بهبود','Imp
 var chanEl=null,chanTouched=false;
 function chanFmt(o,d){try{return new Intl.DateTimeFormat(EN?'en-US':ARB?'ar-SA':'fa-IR',o).format(d)}catch(e){return ''}}
 /* poll under a post: the choice is kept in state.profile.chPoll[postId] = option index (changeable, saved with the profile) */
+/* v381: the poll shows the share of every option after the person picks one — a liquid bar fills the option's box, the picked option pops, the percent counts up.
+   The counts of everybody come from Supabase (chan_poll_counts); without internet / sign-in only this phone's own vote is known. */
+var CHP={};   /* post id -> {c:[counts as the server knows them], m:my vote as the server knows it} */
+function chanPollCnt(p,n){
+  var d=CHP[p.id],my=(state.profile.chPoll||{})[p.id],c=[],i;my=(my===0||my>0)?+my:-1;
+  for(i=0;i<n;i++)c[i]=d&&d.c&&d.c[i]>0?+d.c[i]:0;
+  if(d&&d.m>=0&&c[d.m]>0)c[d.m]--;
+  if(my>=0&&my<n)c[my]++;
+  return c;
+}
 function chanPollHTML(p){
-  var o=chanTx(p,'po'),q=chanTx(p,'pq'),my,i,h;
+  var o=chanTx(p,'po'),q=chanTx(p,'pq'),my,i,h,c,tot=0,pc,voted;
   if(!Array.isArray(o)||o.length<2||!q)return '';
-  my=(state.profile.chPoll||{})[p.id];my=(my===0||my>0)?+my:-1;
+  my=(state.profile.chPoll||{})[p.id];my=(my===0||my>0)?+my:-1;voted=my>=0;
+  c=chanPollCnt(p,o.length);c.forEach(function(x){tot+=x});
   h='<div class="tgq" data-pq="'+esc(p.id)+'"><small>📊 '+__("نظرسنجی","Poll")+'</small><b dir="auto">'+esc(q)+'</b>';
-  for(i=0;i<o.length;i++)h+='<button type="button" class="tgo'+(my===i?' on':'')+'" data-cn="vote" data-id="'+esc(p.id)+'" data-i="'+i+'" aria-pressed="'+(my===i?'true':'false')+'"><i aria-hidden="true">'+(my===i?'✓':'')+'</i><span dir="auto">'+esc(o[i])+'</span></button>';
-  return h+'<em>'+(my>=0?__("پاسخ تو ثبت شد؛ می‌توانی عوضش کنی","Your answer is saved; you can change it"):__("یکی را انتخاب کن","Pick one"))+'</em></div>';
+  for(i=0;i<o.length;i++){
+    pc=tot?Math.round(c[i]/tot*100):0;
+    h+='<button type="button" class="tgo'+(my===i?' on':'')+(voted?' res':'')+'" data-cn="vote" data-id="'+esc(p.id)+'" data-i="'+i+'" aria-pressed="'+(my===i?'true':'false')+'">'+
+      (voted?'<u class="mc-qb" data-w="'+pc+'" style="width:'+pc+'%"></u>':'')+
+      '<i aria-hidden="true">'+(my===i?'✓':'')+'</i><span dir="auto">'+esc(o[i])+'</span>'+(voted?'<strong class="tgv" data-p="'+pc+'">'+fa(pc)+PCT+'</strong>':'')+'</button>';
+  }
+  return h+'<em>'+(voted?__("پاسخ تو ثبت شد؛ می‌توانی عوضش کنی","Your answer is saved; you can change it"):__("یکی را انتخاب کن","Pick one"))+'</em></div>';
+}
+/* redraw one poll with the liquid animation: bars flow from their old width, the picked option pops, percents count up */
+function chanPollPaint(bx,p,hint){
+  var old={},oldP={},nb,t;
+  Array.prototype.forEach.call(bx.querySelectorAll('.tgo'),function(b){
+    var bar=b.querySelector('.mc-qb'),pp=b.querySelector('.tgv');
+    old[b.dataset.i]=bar?(parseFloat(bar.dataset.w)||0):0;oldP[b.dataset.i]=pp?(+pp.dataset.p||0):0;
+  });
+  t=document.createElement('div');t.innerHTML=chanPollHTML(p);nb=t.firstChild;if(!nb)return;
+  bx.replaceWith(nb);
+  var rm=false;try{rm=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  if(rm)return;
+  var fxs=[];
+  Array.prototype.forEach.call(nb.querySelectorAll('.tgo'),function(b){
+    var k=+b.dataset.i,bar=b.querySelector('.mc-qb'),pp=b.querySelector('.tgv'),w=bar?(parseFloat(bar.dataset.w)||0):0,go=(hint&&hint.indexOf(k)>-1)||(bar&&Math.abs(w-(old[k]||0))>.5);
+    if(bar){bar.style.transition='none';bar.style.width=(old[k]||0)+'%';bar._w=w}
+    if(go){b.classList.add('fx');fxs.push(b)}
+    if(pp){var to=+pp.dataset.p||0,from=oldP[k]||0;if(to!==from)mcPollCount(pp,from,to)}
+  });
+  void nb.offsetWidth;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){
+    Array.prototype.forEach.call(nb.querySelectorAll('.mc-qb'),function(bar){bar.style.transition='';bar.style.width=bar._w+'%'});
+  })});
+  if(fxs.length)setTimeout(function(){fxs.forEach(function(b){b.classList.remove('fx')})},1900);
+}
+function chanPollRepaintAll(){
+  if(!chanEl)return;
+  Array.prototype.forEach.call(chanEl.querySelectorAll('[data-pq]'),function(bx){
+    var pp=chanPosts().filter(function(x){return x.id===bx.dataset.pq})[0];
+    if(pp&&bx.querySelector('.tgo.res'))chanPollPaint(bx,pp);
+  });
+}
+/* ask the server for everybody's votes; a vote this phone has but the server lacks is sent too */
+function chanPollSync(){
+  if(!CNX.uid)return;
+  cnxReq('/rest/v1/rpc/chan_poll_counts','POST',{}).then(function(r){
+    if(!r.ok||!r.j||typeof r.j!=='object')return;
+    var cs=r.j.counts||{},ms=r.j.mine||{},k,cp=state.profile.chPoll||{};
+    for(k in cs)CHP[k]={c:cs[k],m:(ms[k]===0||ms[k]>0)?+ms[k]:-1};
+    for(k in cp){if(cp[k]>=0&&!(ms[k]>=0)&&chanPosts().some(function(x){return x.id===k})){CHP[k]=CHP[k]||{c:[],m:-1};cnxReq('/rest/v1/rpc/chan_poll_vote','POST',{p_post:k,p_opt:+cp[k]}).then(function(){})}}
+    chanPollRepaintAll();
+  }).catch(function(){});
+}
+function chanPollSend(pid,i){
+  if(!CNX.uid)return;
+  cnxReq('/rest/v1/rpc/chan_poll_vote','POST',{p_post:pid,p_opt:i}).then(function(r){if(r.ok)chanPollSync()}).catch(function(){});
 }
 /* reaction of the person on a post: chRx[id] = an emoji (older versions saved 1 = ❤️) */
 function chanRx(id){var v=(state.profile.chRx||{})[id];return v?(v===1?'❤️':String(v)):''}
@@ -993,51 +1094,136 @@ function chanBubble(p){
   return '<div class="tgr"><article class="tgb" id="cn-'+esc(p.id)+'">'+
     (p.img?'<img class="tgi" src="img/'+esc(p.img)+'" alt="" draggable="false" decoding="async">':'')+
     '<div class="tgx"><span class="tgk k-'+esc(p.k||'info')+'">'+k[0]+' '+__(k[1],k[2])+'</span>'+
-    '<h3 dir="auto">'+esc(chanTx(p,'t'))+'</h3><p dir="auto">'+esc(chanTx(p,'x'))+'</p>'+chanPollHTML(p)+
+    '<h3 dir="auto">'+esc(chanTx(p,'t'))+'</h3><p dir="auto">'+stkInlineHTML(esc(chanTx(p,'x')),null,true)+'</p>'+chanPollHTML(p)+
     '<div class="tgf"><button type="button" class="tgh'+(rx?' on':'')+'" data-cn="like" data-id="'+esc(p.id)+'" aria-pressed="'+(rx?'true':'false')+'" aria-label="'+__("پسندیدن","Like")+'">'+chanRxHTML(rx)+'</button><span class="tgm">'+esc(meta)+'</span></div></div></article>'+
     '<button type="button" class="tgs2" data-cn="share" data-id="'+esc(p.id)+'" aria-label="'+__("ارسال","Share")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7-7 7v-4c-6 0-9.5 1.6-12 5 1-6 4.5-10 12-11z" fill="currentColor"/></svg></button></div>';
 }
-function chanFeedHTML(un){
+function chanFeedHTML(div){
   var L=chanPosts().slice().reverse(),n=L.length,h='',last='',i,p,dk;
   for(i=0;i<n;i++){
     p=L[i];
-    if(un>0&&i===n-un)h+='<div class="tgd"><span>'+__("پست‌های تازه","New posts")+'</span></div>';
+    if(div&&p.id===div)h+='<div class="tgu" id="tgUnread"><span>'+__("پیام‌های نخوانده","Unread messages")+'</span></div>';
     dk=p.d||'';
     if(dk&&dk!==last){last=dk;h+='<div class="tgd"><span>'+esc(chanFmt({day:'numeric',month:'long',year:'numeric'},new Date(dk+'T12:00:00')))+'</span></div>'}
     h+=chanBubble(p);
   }
   return h;
 }
+/* v382: the Mute / Unmute button changes softly: the word slides and fades out, the new word fades in from below, the button breathes and its colour flows */
+function chanMuteAnim(b){
+  var sp=b.querySelector('.tgmt'),tk=b._mt=(b._mt||0)+1,rm=false,on=!!state.profile.chMute;
+  try{rm=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  b.classList.toggle('off',on);
+  if(!sp){b.innerHTML='<span class="tgmt">'+chanMuteTxt()+'</span>';return}
+  if(rm){sp.textContent=chanMuteTxt();return}
+  b.classList.remove('pop');void b.offsetWidth;b.classList.add('pop');
+  sp.classList.remove('in');sp.classList.add('out');
+  setTimeout(function(){
+    if(b._mt!==tk)return;
+    sp.textContent=chanMuteTxt();sp.classList.remove('out');sp.classList.add('pre');void sp.offsetWidth;sp.classList.remove('pre');sp.classList.add('in');
+    setTimeout(function(){if(b._mt===tk){sp.classList.remove('in');b.classList.remove('pop')}},420);
+  },190);
+}
 function chanMuteTxt(){return state.profile.chMute?__("صدا را باز کن","Unmute"):__("بی‌صدا","Mute")}
+/* v385: unread posts.
+   - The channel opens where the person stopped: the band «پیام‌های نخوانده» sits right under the header, the unread posts under it.
+   - profile.chSeen moves forward while the person scrolls (a post counts as read when its bottom has been on the screen);
+     profile.chDiv = id of the post the band sits above; profile.chDivAt = when the last unread post was seen (0 = not yet).
+   - One hour after everything was seen, the band fades away.
+   - A round arrow with the number of unread posts floats at the bottom; a tap glides smoothly to the newest post; the number goes down
+     while scrolling and the arrow disappears at the newest post. */
+var CHAN_HOUR=3600000,chanDivT=0,chanScrollAnim=0,chanRaf=0;
+function chanIdx(id){var L=chanPosts(),i;for(i=0;i<L.length;i++)if(L[i].id===id)return i;return L.length}
+function chanDivFade(){
+  var p=state.profile,d=chanEl&&chanEl.querySelector('#tgUnread');
+  p.chDiv='';p.chDivAt=0;persist();
+  if(!d)return;
+  d.classList.add('out');setTimeout(function(){if(d.parentNode)d.remove()},450);
+}
+/* which posts has the person seen? the newest post whose bottom edge is on the screen counts; everything older was passed */
+function chanReadScan(){
+  chanRaf=0;
+  if(!chanEl)return;
+  var sc=chanEl.querySelector('#tgScroll'),bt=chanEl.querySelector('.tgdn'),p=state.profile,L=chanPosts(),
+      vb=sc.getBoundingClientRect().bottom-64,
+      arts=sc.querySelectorAll('article.tgb'),best='',i,r;
+  for(i=arts.length-1;i>=0;i--){r=arts[i].getBoundingClientRect();if(r.bottom<=vb+24){best=arts[i].id.slice(3);break}}
+  if(best&&chanIdx(best)<chanIdx(p.chSeen||'')){p.chSeen=best;persist()}
+  var un=chanUnread(),atEnd=sc.scrollHeight-sc.scrollTop-sc.clientHeight<90;
+  if(un===0&&p.chDiv&&!p.chDivAt){
+    p.chDivAt=Date.now();persist();
+    clearTimeout(chanDivT);chanDivT=setTimeout(chanDivFade,CHAN_HOUR);
+  }
+  if(bt){
+    var nb=bt.querySelector('.tgdc'),old=nb.dataset.n||'';
+    nb.hidden=un===0;
+    if(String(un)!==old){
+      nb.dataset.n=String(un);nb.textContent=un>99?(EN?'99+':'۹۹+'):fa(un);
+      if(old!==''){nb.classList.remove('bump');void nb.offsetWidth;nb.classList.add('bump')}
+    }
+    bt.classList.toggle('show',!atEnd);
+    bt.tabIndex=atEnd?-1:0;
+  }
+}
+function chanReadSoon(){if(!chanRaf)chanRaf=requestAnimationFrame(chanReadScan)}
+/* glide to the newest post: ease-in-out, 0.5–1.1 s depending on the distance; a touch stops it */
+function chanGlideEnd(sc){
+  var from=sc.scrollTop,to=sc.scrollHeight-sc.clientHeight,dist=to-from,rm=false;
+  chanTouched=true;cancelAnimationFrame(chanScrollAnim);
+  try{rm=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  if(dist<=0)return;
+  if(rm){sc.scrollTop=to;return}
+  var dur=Math.min(1100,Math.max(500,380+Math.sqrt(dist)*9)),t0=0;
+  var step=function(t){
+    if(!t0)t0=t;
+    var k=Math.min(1,(t-t0)/dur),e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;
+    sc.scrollTop=from+(sc.scrollHeight-sc.clientHeight-from)*e;
+    if(k<1&&chanEl)chanScrollAnim=requestAnimationFrame(step);
+  };
+  chanScrollAnim=requestAnimationFrame(step);
+}
 function chanOpenOv(fromRoute,toId){
   if(chanEl)return;
-  var L=chanPosts(),p=state.profile,un=chanUnread(),el=document.createElement('div');
+  var L=chanPosts(),p=state.profile,un=chanUnread(),el=document.createElement('div'),dv=p.chDiv||'';
+  /* the band: above the first unread post; with nothing unread it stays one hour after the posts were seen, then it is gone */
+  if(un>0){dv=L[un-1].id;p.chDiv=dv;p.chDivAt=0;persist()}
+  else if(dv&&(!chanPosts().some(function(x){return x.id===dv})||(p.chDivAt&&Date.now()-p.chDivAt>=CHAN_HOUR))){dv='';p.chDiv='';p.chDivAt=0;persist()}
   el.id='chanOv';el.className='tg'+(ui.tab==='kcm'?' tg-top':'');el.setAttribute('role','dialog');el.setAttribute('aria-label',__("کانال Ario","Ario Channel"));
   el.innerHTML=
-    '<div class="tgs" id="tgScroll"><div class="tgpad">'+(L.length?chanFeedHTML(un):'<div class="tgd"><span>'+__("هنوز پستی نیست","No posts yet")+'</span></div>')+'</div></div>'+
+    '<div class="tgs" id="tgScroll"><div class="tgpad">'+(L.length?chanFeedHTML(dv):'<div class="tgd"><span>'+__("هنوز پستی نیست","No posts yet")+'</span></div>')+'</div></div>'+
     '<header class="tgh1"><button type="button" class="tgc" data-cn="back" aria-label="'+__("برگشت","Back")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'+
     '<div class="tgp"><i class="tga"><img src="img/ario-ghost.webp" alt="" draggable="false"></i><div class="tgn"><b>'+__("کانال Ario","Ario Channel")+'</b><span>'+fa(L.length)+' '+__("پست","posts")+' · '+__("فقط خواندنی","Read only")+'</span></div></div></header>'+
-    '<footer class="tgb1"><button type="button" class="tgmu" data-cn="mute">'+chanMuteTxt()+'</button></footer>';
+    '<button type="button" class="tgdn" data-cn="down" tabindex="-1" aria-label="'+__("رفتن به آخرین پست","Go to the newest post")+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b class="tgdc" hidden></b></button>'+
+    '<footer class="tgb1"><button type="button" class="tgmu'+(state.profile.chMute?' off':'')+'" data-cn="mute"><span class="tgmt">'+chanMuteTxt()+'</span></button></footer>';
   document.body.appendChild(el);chanEl=el;chanTouched=false;
   el.addEventListener('click',chanClick);
-  var sc=el.querySelector('#tgScroll');
-  sc.addEventListener('touchstart',function(){chanTouched=true},{passive:true});sc.addEventListener('wheel',function(){chanTouched=true},{passive:true});
-  /* open at the bottom (newest); pictures change the height when they load, so keep it at the bottom until the person scrolls */
+  var sc=el.querySelector('#tgScroll'),band=el.querySelector('#tgUnread');
+  var stop=function(){chanTouched=true;cancelAnimationFrame(chanScrollAnim)};
+  sc.addEventListener('touchstart',stop,{passive:true});sc.addEventListener('wheel',stop,{passive:true});
+  sc.addEventListener('scroll',chanReadSoon,{passive:true});
+  /* where to stand: on a forwarded post, else the band «پیام‌های نخوانده» just under the header (when something is unread), else the newest post.
+     pictures change the height while they load, so the place is kept until the person scrolls */
   var down=function(){if(!chanTouched)sc.scrollTop=sc.scrollHeight};
   var tg=toId?el.querySelector('#cn-'+(window.CSS&&CSS.escape?CSS.escape(toId):toId)):null;
   if(tg){
-    /* open on the forwarded post (pictures change the height while they load, so keep it in place until the person scrolls) */
     down=function(){if(!chanTouched)sc.scrollTop=Math.max(0,tg.offsetTop-Math.max(70,(sc.clientHeight-tg.offsetHeight)/2))};
     tg.classList.add('tgb-fl');setTimeout(function(){tg.classList.remove('tgb-fl')},1800);
+  }else if(band&&un>0){
+    var hd=el.querySelector('.tgh1');
+    down=function(){if(chanTouched)return;sc.scrollTop+=band.getBoundingClientRect().top-(hd.getBoundingClientRect().bottom+6)};
   }
-  down();requestAnimationFrame(down);
-  el.querySelectorAll('img.tgi').forEach(function(im){if(!im.complete)im.addEventListener('load',down)});
-  if(L.length&&p.chSeen!==L[0].id){p.chSeen=L[0].id;persist()}
+  down();requestAnimationFrame(function(){down();chanReadScan()});
+  el.querySelectorAll('img.tgi').forEach(function(im){if(!im.complete)im.addEventListener('load',function(){down();chanReadSoon()})});
+  /* a band that is already counting down (everything seen earlier) fades after what is left of the hour */
+  clearTimeout(chanDivT);
+  if(dv&&p.chDivAt)chanDivT=setTimeout(chanDivFade,Math.max(0,p.chDivAt+CHAN_HOUR-Date.now()));
+  chanPollSync();
   if(!fromRoute){try{history.pushState({cn:1},'','#/channel')}catch(e){}}
   if(ui.tab==='today')render();
 }
 function chanCloseOv(){
   if(!chanEl)return;
+  cancelAnimationFrame(chanScrollAnim);cancelAnimationFrame(chanRaf);chanRaf=0;clearTimeout(chanDivT);
   chanEl.remove();chanEl=null;
   if(ui.tab==='today')render();
 }
@@ -1049,7 +1235,7 @@ function chanBackA(){
 }
 /* outside the app: the phone's share sheet, or copy the text */
 function chanShareExt(p){
-  var txt=chanTx(p,'t')+'\n\n'+chanTx(p,'x');
+  var txt=chanTx(p,'t')+'\n\n'+stkPlain(stkChStrip(chanTx(p,'x')));
   if(navigator.share){navigator.share({title:chanTx(p,'t'),text:txt}).catch(function(){});return}
   try{navigator.clipboard.writeText(txt).then(function(){toast(__("متن پست کپی شد","Post text copied"),null,null,'ok')})}catch(e){}
 }
@@ -1062,7 +1248,7 @@ async function chanFwdBlob(p){
 function mcSendChan(l,p,blob){
   var id=mcNewId(),base=l.id+'/'+CNX.uid+'/'+id,up=[],t=chanTx(p,'t')||'';
   if(blob)up.push({path:base+'.webp',blob:blob,field:'media'});
-  mcPost(l,{id:id,kind:'t',body:(t+'\n\n'+(chanTx(p,'x')||'')).slice(0,3000),meta:{fc:p.id,fi:p.img||'',ft:t.slice(0,200)}},up);
+  mcPost(l,{id:id,kind:'t',body:(t+'\n\n'+stkChStrip(chanTx(p,'x')||'')).slice(0,3000),meta:{fc:p.id,fi:p.img||'',ft:t.slice(0,200)}},up);
   return true;
 }
 /* v347: the bubble of a forwarded channel post */
@@ -1070,6 +1256,7 @@ function mcFwcHTML(m,me,c,tt){
   var t=String(me.ft||''),b=String(m.body||''),loc=chanPosts().filter(function(x){return x.id===me.fc})[0],fi=/^[\w.-]+$/.test(me.fi||'')?me.fi:'';
   if(t&&b.indexOf(t)===0)b=b.slice(t.length).replace(/^\s+/,'');
   if(loc){t=chanTx(loc,'t')||t;b=chanTx(loc,'x')||b;fi=loc.img||fi}
+  b=stkChStrip(b).replace(/[ \t]+$/gm,'');   /* channel stickers live only in the channel page */
   return '<div class="kcx-m '+c+' mc-fwc"><button type="button" class="mc-fwh" data-fch="'+esc(me.fc)+'">'+SVFWD+'<span>'+__('هدایت‌شده از','Forwarded from')+'</span><b>'+__('کانال Ario','Ario Channel')+'</b></button>'+
     ((fi||m.media)?'<img class="mc-fwi" data-fch="'+esc(me.fc)+'" data-fci="'+esc(m.id)+'"'+(fi?' src="img/'+esc(fi)+'"':'')+' alt="" draggable="false">':'')+
     (t?'<h4 dir="auto">'+esc(t)+'</h4>':'')+'<p dir="auto">'+emjText(esc(b).replace(/\n/g,'<br>'))+'</p><time>'+tt+'</time></div>';
@@ -1147,10 +1334,12 @@ function chanClick(e){
   else if(a==='vote'){
     var cp=p.chPoll=(p.chPoll&&typeof p.chPoll==='object')?p.chPoll:{},pid=b.dataset.id,pp=chanPosts().filter(function(x){return x.id===pid})[0],bx=b.closest('[data-pq]');
     cp[pid]=+b.dataset.i;persist();hap('sel');
-    if(pp&&bx){var t=document.createElement('div');t.innerHTML=chanPollHTML(pp);bx.replaceWith(t.firstChild)}
+    if(pp&&bx)chanPollPaint(bx,pp,[+b.dataset.i]);
+    chanPollSend(pid,+b.dataset.i);
   }
   else if(a==='share')chanShare(b.dataset.id);
-  else if(a==='mute'){p.chMute=!p.chMute;b.textContent=chanMuteTxt();persist()}
+  else if(a==='down'){hap('sel');chanGlideEnd(chanEl.querySelector('#tgScroll'))}
+  else if(a==='mute'){p.chMute=!p.chMute;persist();chanMuteAnim(b)}
 }
 /* a few seconds after start: tell the person about posts they have not seen yet (not when the channel is muted) */
 function chanAnnounce(){
@@ -1193,6 +1382,7 @@ function bkTrack(){
 }
 function bkVis(el){return !!el&&!el.hidden&&el.getClientRects().length>0}
 function bkCloseOverlay(){
+  if(typeof islBack==='function'&&islBack())return true;   /* v363: the island card */
   if(typeof vcBack==='function'&&vcBack())return true;   /* v344: the voice chat sheet */
   var q=function(sel){return [].slice.call(document.querySelectorAll(sel))},a,i;
   /* a long-press selection in a chat */
@@ -1293,6 +1483,36 @@ function viewChar(){
 }
 /* a character opens on its front. Tapping it fades to the back view for 3 seconds, then it fades back to the front
    (a tap while it shows the back goes back at once). */
+/* ---------- v400: tilt the phone -> banners and characters move with depth ----------
+   deviceorientation (gyro) is smoothed into TL.x / TL.y in -1..1; the layers read --tx / --ty (CSS) on .chwrap (character page) and .adcar (banner),
+   and --px / --py on the open VIP preview. The neutral angle follows the way the phone is held, so only changes of tilt move things.
+   On a computer the mouse does the same. Nothing runs when the system asks for reduced motion. */
+var TL={x:0,y:0,b0:null,g0:null,on:0};
+function tlClamp(v){return Math.max(-1,Math.min(1,v))}
+function tlApply(){
+  var x=TL.x.toFixed(3),y=TL.y.toFixed(3);
+  document.querySelectorAll('.chwrap,.adcar').forEach(function(e){e.style.setProperty('--tx',x);e.style.setProperty('--ty',y)});
+  if(typeof vpEl!=='undefined'&&vpEl&&vpEl.classList.contains('open')){vpEl.style.setProperty('--px',x);vpEl.style.setProperty('--py',y)}
+}
+function tlOri(e){
+  if(e.gamma==null||e.beta==null)return;
+  if(TL.b0==null){TL.b0=e.beta;TL.g0=e.gamma}
+  var tx=tlClamp((e.gamma-TL.g0)/22),ty=tlClamp((e.beta-TL.b0)/22);
+  TL.b0+=(e.beta-TL.b0)*.003;TL.g0+=(e.gamma-TL.g0)*.003;
+  TL.x+=(tx-TL.x)*.14;TL.y+=(ty-TL.y)*.14;tlApply();
+}
+function tlOn(){if(TL.on)return;TL.on=1;window.addEventListener('deviceorientation',tlOri,true)}
+(function(){
+  try{if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return}catch(e){}
+  var D=window.DeviceOrientationEvent;
+  if(D)tlOn();   /* the listener is harmless until the system lets the sensor through (iPhone asks on the first tap) */
+  if(D&&typeof D.requestPermission==='function')document.addEventListener('click',function(){try{D.requestPermission().catch(function(){})}catch(e){}},{once:true,capture:true});
+  document.addEventListener('pointermove',function(e){
+    if(e.pointerType!=='mouse'||TL.on&&TL.b0!=null)return;
+    var el=e.target.closest&&e.target.closest('.chwrap,.adcar');if(!el)return;
+    var r=el.getBoundingClientRect();TL.x=tlClamp(((e.clientX-r.left)/r.width-.5)*2);TL.y=tlClamp(((e.clientY-r.top)/r.height-.5)*2);tlApply();
+  },{passive:true});
+})();
 var chFlipT=0;
 function chAutoBack(){clearTimeout(chFlipT)}
 function chFlipA(){
@@ -1395,6 +1615,7 @@ function render(mode){
   else if(ui.tab==='kcm'&&mcOpenNow())mcInit();
   else if(ui.tab==='coach'||ui.tab==='kcm'&&(ui.mcl==='*'||ui.mcl==='#f'))mcRefresh();
   unPaint();
+  try{musPillPaint()}catch(e){}
   try{frFabSync()}catch(e){}
   if(pkFirst&&ui.tab==='today'&&document.querySelector('.hbpw')){pkFirst=false;clearTimeout(pkWaveT);pkWaveT=setTimeout(pkWaveA,1200)}
 }
@@ -1752,6 +1973,44 @@ function bnTile(b,cur,pick){
   return '<'+tg+(pick?' type="button"':'')+' class="bno'+(lock?' locked':'')+'"'+(pick?' data-bn="'+b[0]+'" aria-pressed="'+(cur===b[0])+'"':'')+(lock?' aria-disabled="true"':'')+' aria-label="'+b[1]+(lock?(" "+__("(قفل،")+" ")+bnNeed(b)+')':'')+'"><span class="bnp bn-'+b[0]+'"></span><b>'+b[1]+'</b><small>'+(lock?bnNeed(b):(b[0]==='auto'?(__("پیش‌فرض")):(__("باز شده"))))+'</small>'+(lock?'<span class="lk" aria-hidden="true">'+icon('lock')+'</span>':'')+'</'+tg+'>';
 }
 var AVN={av1:(__("گوزن")),av2:(__("کلاه‌دار")),av3:(__("شماغ")),av4:(__("خرگوش")),av5:(__("گربه")),av6:(__("شماغ و عبا")),av7:(__("تاج گل")),av8:(__("فرشته")),av9:(__("اسکلت")),av10:(__("کابوی")),av11:(__("خرگوش صورتی")),av12:(__("هدفون"))},VIPS=['av6','av7','av8'];
+
+/* ---------- v396: frames and badges beside the avatar and the name ----------
+   fire = a streak of 7+ days, star = 100+ hours of study, crown = most study minutes this week among the people I chat with.
+   Every message already carries the sender's picture (meta.av), so the earned frames (f), this week's minutes (w) and the week (wk) travel with it: no server change. */
+var FR_L=[['crown',__('تاج','Crown'),'#f2a900'],['star',__('ستاره','Star'),'#f5c518'],['fire',__('آتش','Fire'),'#ff5a2c']],FR_K={crown:'c',star:'s',fire:'f'},FR_C=null,FR_MIN=60,FR_DAYS=7,FR_HRS=100;
+function frClean(x){x=String(x||'');return FR_L.filter(function(a){return x.indexOf(FR_K[a[0]])>-1}).map(function(a){return FR_K[a[0]]}).join('')}
+function frTop(f){f=frClean(f);for(var i=0;i<FR_L.length;i++)if(f.indexOf(FR_K[FR_L[i][0]])>-1)return FR_L[i][0];return ''}
+function frCls(f){var t=frTop(f);return t?' frm fr-'+t:''}
+function frSvg(k){var a=FR_L.filter(function(x){return x[0]===k})[0];return '<svg class="ic fr-i" style="color:'+a[2]+'"><use href="#i-fr-'+k+'"/></svg>'}
+function frBadges(f){f=frClean(f);if(!f)return '';return '<span class="frb" aria-hidden="true">'+FR_L.filter(function(a){return f.indexOf(FR_K[a[0]])>-1}).map(function(a){return frSvg(a[0])}).join('')+'</span>'}
+function frStats(){
+  var now=Date.now();if(FR_C&&now-FR_C.t<30000)return FR_C;
+  var td=todayKey(),off=wkLead(parse(td)),tot=0,wk=0,i,m,st=0;
+  try{for(i=0;i<800;i++){m=+aoDayMin(addDays(td,-i))||0;tot+=m;if(i<=off)wk+=m}st=streaks().cur}catch(e){}
+  FR_C={t:now,fire:st,min:Math.round(tot),wk:Math.round(wk),wkk:addDays(td,-off),oth:0,top:0};
+  /* the best week among the other people whose messages I have loaded */
+  var seen={},id,u;
+  try{for(id in MC.msgs){(MC.msgs[id]||[]).forEach(function(x){var v=x.meta&&x.meta.av;if(!v||x.sender_id===CNX.uid||v.wk!==FR_C.wkk)return;var w=+v.w;if(isFinite(w)&&w>=0&&!(seen[x.sender_id]>=w))seen[x.sender_id]=w})}}catch(e){}
+  for(u in seen){FR_C.oth++;if(seen[u]>FR_C.top)FR_C.top=seen[u]}
+  return FR_C;
+}
+function frMine(){
+  var s=frStats(),f='';
+  if(s.oth>0&&s.wk>=FR_MIN&&s.wk>=s.top)f+='c';
+  if(s.min>=FR_HRS*60)f+='s';
+  if(s.fire>=FR_DAYS)f+='f';
+  return f;
+}
+function frCard(){
+  var s=frStats(),f=frMine(),hr=Math.floor(s.min/60);
+  var has=function(k){return f.indexOf(k)>-1};
+  var row=function(k,t,sub,pc,on){return '<div class="frr'+(on?' on':'')+'"><span class="fri" style="color:'+FR_L.filter(function(a){return a[0]===k})[0][2]+'">'+frSvg(k)+'</span><div><b>'+t+'</b><small>'+sub+'</small><i><u style="width:'+Math.round(Math.max(0,Math.min(1,pc))*100)+'%"></u></i></div></div>'};
+  return '<div class="frcard"><h4>'+__('قاب‌ها و نشان‌ها','Frames and badges')+'</h4>'+
+    row('fire',__('قاب آتش','Fire frame'),has('f')?__('رکورد پیاپی فعال است','Streak frame earned'):fa(Math.min(s.fire,FR_DAYS))+__(' از ',' of ')+fa(FR_DAYS)+__(' روز پیاپی',' days in a row'),s.fire/FR_DAYS,has('f'))+
+    row('star',__('قاب ستاره','Star frame'),has('s')?__('۱۰۰ ساعت مطالعه کامل شد','100 study hours reached'):fa(Math.min(hr,FR_HRS))+__(' از ',' of ')+fa(FR_HRS)+__(' ساعت مطالعه',' study hours'),s.min/(FR_HRS*60),has('s'))+
+    row('crown',__('قاب تاج','Crown frame'),has('c')?__('رتبه‌ی اول این هفته','Top of this week'):__('بیشترین مطالعه‌ی هفته بین دوستان و گروه‌هایت (حداقل ۱ ساعت)','Most study this week among your friends and groups (at least 1 h)'),has('c')?1:Math.min(1,s.wk/Math.max(FR_MIN,s.top||FR_MIN)),has('c'))+
+  '</div>';
+}
 function okPhoto(x){return typeof x==='string'&&/^av([1-9]|1[0-2])$/.test(x)}
 var VIPDAYS=30;
 function isVip(id){return VIPS.indexOf(id)>-1}
@@ -1821,7 +2080,7 @@ function viewAccPage(id){
       row('book',__("مشاهده مجدد آموزش","Replay the tour"),'','replayTour')+
       row('info',(__("اطلاعات برنامه")),L?'':(__("نسخه")+" ")+fa(APP.ver),'openAppInfo');
   return head(esc(displayName()),__(ACC_T[id]?ACC_T[id][1]:'تنظیمات'),{back:1,backAct:'accBack',backTxt:(ACC_SUB[id]?__("تنظیمات"):__("حساب کاربری"))})+
-    '<section class="acc glass accp">'+rows+'</section>';
+    '<section class="acc glass accp">'+rows+'</section>'+(id==='look'&&!L?'<section class="acc glass accp frsec">'+frCard()+'</section>':'');
 }
 function accBack(){
   if(history.state&&history.state.accp){history.back();return}
@@ -1837,13 +2096,13 @@ function viewAccount(){
   var bSub=L?(__("لطفاً چند لحظه صبر کن")):(lastSync?(__("آخرین بارگذاری:")+" ")+fmtTime(lastSync):(__("هنوز بارگذاری نشده")));
   var row=function(ic,label,val,act){return '<button type="button" class="mrow" data-act="'+act+'"><span class="mi">'+icon(ic)+'</span><span class="ml">'+label+'</span>'+(val?'<span class="mv">'+val+'</span>':'')+icon('chev','chv')+'</button>'};
   var ph=(!L&&okPhoto(p.photo)&&canUse(p.photo))?p.photo:'',vf=ph&&isVip(ph)?VFX[ph]:null;
-  var nameH=ph?'<h2 class="vipn'+(vf?'':' plain')+'"'+(vf?' style="--c1:'+vf.c[0]+';--c2:'+vf.c[1]+';--c3:'+vf.c[2]+';--g:'+vf.g+'"':'')+'><span class="vnm">'+tkWrap(name)+'</span><img class="vfig" src="img/vp-'+(vf?vf.bn:ph)+'.webp" alt="" draggable="false"></h2>':'<h2>'+tkWrap(name)+'</h2>';
+  var nameH=ph?'<h2 class="vipn'+(vf?'':' plain')+'"'+(vf?' style="--c1:'+vf.c[0]+';--c2:'+vf.c[1]+';--c3:'+vf.c[2]+';--g:'+vf.g+'"':'')+'><span class="vnm">'+tkWrap(name)+'</span>'+frBadges(frMine())+'<img class="vfig" src="img/vp-'+(vf?vf.bn:ph)+'.webp" alt="" draggable="false"></h2>':'<h2>'+tkWrap(name)+frBadges(frMine())+'</h2>';
   var idBlock=L?'<h2>'+sk+'</h2><p>'+sk+'</p>':nameH+'<p><bdi dir="ltr">@'+esc(displayHandle())+'</bdi></p>';
   return '<header class="head">'+bellBtn()+'<div class="ht"><p class="sub">'+(L?(__("در حال بارگذاری…")):(__("سلام،")+" ")+esc(name))+("</p><h1>"+__("حساب کاربری")+"</h1></div>")+
     '<button type="button" class="round glass'+(L?' spin':'')+("\" data-act=\"reload\" aria-label=\""+__("بارگذاری مجدد اطلاعات")+"\">")+icon('refresh')+'</button></header>'+
     '<section class="prof glass">'+
       '<div class="cover'+bnCls()+(coverDk?' dk':'')+("\" role=\"img\" aria-label=\""+__("بنر پروفایل")+"\"><i class=\"cl\"></i><i class=\"cd\"></i></div><div class=\"avwrap\">")+
-      '<button type="button" class="avatar" data-act="editProfile" style="--h:'+p.hue+("\" aria-label=\""+__("ویرایش مشخصات")+"\">")+avatarInner(name,p)+'<span class="cam">'+icon('edit')+'</span></button></div>'+
+      '<button type="button" class="avatar'+(L?'':frCls(frMine()))+'" data-act="editProfile" style="--h:'+p.hue+("\" aria-label=\""+__("ویرایش مشخصات")+"\">")+avatarInner(name,p)+(!L&&frTop(frMine())?'<span class="frem">'+frSvg(frTop(frMine()))+'</span>':'')+'<span class="cam">'+icon('edit')+'</span></button></div>'+
       '<div class="pcard">'+
         '<div class="pid"><div class="pt">'+idBlock+'</div><button type="button" class="pbadge" data-act="openGm">'+icon('spark')+(__("سطح")+" ")+fa(gmLevel(gmXp(gmTotals())).l)+' · '+gmTitle(gmLevel(gmXp(gmTotals())).l)+'</button></div>'+
         '<div class="stats">'+stat(total,(__("کل کارها")))+stat(doneN,(__("انجام‌شده")))+stat(left,(__("مانده","Left")))+'</div>'+
@@ -1851,6 +2110,7 @@ function viewAccount(){
       '</div>'+
     '</section>'+
     accCloud()+
+    musBox()+
     accLink('edit','user',(__("ویرایش مشخصات")))+
     accLink('look','palette',(__("مشخصات ظاهری")))+
     accLink('center','target',(__("مرکز من")))+
@@ -4770,11 +5030,12 @@ function foDraw(){
   $('#foPr').style.strokeDashoffset=(C*(1-prog)).toFixed(1);
   $('#foTime').textContent=foFmt(fo.left);
   $('#foSt').textContent=fo.done?(__("تمام شد")):fo.run?(__("در حال تمرکز")):foStarted()?(__("متوقف")):(__("آماده"));
-  $('#foRing').classList.toggle('done',fo.done);
+  $('#foRing').classList.toggle('done',fo.done);FW.classList.toggle('run',fo.run);foSetApply();
   $('#foGo').textContent=fo.done?(__("دوباره")):fo.run?(__("توقف")):foStarted()?(__("ادامه")):(__("شروع"));
   $('#foFin').hidden=!(fo.done&&tk&&!tk.done);
   $('#fpill').hidden=FW.hidden?!(foStarted()&&!fo.done):true;
   $('#fpillT').textContent=foFmt(fo.left);
+  foAmbSync();
 }
 function foDrawDur(){
   var dis=foStarted()?' disabled':'';
@@ -4788,14 +5049,47 @@ function foDrawTasks(){
   var tk=fo.task?find(fo.task):null;
   $('#foTaskLbl').textContent=tk?tk.t:(__("یک کار را انتخاب کن یا بدون کار شروع کن"));
 }
+/* ---------- v395: ambient sound (rain, library, sea, fireplace) while the focus timer runs ----------
+   The four loops are www/audio/ambient-<name>.ogg (40 s, seamless). The choice and volume are kept in state.profile.amb / ambv.
+   It plays only while the timer runs (pause, reset and the end stop it); tapping a sound while the timer is stopped plays a short preview. */
+var AMB_L=[['','amb-off',__('بی‌صدا','Silent')],['rain','amb-rain',__('باران','Rain')],['library','amb-books',__('کتابخانه','Library')],['sea','amb-sea',__('دریا','Sea')],['white','amb-sea',__('نویز سفید','White noise')],['fire','amb-fire',__('شومینه','Fireplace')]],AMBA=null,AMBP=0;
+function ambSel(){var k=state.profile.amb;return AMB_L.some(function(x){return x[0]&&x[0]===k})?k:''}
+function ambVol(){var v=state.profile.ambv;return v==null||!isFinite(+v)?60:Math.max(0,Math.min(100,+v))}
+function foAmbDraw(){
+  var k=ambSel();
+  $('#foAmb').innerHTML=AMB_L.map(function(x){return '<button type="button" class="chip" data-amb="'+x[0]+'" aria-pressed="'+(x[0]===k)+'"><span>'+x[2]+'</span>'+icon(x[1])+'</button>'}).join('');
+  $('#foAmbVW').hidden=!k;$('#foAmbV').value=ambVol();$('#foAmbVL').textContent=__('صدا','Volume');
+}
+function foAmbSync(){
+  if(typeof AMB_L==='undefined'||!AMB_L)return;
+  var k=ambSel(),want=!!k&&(fo.run||AMBP>Date.now());
+  if(k!=='white')wnStop();
+  if(!want){if(AMBA&&!AMBA.paused)try{AMBA.pause()}catch(e){}if(!k)AMBA=null;if(k==='white')wnStop();return}
+  if(k==='white'){if(AMBA&&!AMBA.paused)try{AMBA.pause()}catch(e){}wnStart();return}
+  if(!AMBA||AMBA.k!==k){
+    if(AMBA)try{AMBA.pause()}catch(e){}
+    AMBA=new Audio('audio/ambient-'+k+'.ogg');AMBA.k=k;AMBA.loop=true;AMBA.preload='auto';
+  }
+  AMBA.volume=ambVol()/100;
+  if(AMBA.paused){try{var pr=AMBA.play();if(pr&&pr.catch)pr.catch(function(){})}catch(e){}}
+}
+$('#foAmb').addEventListener('click',function(e){
+  var b=e.target.closest('[data-amb]');if(!b)return;
+  state.profile.amb=b.dataset.amb;persist();
+  AMBP=(!fo.run&&b.dataset.amb)?Date.now()+4500:0;   /* a short preview when the timer is stopped */
+  foAmbDraw();foAmbSync();
+  if(AMBP)setTimeout(foAmbSync,4600);
+});
+$('#foAmbV').addEventListener('input',function(){state.profile.ambv=+this.value;if(AMBA)AMBA.volume=ambVol()/100;if(ambSel()==='white')foAmbSync()});
+$('#foAmbV').addEventListener('change',function(){persist()});
 function openFocus(){
-  foDrawDur();foDrawTasks();fgBtn();
-  clearTimeout(foCloseT);FW.hidden=false;foDraw();
+  foDrawDur();foDrawTasks();fgBtn();foAmbDraw();foSceneBuild();foScnDraw();foSetOn=!fo.run;
+  clearTimeout(foCloseT);FW.hidden=false;foDraw();foRainStart();
   requestAnimationFrame(function(){requestAnimationFrame(function(){FW.classList.add('open')})});
 }
 function closeFocus(){
   FW.classList.remove('open');clearTimeout(foCloseT);
-  foCloseT=setTimeout(function(){FW.hidden=true;foDraw()},320);
+  foCloseT=setTimeout(function(){FW.hidden=true;foRainStop();foDraw()},320);
 }
 /* status-bar timer: live countdown notification (native) + a scheduled "finished" alert, so it works with the screen off */
 var FN=null;
@@ -4832,7 +5126,7 @@ function foGo(){
     fo.acc+=Math.round((Date.now()-fo.seg)/1000);
     fo.left=Math.max(0,Math.round((fo.end-Date.now())/1000));fo.run=false;
   }else{
-    if(fo.left<=0)fo.left=fo.dur;
+    foSetOn=false;if(fo.left<=0)fo.left=fo.dur;
     fo.run=true;fo.seg=Date.now();fo.end=fo.seg+fo.left*1000;
   }
   foDrawDur();foDraw();foNotif();
@@ -4856,11 +5150,88 @@ function foTick(){
   }
   foDraw();
 }
+/* ---------- v399: immersive focus scene (rainy library / night café), white noise, tap-for-settings ----------
+   The scene is drawn with CSS plus one rain canvas (only animated while the focus page is open). state.profile.fsc = 'lib' | 'cafe'.
+   White noise is generated with WebAudio (no file). While the timer runs the settings are hidden; tapping the screen shows them. */
+var foSetOn=true,WNO=null,FR={on:0,raf:0,cv:null,cx:null,w:0,h:0,d:[],g:[]};
+function wnStart(){
+  try{
+    var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+    if(!WNO){
+      var c=new AC(),n=c.sampleRate*3,b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0),l=0,i,w;
+      for(i=0;i<n;i++){w=Math.random()*2-1;l=(l+.04*w)/1.04;d[i]=(w*.5+l*3)*.5}
+      var src=c.createBufferSource();src.buffer=b;src.loop=true;
+      var f=c.createBiquadFilter();f.type='lowpass';f.frequency.value=4200;
+      var g=c.createGain();g.gain.value=0;src.connect(f);f.connect(g);g.connect(c.destination);src.start();WNO={c:c,g:g};
+    }
+    if(WNO.c.state==='suspended')WNO.c.resume();
+    WNO.g.gain.setTargetAtTime(ambVol()/100*.55,WNO.c.currentTime,.08);
+  }catch(e){}
+}
+function wnStop(){try{if(WNO)WNO.g.gain.setTargetAtTime(0,WNO.c.currentTime,.08)}catch(e){}}
+function foScnKey(){return state.profile.fsc==='cafe'?'cafe':'lib'}
+function foScnDraw(){
+  var k=foScnKey();FW.dataset.scn=k;
+  $('#foScn').innerHTML=[['lib',__('کتابخانه‌ی بارانی','Rainy library')],['cafe',__('کافه‌ی شبانه','Night café')]].map(function(x){return '<button type="button" class="chip" data-scn="'+x[0]+'" aria-pressed="'+(x[0]===k)+'"><span>'+x[1]+'</span></button>'}).join('');
+}
+$('#foScn').addEventListener('click',function(e){var b=e.target.closest('[data-scn]');if(!b)return;state.profile.fsc=b.dataset.scn;persist();foScnDraw()});
+function foSceneBuild(){
+  var el=$('#foScene');if(el.dataset.b)return;el.dataset.b=1;
+  var sd=7,r=function(){sd=(sd*16807)%2147483647;return sd/2147483647},i,j,rows='',bk='',cf='',ds='';
+  for(i=0;i<8;i++){rows+='<div class="fo-row">';for(j=0;j<40;j++){rows+='<i style="width:'+(8+r()*13|0)+'px;height:'+(52+r()*44|0)+'%;background-color:hsl('+(r()*360|0)+','+(25+r()*30|0)+'%,'+(22+r()*18|0)+'%)"></i>'}rows+='</div>'}
+  var bc=['#ffc46b','#ff8a5c','#7fb2ff','#ffd9a0'];
+  for(i=0;i<5;i++)bk+='<b style="left:'+(8+r()*72|0)+'%;top:'+(30+r()*55|0)+'%;width:'+(34+r()*40|0)+'px;height:'+(34+r()*40|0)+'px;background:'+bc[i%4]+';animation-delay:-'+(r()*9|0)+'s"></b>';
+  var cc=['#ffb24d','#ff6f91','#5fd4ff','#ffd479','#b48cff','#ff9a4d'];
+  for(i=0;i<12;i++){var sz=26+r()*58|0;cf+='<b style="left:'+(r()*96|0)+'%;top:'+(16+r()*42|0)+'%;width:'+sz+'px;height:'+sz+'px;background:'+cc[i%6]+';animation-delay:-'+(r()*9|0)+'s"></b>'}
+  for(i=0;i<16;i++)ds+='<i style="left:'+(r()*100|0)+'%;top:'+(r()*100|0)+'%;animation-duration:'+(12+r()*14|0)+'s;animation-delay:-'+(r()*20|0)+'s"></i>';
+  el.innerHTML='<div class="sc lib"><div class="fo-shelf">'+rows+'</div><div class="fo-win"><span class="cb"></span>'+bk+'</div></div>'+
+   '<div class="sc cafe"><div class="fo-bk">'+cf+'</div><div class="fo-mul"></div><div class="fo-neon">'+__('کافه','Café')+'</div>'+
+   '<div class="fo-cup"><u></u><u></u><u></u><em></em></div></div><canvas class="rain"></canvas><div class="fo-dust">'+ds+'</div><div class="fo-vig"></div>';
+}
+function foDrop(init){return {x:Math.random()*(FR.w+80)-40,y:init?Math.random()*FR.h:-30,l:12+Math.random()*22,v:9+Math.random()*9,a:.12+Math.random()*.3}}
+function foRainSize(){
+  var c=FR.cv,dp=Math.min(window.devicePixelRatio||1,1.5),i;
+  FR.w=c.clientWidth;FR.h=c.clientHeight;c.width=FR.w*dp;c.height=FR.h*dp;FR.cx.setTransform(dp,0,0,dp,0,0);
+  FR.d=[];for(i=Math.max(60,Math.min(150,Math.round(FR.w*FR.h/8000)));i>0;i--)FR.d.push(foDrop(1));
+  FR.g=[];for(i=0;i<16;i++)FR.g.push({x:Math.random()*FR.w,y:Math.random()*FR.h,r:1.6+Math.random()*3.4,v:0});
+}
+function foRainLoop(){
+  if(!FR.on)return;FR.raf=requestAnimationFrame(foRainLoop);
+  var x=FR.cx;x.clearRect(0,0,FR.w,FR.h);x.lineWidth=1;x.lineCap='round';
+  FR.d.forEach(function(d){
+    d.y+=d.v;d.x-=d.v*.18;if(d.y>FR.h+30||d.x<-40)Object.assign(d,foDrop(0));
+    x.strokeStyle='rgba(185,210,255,'+d.a+')';x.beginPath();x.moveTo(d.x,d.y);x.lineTo(d.x+d.l*.18,d.y-d.l);x.stroke();
+  });
+  FR.g.forEach(function(g){
+    if(g.v<.05&&Math.random()<.004)g.v=.5+Math.random()*1.1;
+    if(g.v>=.05){g.y+=g.v;g.v*=.985;x.strokeStyle='rgba(190,215,255,.07)';x.beginPath();x.moveTo(g.x,g.y-g.r*5);x.lineTo(g.x,g.y);x.stroke()}
+    if(g.y>FR.h+8){g.y=-8;g.x=Math.random()*FR.w;g.v=0}
+    var q=x.createRadialGradient(g.x-g.r*.3,g.y-g.r*.3,0,g.x,g.y,g.r);q.addColorStop(0,'rgba(255,255,255,.5)');q.addColorStop(1,'rgba(150,185,255,.1)');
+    x.fillStyle=q;x.beginPath();x.arc(g.x,g.y,g.r,0,6.3);x.fill();
+  });
+}
+function foRainStart(){
+  var c=FW.querySelector('.rain');if(!c)return;
+  FR.cv=c;FR.cx=c.getContext('2d');cancelAnimationFrame(FR.raf);
+  try{window.matchMedia('(prefers-reduced-motion: reduce)').matches?(FR.on=0):(FR.on=1)}catch(e){FR.on=1}
+  foRainSize();if(FR.on)foRainLoop();
+}
+function foRainStop(){FR.on=0;cancelAnimationFrame(FR.raf)}
+window.addEventListener('resize',function(){if(FR.on)foRainSize()});
+document.addEventListener('visibilitychange',function(){if(document.hidden)foRainStop();else if(!FW.hidden)foRainStart()});
+function foSetApply(){
+  var on=!fo.run||foSetOn;
+  $('#foSet').classList.toggle('off',!on);
+  $('#foTap').textContent=fo.run?(on?__('برای بستن تنظیمات، صفحه را لمس کن','Tap the screen to hide settings'):__('برای تنظیمات، صفحه را لمس کن','Tap the screen for settings')):'';
+}
+FW.addEventListener('click',function(e){
+  if(!fo.run||e.target.closest('button,.fo-set,input,label,a'))return;
+  foSetOn=!foSetOn;foSetApply();
+});
 $('#foGo').addEventListener('click',foGo);
 $('#foReset').addEventListener('click',foReset);
 $('#foClose').addEventListener('click',closeFocus);
 $('#foDim').addEventListener('click',closeFocus);
-$('#fpill').addEventListener('click',openFocus);
 $('#foDur').addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b||b.disabled)return;
   if(b.dataset.m)fo.dur=Number(b.dataset.m)*60;
@@ -6012,6 +6383,268 @@ function openAdvTone(){
 actions.openAdvTone=openAdvTone;
 
 
+/* ---------- v358: music box on the account page (the songs are bundled in www/audio and play right here) ---------- */
+var MUS={tr:[{src:'audio/night-time-vibes.mp3',t:'Night Time Vibes - Fear In Me',cv:'img/music-cover.webp',d:490}],i:0,a:null,seek:false};
+var MUS_PLAY='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 7.5v17l14-8.5z" fill="currentColor"/></svg>';
+var MUS_PAUSE='<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="9" y="7" width="5" height="18" rx="1.5" fill="currentColor"/><rect x="18" y="7" width="5" height="18" rx="1.5" fill="currentColor"/></svg>';
+var MUS_FWD='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 6.5a9.5 9.5 0 1 0 9 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M19.5 2.5l-4 4 4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><text x="16" y="20.5" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">10</text></svg>';
+var MUS_BACK='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 6.5a9.5 9.5 0 1 1-9 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M12.5 2.5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><text x="16" y="20.5" font-size="9.5" font-weight="800" text-anchor="middle" fill="currentColor">10</text></svg>';
+function musDur(){var a=MUS.a;return a&&isFinite(a.duration)&&a.duration>0?a.duration:MUS.tr[MUS.i].d}
+function musFmt(x){x=Math.max(0,Math.floor(x||0));var m=Math.floor(x/60);x%=60;return (m<10?'0':'')+m+':'+(x<10?'0':'')+x}
+function musBox(){
+  var t=MUS.tr[MUS.i],a=MUS.a,cur=a?a.currentTime:0,d=musDur(),pl=!!a&&!a.paused,bars='';
+  for(var i=0;i<12;i++)bars+='<i style="--h:'+[34,58,44,72,52,84,60,46,66,38,28,20][i]+'%;--d:'+((i*0.13)%1.1).toFixed(2)+'s"></i>';
+  return '<section class="mus glass'+(pl?' on':'')+'" dir="ltr"><span class="mus-wave" aria-hidden="true">'+bars+'</span>'+
+    '<svg class="mus-note" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12M9 18a2.5 2.5 0 1 1-2.5-2.5A2.5 2.5 0 0 1 9 18zm10-2a2.5 2.5 0 1 1-2.5-2.5A2.5 2.5 0 0 1 19 16z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>'+
+    '<div class="mus-ctl"><button type="button" class="mus-sk" data-act="musFwd" aria-label="'+__('۱۰ ثانیه جلو','Forward 10 seconds')+'">'+MUS_FWD+'<small>10s</small></button>'+
+    '<button type="button" class="mus-pp'+(pl?' pl':'')+'" data-pl="'+(pl?'1':'0')+'" data-act="musToggle" aria-label="'+(pl?__('توقف','Pause'):__('پخش','Play'))+'"><span class="mp-a">'+MUS_PLAY+'</span><span class="mp-b">'+MUS_PAUSE+'</span></button>'+
+    '<button type="button" class="mus-sk" data-act="musBack" aria-label="'+__('۱۰ ثانیه عقب','Back 10 seconds')+'">'+MUS_BACK+'<small>10s</small></button></div>'+
+    '<div class="mus-in"><b class="mus-t">'+esc(t.t)+'</b><input type="range" class="mus-seek" min="0" max="1000" value="'+Math.round(cur/d*1000)+'" style="--p:'+(cur/d*100)+'%" aria-label="'+__('جلو و عقب بردن آهنگ','Seek')+'"><span class="mus-tm">'+musFmt(cur)+' / '+musFmt(d)+'</span></div>'+
+    '<div class="mus-cv"><img src="'+t.cv+'" alt="" draggable="false"></div></section>';
+}
+function musSync(){
+  var a=MUS.a,cur=a?a.currentTime:0,d=musDur(),pl=!!a&&!a.paused;
+  if(pl&&!MUS.on)MUS.on=true;
+  musPillPaint();
+  [].forEach.call(document.querySelectorAll('.mus'),function(b){
+    b.classList.toggle('on',pl);
+    var r=b.querySelector('.mus-seek');if(r&&!MUS.seek){r.value=Math.round(cur/d*1000);r.style.setProperty('--p',(cur/d*100)+'%')}
+    var m=b.querySelector('.mus-tm');if(m)m.textContent=musFmt(cur)+' / '+musFmt(d);
+    var p=b.querySelector('.mus-pp');if(p&&p.dataset.pl!==(pl?'1':'0')){p.dataset.pl=pl?'1':'0';p.classList.toggle('pl',pl);p.setAttribute('aria-label',pl?__('توقف','Pause'):__('پخش','Play'))}
+  });
+  islSync();
+}
+function musLoad(){var t=MUS.tr[MUS.i];MUS.a.src=t.src;try{if('mediaSession' in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:t.t,artist:'Ario',artwork:[{src:t.cv,sizes:'224x210',type:'image/webp'}]})}catch(e){}}
+function musAud(){
+  if(!MUS.a){
+    var a=new Audio();a.preload='metadata';MUS.a=a;musLoad();
+    ['timeupdate','play','pause','loadedmetadata','durationchange'].forEach(function(n){a.addEventListener(n,musSync)});
+    a.addEventListener('ended',function(){if(MUS.tr.length>1){MUS.i=(MUS.i+1)%MUS.tr.length;musLoad();a.play().catch(function(){})}else{a.currentTime=0}musSync()});
+    a.addEventListener('error',function(){toast(__('پخش آهنگ ممکن نشد','Could not play the song'),null,null,'warn')});
+    try{if('mediaSession' in navigator){navigator.mediaSession.setActionHandler('play',function(){a.play()});navigator.mediaSession.setActionHandler('pause',function(){a.pause()});navigator.mediaSession.setActionHandler('seekbackward',function(){a.currentTime=Math.max(0,a.currentTime-10)});navigator.mediaSession.setActionHandler('seekforward',function(){a.currentTime=Math.min(musDur(),a.currentTime+10)})}}catch(e){}
+  }
+  return MUS.a;
+}
+function musSkip(dx){var a=musAud();if(a.readyState<1){a.addEventListener('loadedmetadata',function(){a.currentTime=Math.max(0,Math.min(musDur(),a.currentTime+dx))},{once:true});return}a.currentTime=Math.max(0,Math.min(musDur(),a.currentTime+dx));musSync()}
+/* a small bar at the top (like the voice-chat one) while the music is on; tap = open the account page, ▶/❚❚ = play / pause, ✕ = stop and hide */
+function musPillPaint(){
+  var show=!!MUS.on&&ui.tab!=='account'&&!document.querySelector('.cw-wrap.open,.kcx-sel');
+  var p=MUS.pill;
+  if(!show){if(p)p.hidden=true;return}
+  if(!p){
+    p=document.createElement('div');p.className='mus-pill';p.setAttribute('role','button');p.tabIndex=0;
+    p.innerHTML='<span class="mpi" aria-hidden="true"><i></i><i></i><i></i><i></i></span><b></b><button type="button" class="mpp" data-mp="t"><span class="mp-a">'+MUS_PLAY+'</span><span class="mp-b">'+MUS_PAUSE+'</span></button><button type="button" class="mpx" data-mp="x" aria-label="'+__('بستن','Close')+'">'+icon('close')+'</button>';
+    p.addEventListener('click',function(e){
+      var b=e.target.closest('[data-mp]');
+      if(b&&b.dataset.mp==='t'){actions.musToggle();return}
+      if(b&&b.dataset.mp==='x'){MUS.on=false;if(MUS.a)MUS.a.pause();musPillPaint();return}
+      var t=document.querySelector('.tab[data-tab="account"]');if(t)t.click();
+    });
+    islAdopt('mus',p);MUS.pill=p;
+  }
+  var pl=!!MUS.a&&!MUS.a.paused,vp=(typeof VC!=='undefined'&&VC.pill&&!VC.pill.hidden);
+  p.hidden=false;p.classList.toggle('pl',pl);p.classList.toggle('low',vp);
+  p.querySelector('.mpp').classList.toggle('pl',pl);
+  p.querySelector('b').textContent=MUS.tr[MUS.i].t;
+}
+/* ISLAND-START
+   v363: the "island". The voice-chat bar and the music bar live in one container at the top of the screen.
+   - one bar on: it is a long pill.
+   - both on: one is the big pill, the other shrinks to a small circle beside it. Tap the circle and they swap places.
+   - a bar that appears or goes away grows / shrinks with an elastic move (CSS transitions on width and transform; JS only works out the numbers).
+   The bars keep their own code (vcPillPaint / musPillPaint); they only get moved in here by islAdopt(). */
+var ISL={el:null,pri:'',prev:[],raf:0};
+function islAdopt(k,p){
+  var e=ISL.el;
+  if(!e){
+    e=ISL.el=document.createElement('div');e.className='isl';document.body.appendChild(e);
+    e.addEventListener('click',function(ev){
+      var it=ev.target.closest('.isl-it');
+      if(!it||it.parentNode!==e)return;
+      if(ev.target.closest('[data-mp],[data-fp]')&&!it.classList.contains('dot'))return;   /* the music bar's own ▶/❚❚ and ✕, and the focus bar's ✕, keep working */
+      if(it.dataset.k==='fo'&&!it.classList.contains('dot')){ev.stopImmediatePropagation();ev.preventDefault();openFocus();return}   /* v408: the focus bar has no card: a tap opens the focus screen */
+      ev.stopImmediatePropagation();ev.preventDefault();
+      if(it.classList.contains('dot')){if(ISLC.el&&!ISLC.closing)islSwap(it.dataset.k);else{ISL.pri=it.dataset.k;islLayout()}}   /* a tap on the small circle swaps (the open card too) */
+      else islOpen(it.dataset.k);                                            /* a tap on the big pill opens its card */
+    },true);
+    /* re-lay out when a bar is shown / hidden (the hidden attribute), added or removed, or its text changes */
+    new MutationObserver(islSoon).observe(e,{attributes:true,attributeFilter:['hidden'],childList:true,characterData:true,subtree:true});
+    window.addEventListener('resize',islSoon);
+  }
+  var s=document.createElement('i');s.className='isl-in';
+  while(p.firstChild)s.appendChild(p.firstChild);p.appendChild(s);
+  p.classList.add('isl-it');p.dataset.k=k;e.appendChild(p);
+}
+function islSoon(){if(ISL.raf)return;ISL.raf=requestAnimationFrame(function(){ISL.raf=0;islLayout()})}
+function islLayout(){
+  var e=ISL.el;if(!e)return;
+  var D=32,DW=56,G=6,vw=document.documentElement.clientWidth;   /* v407: beside the big pill the small bar is a circle (32); above an open card it is a rounded rectangle (DW × 32) */
+  var its=[].filter.call(e.children,function(c){return c.classList.contains('isl-it')});
+  var pr=its.filter(function(it){return !it.hidden}),keys=pr.map(function(it){return it.dataset.k}),two=pr.length>1;
+  /* a bar that has just appeared becomes the big one; with only one bar it is the big one */
+  keys.forEach(function(k){if(ISL.prev.length&&ISL.prev.indexOf(k)<0)ISL.pri=k});
+  var oc=(ISLC&&ISLC.el&&!ISLC.closing)?ISLC.k:'';   /* the bar whose card is open */
+  if(oc&&keys.indexOf(oc)>=0)ISL.pri=oc;
+  if(keys.indexOf(ISL.pri)<0)ISL.pri=keys[0]||'';
+  ISL.prev=keys;
+  var maxF=Math.min(vw-28,420)-(two?D+G:0),w={},X={},tot=0,x;
+  pr.forEach(function(it){
+    var k=it.dataset.k;
+    if(two&&k!==ISL.pri){w[k]=D;return}
+    /* natural width of the content; a long title is cut with "…" so everything fits the screen */
+    var b=it.querySelector('b'),W;
+    if(b)b.style.maxWidth='none';
+    W=it.firstChild.offsetWidth;
+    if(W>maxF){if(b)b.style.maxWidth=Math.max(20,b.offsetWidth-(W-maxF))+'px';W=maxF}
+    w[k]=Math.max(W,D);
+  });
+  pr.sort(function(a,b){return (b.dataset.k===ISL.pri)-(a.dataset.k===ISL.pri)});
+  pr.forEach(function(it){tot+=w[it.dataset.k]+(tot?G:0)});
+  x=(vw-tot)/2;
+  pr.forEach(function(it){X[it.dataset.k]=x;x+=w[it.dataset.k]+G});
+  var ups=pr.filter(function(it){return oc&&two&&it.dataset.k!==oc}),UX={},ux=(vw-(ups.length*DW+(ups.length-1)*G))/2;   /* v408: with three bars the small ones sit side by side above the card */
+  ups.forEach(function(it){UX[it.dataset.k]=ux;ux+=DW+G});
+  its.forEach(function(it){
+    var k=it.dataset.k,on=!it.hidden,xx=X[k];
+    if(on){it._sx=X[k];it._sw=w[k]}   /* where it sits when no card is open (the card shrinks back to this) */
+    var up=on&&oc&&two&&k!==oc;
+    if(up)xx=UX[k];   /* card open: the other bar is a small rounded rectangle in the middle, above the card */
+    it.classList.toggle('up',!!up);
+    it.classList.toggle('under',on&&k===oc);
+    if(on&&!it._seen){void it.offsetWidth}   /* first time: let the closed state be drawn first, so it grows from nothing */
+    if(on)it._seen=1;
+    it.classList.toggle('on',on);
+    it.classList.toggle('dot',on&&two&&k!==ISL.pri);
+    it.style.zIndex=k===ISL.pri?2:1;
+    it.setAttribute('aria-hidden',on?'false':'true');
+    it.style.width=(on?(up?DW:w[k]):0)+'px';
+    it.style.transform='translateX('+(on?xx:vw/2)+'px) scale('+(on?1:.4)+')';
+  });
+  islSync();
+}
+/* ----- the card: tap the big pill and it stretches into a card (music: cover, ±10 s, play, seek bar; voice chat: who is in, mute, leave) -----
+   Back button, a tap outside, or a swipe up closes it (it shrinks back into the pill). */
+var ISLC={};
+var ISL_EXP='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M10 20H4v-6M4 20l8-8"/></svg>';
+function islOpen(k){
+  if(k==='fo'){if(ISL.el){islClose();ISL.pri='fo';islLayout()}return}   /* v408: the focus bar has no card: it only becomes the big one */
+  if(ISLC.el||!ISL.el)return;
+  var it=ISL.el.querySelector('.isl-it[data-k="'+k+'"]');if(!it)return;
+  var r=it.getBoundingClientRect(),vw=document.documentElement.clientWidth,W=Math.min(vw-28,380),H;
+  var bd=document.createElement('div');bd.className='isl-bd';
+  var c=document.createElement('div');c.className='isl-card k-'+k;c.setAttribute('role','dialog');
+  c.setAttribute('aria-label',k==='mus'?__('موسیقی','Music'):__('گفتگوی صوتی','Voice chat'));
+  c.innerHTML='<div class="isl-cin" style="width:'+W+'px">'+(k==='mus'?
+    '<div class="ic-r1"><img class="ic-cv" alt="" draggable="false"><span class="ic-tt"><b class="ic-ti"></b><small>Ario</small></span><button type="button" class="ic-go" data-ic="go" aria-label="'+__('باز کردن','Open')+'">'+ISL_EXP+'</button></div>'+
+    '<div class="ic-r2"><button type="button" class="ic-b" data-ic="back" aria-label="'+__('۱۰ ثانیه عقب','Back 10 seconds')+'">'+MUS_BACK+'</button>'+
+    '<button type="button" class="ic-b ic-pp" data-ic="pp"><span class="mp-a">'+MUS_PLAY+'</span><span class="mp-b">'+MUS_PAUSE+'</span></button>'+
+    '<button type="button" class="ic-b" data-ic="fwd" aria-label="'+__('۱۰ ثانیه جلو','Forward 10 seconds')+'">'+MUS_FWD+'</button>'+
+    '<button type="button" class="ic-b" data-ic="x" aria-label="'+__('بستن','Close')+'">'+icon('close')+'</button></div>'+
+    '<div class="ic-r3"><span class="ic-t1"></span><input type="range" class="ic-seek" min="0" max="1000" value="0" aria-label="'+__('جلو و عقب بردن آهنگ','Seek')+'"><span class="ic-t2"></span></div>'
+    :
+    '<div class="ic-r1"><span class="ic-ico">'+VC_ICON.bars+'</span><span class="ic-tt"><b class="ic-ti" dir="auto"></b><small class="ic-sub"></small></span><button type="button" class="ic-go" data-ic="go" aria-label="'+__('باز کردن','Open')+'">'+ISL_EXP+'</button></div>'+
+    '<div class="ic-pl"></div>'+
+    '<div class="ic-r2 ic-vr"><button type="button" class="ic-wb ic-mu" data-ic="mute"></button><button type="button" class="ic-wb ic-lv" data-ic="leave">'+VC_ICON.end+'<span>'+__('خروج','Leave')+'</span></button></div>'
+  )+'</div>';
+  ISLC={el:c,bd:bd,k:k,seek:false};
+  document.body.appendChild(bd);document.body.appendChild(c);
+  islSync();
+  H=c.firstChild.offsetHeight;
+  c.style.left=r.left+'px';c.style.top=r.top+'px';c.style.width=r.width+'px';c.style.height=r.height+'px';   /* start exactly on the pill */
+  void c.offsetWidth;
+  ISL.el.classList.add('card');c.classList.add('open');islLayout();
+  c.style.left=(vw-W)/2+'px';c.style.top=(ISL.el.getBoundingClientRect().top+32+8)+'px';c.style.width=W+'px';c.style.height=H+'px';c.style.borderRadius='28px';
+  bd.addEventListener('click',function(){islClose()});
+  c.addEventListener('click',islCardClick);
+  var y0=0;
+  c.addEventListener('pointerdown',function(e){y0=e.clientY});
+  c.addEventListener('pointermove',function(e){if(y0&&y0-e.clientY>50&&!e.target.closest('input')){y0=0;islClose()}});
+  c.addEventListener('pointerup',function(){y0=0});
+  var sk=c.querySelector('.ic-seek');
+  if(sk){
+    sk.addEventListener('input',function(){
+      ISLC.seek=true;var a=musAud(),v=(+sk.value)/1000*musDur();sk.style.setProperty('--p',(sk.value/10)+'%');
+      c.querySelector('.ic-t1').textContent=musFmt(v);
+      if(a.readyState<1)a.addEventListener('loadedmetadata',function(){a.currentTime=(+sk.value)/1000*musDur()},{once:true});else a.currentTime=v;
+    });
+    sk.addEventListener('change',function(){ISLC.seek=false;islSync()});
+  }
+}
+function islCardClick(e){
+  var b=e.target.closest('[data-ic]');if(!b)return;
+  var k=b.dataset.ic,kind=ISLC.k;
+  if(k==='go'){islClose(1);if(kind==='mus'){var t=document.querySelector('.tab[data-tab="account"]');if(t)t.click()}else vcShow();return}
+  if(k==='back'){actions.musBack();return}
+  if(k==='fwd'){actions.musFwd();return}
+  if(k==='pp'){actions.musToggle();return}
+  if(k==='x'){islClose(1);MUS.on=false;if(MUS.a)MUS.a.pause();musPillPaint();return}
+  if(k==='mute'){vcMute(!VC.muted);islSync();return}
+  if(k==='leave'){islClose(1);vcShow();vcAskLeave(false);return}
+}
+function islClose(now){
+  var c=ISLC.el;if(!c||ISLC.closing)return;
+  var bd=ISLC.bd,it=ISL.el.querySelector('.isl-it[data-k="'+ISLC.k+'"]');
+  function done(){c.remove();bd.remove();ISL.el.classList.remove('card');ISLC={};islLayout()}
+  if(now||!it||it.hidden){ISLC.closing=1;done();return}
+  ISLC.closing=1;bd.remove();ISL.el.classList.remove('card');c.classList.remove('open');
+  islLayout();   /* the pill comes back to its place and the small circle goes back beside it */
+  c.style.left=(it._sx||0)+'px';c.style.top=ISL.el.getBoundingClientRect().top+'px';c.style.width=(it._sw||it.offsetWidth)+'px';c.style.height='32px';c.style.borderRadius='16px';
+  setTimeout(done,650);
+}
+/* the other bar stays as a small circle above the open card; a tap on it swaps the cards (the old card shrinks into the circle, the new one grows out of it) */
+function islSwap(k2){
+  var old=ISLC;if(!old.el||old.closing||old.k===k2||!ISL.el)return;
+  if(k2==='fo'){islClose();ISL.pri='fo';islLayout();return}
+  var dot=ISL.el.querySelector('.isl-it[data-k="'+k2+'"]');if(!dot||dot.hidden)return;
+  var dr=dot.getBoundingClientRect(),c=old.el;
+  ISLC={};old.bd.remove();c.classList.remove('open');
+  c.style.left=dr.left+'px';c.style.top=dr.top+'px';c.style.width=dr.width+'px';c.style.height=dr.height+'px';c.style.borderRadius='16px';
+  setTimeout(function(){c.remove()},560);
+  islOpen(k2);
+}
+function islBack(){if(ISLC.el&&!ISLC.closing){islClose();return true}return false}
+/* keeps the open card up to date (called when the audio / voice chat changes and after every re-layout) */
+function islSync(){
+  var c=ISLC.el;if(!c||ISLC.closing)return;
+  var it=ISL.el&&ISL.el.querySelector('.isl-it[data-k="'+ISLC.k+'"]');
+  if(!it||it.hidden){islClose(1);return}   /* its bar has gone away */
+  var q=function(s){return c.querySelector(s)};
+  if(ISLC.k==='mus'){
+    var t=MUS.tr[MUS.i],a=MUS.a,cur=a?a.currentTime:0,d=musDur(),pl=!!a&&!a.paused,cv=q('.ic-cv'),pp=q('.ic-pp'),sk=q('.ic-seek');
+    if(cv.getAttribute('src')!==t.cv)cv.src=t.cv;
+    q('.ic-ti').textContent=t.t;q('.ic-t2').textContent=musFmt(d);
+    if(!ISLC.seek){q('.ic-t1').textContent=musFmt(cur);sk.value=Math.round(cur/d*1000);sk.style.setProperty('--p',(cur/d*100)+'%')}
+    pp.classList.toggle('pl',pl);pp.setAttribute('aria-label',pl?__('توقف','Pause'):__('پخش','Play'));c.classList.toggle('pl',pl);
+  }else{
+    var l=vcLink(),ps=VC.peers||[],h='',L=q('.ic-pl'),mb=q('.ic-mu'),k2=(VC.muted?'1':'0');
+    ps.forEach(function(p){
+      var muted=p.user_id===CNX.uid?VC.muted:!!p.muted;
+      h+='<span class="ic-p'+(muted?' mu':'')+'"><span class="ic-av">'+vcAv(l,p.user_id)+(muted?'<em>'+VC_ICON.off+'</em>':'')+'</span><small dir="auto">'+esc(vcName(l,p.user_id))+'</small></span>';
+    });
+    if(L.dataset.h!==h){L.innerHTML=h;L.dataset.h=h}
+    q('.ic-ti').textContent=VC.title||__('گفتگوی صوتی','Voice chat');
+    q('.ic-sub').textContent=fa(ps.length)+' '+__('نفر','people');
+    if(mb.dataset.k!==k2){mb.dataset.k=k2;mb.innerHTML=(VC.muted?VC_ICON.off:VC_ICON.mic)+'<span>'+(VC.muted?__('روشن کردن','Unmute'):__('بی‌صدا','Mute'))+'</span>'}
+    c.classList.toggle('mu',!!VC.muted);
+  }
+}
+/* v408: the focus-mode timer is the third bar of the island (red); its ✕ resets the timer and the bar goes away */
+(function(){
+  var p=document.getElementById('fpill');if(!p||p.dataset.k)return;
+  p.addEventListener('click',function(e){if(e.target.closest('[data-fp]')){e.stopPropagation();foReset()}});
+  islAdopt('fo',p);
+})();
+/* ISLAND-END */
+actions.musToggle=function(){var a=musAud();if(a.paused){var r=a.play();if(r&&r.catch)r.catch(function(){})}else a.pause()};
+actions.musBack=function(){musSkip(-10)};
+actions.musFwd=function(){musSkip(10)};
+document.addEventListener('input',function(e){
+  var r=e.target;if(!r||!r.classList||!r.classList.contains('mus-seek'))return;
+  MUS.seek=true;var a=musAud(),v=(+r.value)/1000*musDur();r.style.setProperty('--p',(r.value/10)+'%');
+  var m=r.closest('.mus').querySelector('.mus-tm');if(m)m.textContent=musFmt(v)+' / '+musFmt(musDur());
+  if(a.readyState<1)a.addEventListener('loadedmetadata',function(){a.currentTime=(+r.value)/1000*musDur()},{once:true});else a.currentTime=v;
+});
+document.addEventListener('change',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('mus-seek')){MUS.seek=false;musSync()}});
 actions.sbOpen=function(){sbSheet()};
 
 /* ---------- app info ---------- */
@@ -8179,7 +8812,7 @@ function kkStreak(){
   while(kkDay(k)>0&&n<5000){n++;k=addDays(k,-1)}
   return n;
 }
-function kkPut(day,s){var b=null;try{b=pgState()}catch(e){}var d=kkD().d;if(!d[day])d[day]=[];d[day].push(s);try{pgFeedback(b)}catch(e){}}
+function kkPut(day,s){var d=kkD().d;if(!d[day])d[day]=[];d[day].push(s)}
 function kkFull(day){if(kkList(day).length>=60){toast('در هر روز تا ۶۰ جلسه می‌شود ثبت کرد',null,null,'warn');return true}return false}
 function kkSubBars(map){
   var arr=Object.keys(map).map(function(n){return {n:n,m:map[n]}}).filter(function(x){return x.m>0}).sort(function(a,b){return b.m-a.m});
@@ -8683,11 +9316,12 @@ function rpStore(){
     if(pm&&t){var pv=parseFloat(pm[1].replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)}).replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)}).replace('٫','.'));if(isFinite(pv)&&pv>=0&&pv<=100){tc+=t;cr+=Math.round(t*pv/100)}}
   }
   if(a.rt==='1')te+=kkNum(a.rte||'');
-  var k=rpDayKey();
+  var k=rpDayKey(),pg0=null;try{pg0=pgState()}catch(e){}
   rpD()[k]={sp:Math.min(sp,1440),cl:Math.min(cl,1440),te:Math.min(te,5000),tc:Math.min(tc,5000),cr:Math.min(cr,5000),n:n,t:rp.txt.slice(0,9000),ts:Date.now()};
   state.profile.rp=rpClean(state.profile.rp);state.profile.rpd=null;
   kcRecordReport(k);
   mutate();notify('ok','گزارش ذخیره شد',F.long.format(parse(k)));
+  try{pgFeedback(pg0)}catch(e){}
   try{if(cnxAuto()&&cnxOn()&&cnxIsStudent())cnxSendReport(k,true)}catch(e){}
 }
 function rpHistHTML(){
@@ -10757,7 +11391,7 @@ function viewKcm(){
   th.forEach(function(m){var dk=new Date(m.ts).toDateString();if(dk!==ld){lh+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(m.ts)+'</span></div>';ld=dk}lh+=kcxMsg(m)});
   var smile='<svg viewBox="0 0 24 24" class="ic clip" aria-hidden="true"><path d="M20.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a1.8 1.8 0 0 1-2.5-2.5l8-8"/></svg>',dots='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor" stroke="none"/></svg>';
   return '<div class="kcx'+(kcMuted(sec)?' muted':'')+(kcWpGet(sec)?' haswp':'')+'" data-sec="'+sec+'"'+(kcWpGet(sec)?' data-wp="'+kcWpGet(sec)+'"':'')+'>'+kcWpHTML(sec)+'<div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="kcmBack" aria-label="برگشت">'+icon('chev')+'</button>'+
-    '<div class="kcx-pill glass"><div class="kcx-av" style="background:'+tp[4]+'">'+tp[3]+'</div><div class="kcx-ti"><b>'+tp[2]+'<svg class="ic kcx-mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg></b><small id="kcxN" data-p="">'+fa(th.length)+' پیام</small></div></div>'+
+    '<div class="kcx-pill glass"><div class="kcx-av" style="background:'+tp[4]+'">'+tp[3]+'</div><div class="kcx-ti"><b>'+tp[2]+'<svg class="ic kcx-mi bx" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17v-6a6 6 0 1112 0v6l1.5 2h-15zM10 21.5h4M4 4l16 16"/></svg></b><small id="kcxN" data-p="">'+fa(th.length)+' پیام</small></div></div>'+
     '<button type="button" class="kcx-rb glass" data-act="kcMenu" aria-haspopup="menu" aria-expanded="false" aria-label="'+__("بیشتر","More")+'">'+dots+'</button>'+
     '<div class="kcx-st"><button type="button" class="kcx-rb glass" data-sel="x" aria-label="لغو انتخاب">'+icon('close')+'</button><div class="kcx-pill glass"><b id="kcxSc"></b></div><div class="kcx-duo glass"><button type="button" data-sel="copy" aria-label="کپی">'+icon('copy')+'</button><button type="button" class="del" data-sel="del" aria-label="حذف">'+icon('trash')+'</button></div></div></div>'+
     '<div class="kcx-pn glass" id="kcxPn" hidden></div>'+
@@ -10795,17 +11429,17 @@ function mcPeer(l){if(mcGr(l))return l.name||__('گروه','Group');if(mcFr(l))r
 function mcIni(l){if(mcGr(l))return Array.from(String(l.name||'گ'))[0]||'گ';if(mcFr(l))return String(mcPeer(l)).trim().charAt(0)||'د';return mcCns(l)?(String(mcPeer(l)).trim().charAt(0)||'د'):'م'}
 /* ----- Telegram-style profile picture beside the other person's bubbles ----- */
 function mcHue(n){var h=0,i;n=String(n||'');for(i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))%360;return h}
-function mcMyAv(){var p=state.profile,n=String(displayName()||'');return {p:okPhoto(p.photo)&&!isVip(p.photo)?p.photo:'',v:okPhoto(p.photo)&&canUse(p.photo)?p.photo:'',h:isFinite(+p.hue)&&p.hue!=null?+p.hue:mcHue(n),n:Array.from(n)[0]||''}}
+function mcMyAv(){var p=state.profile,n=String(displayName()||'');return {p:okPhoto(p.photo)&&!isVip(p.photo)?p.photo:'',v:okPhoto(p.photo)&&canUse(p.photo)?p.photo:'',h:isFinite(+p.hue)&&p.hue!=null?+p.hue:mcHue(n),n:Array.from(n)[0]||'',f:frMine(),w:frStats().wk,wk:frStats().wkk}}
 /* every message carries the sender's picture (a built-in photo id / colour and first letter), so no extra upload is needed */
 function mcPeerAv(l){
   var a=MC.msgs[l.id]||[],i,nm=String(mcPeer(l)),v;
-  for(i=a.length-1;i>=0;i--){if(a[i].sender_id!==CNX.uid&&a[i].meta&&a[i].meta.av){v=a[i].meta.av;return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||''}}}
+  for(i=a.length-1;i>=0;i--){if(a[i].sender_id!==CNX.uid&&a[i].meta&&a[i].meta.av){v=a[i].meta.av;return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||'',f:frClean(v.f)}}}
   return {p:'',h:mcHue(nm),n:Array.from(nm)[0]||''};
 }
 function mcSnd(l,m){var ms=(l&&l.members)||[],i;for(i=0;i<ms.length;i++)if(ms[i].user_id===m.sender_id&&ms[i].name)return ms[i].name;return (m.meta&&m.meta.nm)||__('عضو','Member')}
-function mcMsgAv(m,nm){var v=(m.meta&&m.meta.av)||{};return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)&&v.h!=null?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||''}}
-function mcAvHTMLv(v){return '<i class="mc-av" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
-function mcAvHTML(l){var v=mcPeerAv(l);return '<i class="mc-av" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
+function mcMsgAv(m,nm){var v=(m.meta&&m.meta.av)||{};return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)&&v.h!=null?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||'',f:frClean(v.f)}}
+function mcAvHTMLv(v){return '<i class="mc-av'+frCls(v.f)+'" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
+function mcAvHTML(l){var v=mcPeerAv(l);return '<i class="mc-av'+frCls(v.f)+'" aria-hidden="true" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':'<b>'+esc(v.n)+'</b>')+'</i>'}
 /* only the last bubble of a run shows the picture (the others keep the space) */
 function mcAvFix(){
   var th=document.getElementById('mcTh');if(!th)return;
@@ -10873,7 +11507,7 @@ async function mcSave(blob,name){
 /* ----- texts ----- */
 function mcPrev(m){
   if(!m)return '';
-  var t=m.kind==='s'?'🧸 '+__('استیکر','Sticker'):m.kind==='p'?'📷 '+__('عکس','Photo'):m.kind==='v'?'🎥 '+__('ویدیو','Video'):m.kind==='a'?'🎤 '+__('پیام صوتی','Voice message'):m.kind==='r'?'🎥 '+__('پیام ویدیویی','Video message'):m.kind==='f'?(m.meta&&m.meta.t==='note'?'📝 ':m.meta&&m.meta.t==='fc'?'🗂 ':'📎 ')+(lsTitle(m)):m.kind==='g'?'📝 '+__('گزارش‌کار روزانه','Daily report'):m.kind==='q'?'📊 '+String(m.body||'').replace(/\s+/g,' ').slice(0,60):String(m.body||'').replace(/\s+/g,' ').slice(0,80);
+  var t=m.kind==='s'?'🧸 '+__('استیکر','Sticker'):m.kind==='p'?'📷 '+__('عکس','Photo'):m.kind==='v'?'🎥 '+__('ویدیو','Video'):m.kind==='a'?'🎤 '+__('پیام صوتی','Voice message'):m.kind==='r'?'🎥 '+__('پیام ویدیویی','Video message'):m.kind==='f'?(m.meta&&m.meta.t==='note'?'📝 ':m.meta&&m.meta.t==='fc'?'🗂 ':'📎 ')+(lsTitle(m)):m.kind==='g'?'📝 '+__('گزارش‌کار روزانه','Daily report'):m.kind==='q'?'📊 '+String(m.body||'').replace(/\s+/g,' ').slice(0,60):stkPlain(m.body||'').replace(/\s+/g,' ').slice(0,80);
   var gl=mcLink(m.link_id);
   return (m.sender_id===CNX.uid?__('تو: ','You: '):mcGr(gl)?mcSnd(gl,m)+': ':'')+t;
 }
@@ -10993,12 +11627,12 @@ function frRowHTML(l,i){
   var pv=s?mcPrev(s):gr?fa((l.members||[]).length)+' '+__('عضو','members'):__('هنوز پیامی نیست','No messages yet');
   return '<div class="fr-sw'+(pin?' pin':'')+(mu?' mu':'')+(FRANIM?' in':'')+(FRSW.open===l.id?' open':'')+'" data-id="'+id+'" style="--fw:'+(n*74)+'px;--i:'+Math.min(i,12)+'">'+
     '<div class="fr-acts">'+
-      '<button type="button" class="fr-a pin" data-act="frPin" data-id="'+id+'"><span>'+(pin?'📍':'📌')+'</span><small>'+(pin?__('برداشتن','Unpin'):__('سنجاق','Pin'))+'</small></button>'+
-      '<button type="button" class="fr-a mute" data-act="frMute" data-id="'+id+'">'+icon('bell')+'<small>'+(mu?__('صدادار','Unmute'):__('بی‌صدا','Mute'))+'</small></button>'+
+      '<button type="button" class="fr-a pin" data-act="frPin" data-id="'+id+'"><span>'+icon(pin?'unpin':'pin')+'</span><small>'+(pin?__('برداشتن','Unpin'):__('سنجاق','Pin'))+'</small></button>'+
+      '<button type="button" class="fr-a mute" data-act="frMute" data-id="'+id+'">'+icon(mu?'bell':'bellx')+'<small>'+(mu?__('صدادار','Unmute'):__('بی‌صدا','Mute'))+'</small></button>'+
       (gr?'':'<button type="button" class="fr-a del" data-act="frDel" data-id="'+id+'">'+icon('close')+'<small>'+__('قطع ارتباط','End link')+'</small></button>')+
     '</div>'+
     '<div class="fr-rw"><button type="button" class="kc-topic mc-row fr-row" data-act="mcOpen" data-from="#f" data-id="'+id+'">'+frAvHTML(l)+
-      '<span class="fr-bd"><span class="fr-l1"><b dir="auto">'+esc(mcPeer(l))+'</b>'+(pin?'<em class="fr-pn" aria-hidden="true">📌</em>':'')+(mu?'<em class="fr-mt" aria-hidden="true">🔕</em>':'')+'<small>'+(s?frWhen(s.created_at):'')+'</small></span>'+
+      '<span class="fr-bd"><span class="fr-l1"><b dir="auto">'+esc(mcPeer(l))+'</b>'+(pin?'<em class="fr-pn" aria-hidden="true">'+icon('pin')+'</em>':'')+(mu?'<em class="fr-mt" aria-hidden="true">'+icon('bellx','bx')+'</em>':'')+'<small>'+(s?frWhen(s.created_at):'')+'</small></span>'+
       '<span class="fr-l2"><span class="kc-tpv">'+esc(pv)+'</span>'+(u?'<span class="un-b" role="status">'+fa(u>99?99:u)+'</span>':'')+'</span></span></button>'+
       '<button type="button" class="fr-more" data-act="frMore" data-id="'+id+'" aria-label="'+__('گزینه‌ها','Options')+'"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button></div></div>';
 }
@@ -11031,7 +11665,7 @@ function frChanRowHTML(){
   if(p&&p.d){d=chanFmt({month:'short',day:'numeric'},new Date(p.d+'T12:00:00'))}
   return '<div class="fr-ch'+(un?' un':'')+'"><button type="button" class="kc-topic mc-row fr-row" data-act="openChannel" aria-label="'+esc(nm)+'">'+
     '<i class="kc-ph fr-av has-p fr-chav" aria-hidden="true"><img src="img/ario-ghost.webp" alt="" draggable="false"></i>'+
-    '<span class="fr-bd"><span class="fr-l1"><b dir="auto">'+esc(nm)+'</b><em class="fr-cm" aria-hidden="true">📣</em>'+(mu?'<em class="fr-mt" aria-hidden="true">🔕</em>':'')+'<small>'+esc(d)+'</small></span>'+
+    '<span class="fr-bd"><span class="fr-l1"><b dir="auto">'+esc(nm)+'</b><em class="fr-cm" aria-hidden="true">📣</em>'+(mu?'<em class="fr-mt" aria-hidden="true">'+icon('bellx','bx')+'</em>':'')+'<small>'+esc(d)+'</small></span>'+
     '<span class="fr-l2"><span class="kc-tpv">'+esc(p?chanTx(p,'t'):__("فقط خواندنی","Read only"))+'</span>'+(un?'<span class="un-b" role="status" aria-label="'+un+' '+__("پست تازه","new posts")+'">'+fa(un>99?99:un)+'</span>':'')+'</span></span></button></div>';
 }
 function frListHTML(){
@@ -11287,21 +11921,45 @@ function stPick(accept,cap){
 }
 /* the text / stickers dragged on the photo are drawn into the picture itself before it is sent */
 function stBake(pk,items){
-  var cv=pk.cv,c=cv.getContext('2d'),w=cv.width;
-  items.forEach(function(it){
-    var x=it.x*cv.width,y=it.y*cv.height;
-    c.save();c.textAlign='center';c.textBaseline='middle';
-    if(it.t==='emo'){c.font=Math.round(w*.16)+'px sans-serif';c.fillText(it.v,x,y)}
-    else{
-      var fs=Math.round(w*.07),pad=fs*.5,lines=String(it.v).split('\n');c.font='800 '+fs+'px sans-serif';
-      var tw=Math.min(w*.9,Math.max.apply(null,lines.map(function(t){return c.measureText(t).width})))+pad*2,th=lines.length*fs*1.3+pad;
-      c.fillStyle='rgba(0,0,0,.5)';
-      if(c.roundRect){c.beginPath();c.roundRect(x-tw/2,y-th/2,tw,th,fs*.5);c.fill()}else c.fillRect(x-tw/2,y-th/2,tw,th);
-      c.fillStyle='#fff';lines.forEach(function(t,i){c.fillText(t,x,y-th/2+pad/2+fs*.65+i*fs*1.3,w*.88)});
-    }
-    c.restore();
+  var cv=pk.cv,c=cv.getContext('2d'),w=cv.width,need=[];
+  items.forEach(function(it){if(it.t==='txt')stkTokIds(it.v).forEach(function(i){if(need.indexOf(i)<0)need.push(i)})});
+  /* v386: the stickers written inside a story text are drawn as small pictures beside the words */
+  return Promise.all(need.map(function(i){return stkThumbOf(i).then(stkLoadImg)})).then(function(ims){
+    var pic={};need.forEach(function(i,n){pic[i]=ims[n]});
+    items.forEach(function(it){
+      var x=it.x*cv.width,y=it.y*cv.height;
+      c.save();c.textAlign='center';c.textBaseline='middle';
+      if(it.t==='emo'){c.font=Math.round(w*.16)+'px sans-serif';c.fillText(it.v,x,y)}
+      else{
+        var fs=Math.round(w*.07),pad=fs*.5,lines=String(it.v).split('\n'),sz=fs*1.25,maxW=w*.88;c.font='800 '+fs+'px sans-serif';
+        /* a line = pieces of text and stickers; the text of a right-to-left line is laid out from the right */
+        var segs=lines.map(function(ln){
+          var o=[],last=0,m,rx=new RegExp(STK_IRX.source,'gi'),tw=0;
+          var addT=function(t){if(t){var wd=c.measureText(t).width;o.push({t:t,w:wd});tw+=wd}};
+          while((m=rx.exec(ln))){addT(ln.slice(last,m.index));if(pic[m[1]]){o.push({im:pic[m[1]],w:sz});tw+=sz}last=m.index+m[0].length}
+          addT(ln.slice(last));
+          var rtl=/[֐-ࣿ]/.test(ln.replace(rx,'').replace(/[^֐-ࣿA-Za-z]/g,'').charAt(0));
+          return {o:o,w:tw,rtl:rtl};
+        });
+        var tw0=Math.min(maxW,Math.max.apply(null,segs.map(function(g){return g.w})))+pad*2,th=lines.length*fs*1.3+pad;
+        if(it.bg!==false){
+          c.fillStyle='rgba(0,0,0,.5)';
+          if(c.roundRect){c.beginPath();c.roundRect(x-tw0/2,y-th/2,tw0,th,fs*.5);c.fill()}else c.fillRect(x-tw0/2,y-th/2,tw0,th);
+        }else{c.shadowColor='rgba(0,0,0,.75)';c.shadowBlur=fs*.22;c.shadowOffsetY=fs*.04}   /* no background: a soft shadow keeps it readable */
+        c.fillStyle='#fff';c.textAlign='left';
+        segs.forEach(function(g,i){
+          var k=g.w>maxW?maxW/g.w:1,cy=y-th/2+pad/2+fs*.65+i*fs*1.3,px=x-g.w*k/2,o=g.rtl?g.o.slice().reverse():g.o;
+          o.forEach(function(sg){
+            if(sg.im){var r=Math.min(sz*k/sg.im.width,sz*k/sg.im.height),dw=sg.im.width*r,dh=sg.im.height*r;c.drawImage(sg.im,px+(sg.w*k-dw)/2,cy-dh/2,dw,dh)}
+            else{c.save();c.translate(px,cy);c.scale(k,k);c.fillText(sg.t,0,0);c.restore()}
+            px+=sg.w*k;
+          });
+        });
+      }
+      c.restore();
+    });
+    return new Promise(function(res){cv.toBlob(function(b){res(b?{blob:b,thumb:stRect(cv)}:null)},'image/jpeg',.82)});
   });
-  return new Promise(function(res){cv.toBlob(function(b){res(b?{blob:b,thumb:stRect(cv)}:null)},'image/jpeg',.82)});
 }
 /* ----- v323: "Add status"-style creator: text on a colour, voice, photo layout (collage), plus the photo / video pickers ----- */
 function stRepGet(){try{return localStorage.getItem('ario.strp')!=='0'}catch(e){return true}}
@@ -11643,34 +12301,47 @@ function stcDo(){
 function stCompose(pk,n){
   if(document.querySelector('.gr-wrap')){if((n||0)<10)setTimeout(function(){stCompose(pk,(n||0)+1)},300);return}   /* the picker sheet is still fading out */
   var vid=pk.kind==='v',items=[],ar=vid?'9/16':pk.w+'/'+pk.h;
-  var tools=vid?'':'<div class="st-tools"><input class="field" id="stTx" maxlength="80" dir="auto" autocomplete="off" placeholder="'+__('نوشته روی عکس','Text on the photo')+'"><button type="button" class="tt-btn" data-gr="addtx">'+__('افزودن','Add')+'</button></div><div class="st-emo">'+ST_EMO.map(function(e){return '<button type="button" data-gr="emo" data-e="'+e+'">'+e+'</button>'}).join('')+'</div>';
+  var tools=vid?'':'<div class="st-tools"><input class="field" id="stTx" maxlength="200" dir="auto" autocomplete="off" placeholder="'+__('نوشته روی عکس','Text on the photo')+'"><button type="button" class="tt-btn" data-gr="addtx">'+__('افزودن','Add')+'</button></div><div class="st-bgrow"><button type="button" class="st-bgb on" data-gr="txbg" aria-pressed="true"><i></i><span>'+__('با پس‌زمینه','With background')+'</span></button><small>'+__('برای عوض کردن پس‌زمینهٔ یک نوشته، روی آن بزن.','Tap a text on the photo to switch its background.')+'</small></div><div class="st-emo">'+ST_EMO.map(function(e){return '<button type="button" data-gr="emo" data-e="'+e+'">'+e+'</button>'}).join('')+'</div><div class="st-emo st-stk" id="stStk" title="'+__('استیکر کنار متن','Stickers beside the text')+'"></div>';
   var sw=grSheet(__('استوری جدید','New story'),
     '<div class="st-prev" id="stPv" style="aspect-ratio:'+ar+';width:min(100%,calc(46vh*'+(vid?'9/16':pk.w+'/'+pk.h)+'))">'+(vid?'<video class="st-pvv" src="'+pk.vurl+'" muted loop autoplay playsinline></video>':'<img src="'+pk.url+'" alt="" draggable="false">')+'<div class="st-ov" id="stOv"></div></div>'+tools+
     '<input class="field" id="stCap" maxlength="200" dir="auto" autocomplete="off" placeholder="'+__('یک نوشته اضافه کن (دلخواه)','Add a caption (optional)')+'">'+
     '<label class="st-sw"><input type="checkbox" id="stRep"'+(stRepGet()?' checked':'')+'><span>'+__('اجازهٔ پاسخ دادن دوستان','Let friends reply')+'</span></label>'+
     '<p class="hint2">'+__('استوری تا ۲۴ ساعت برای دوستانت دیده می‌شود.','Your friends can see the story for 24 hours.')+'</p>',__('اشتراک‌گذاری','Share')),busy=0;
-  var ov=sw.w.querySelector('#stOv'),pv=sw.w.querySelector('#stPv');
+  var ov=sw.w.querySelector('#stOv'),pv=sw.w.querySelector('#stPv'),stRow=sw.w.querySelector('#stStk');
+  /* v386: the stickers (app + «my stickers») that can be put inside the text */
+  if(stRow){
+    var sids=STK_DEF.map(function(d){return 'def-'+d.id}).concat(stkMyIds().slice(0,14).map(function(x){return 'my-'+x}));
+    Promise.all(sids.map(stkThumbOf)).then(function(us){stRow.innerHTML=sids.map(function(id,i){return us[i]?'<button type="button" data-gr="stkin" data-id="'+id+'" aria-label="'+__('استیکر','Sticker')+'"><img alt="" draggable="false" src="'+us[i]+'"></button>':''}).join('')});
+  }
   function paint(){
     var pw=pv.clientWidth||300;
-    ov.innerHTML=items.map(function(it,i){return '<span class="st-it2 '+it.t+'" data-i="'+i+'" style="left:'+(it.x*100)+'%;top:'+(it.y*100)+'%;font-size:'+(it.t==='emo'?pw*.16:pw*.07)+'px"><em>'+esc(it.v).replace(/\n/g,'<br>')+'</em><button type="button" data-rm="'+i+'" aria-label="'+__('حذف','Remove')+'">×</button></span>'}).join('');
+    ov.innerHTML=items.map(function(it,i){return '<span class="st-it2 '+it.t+(it.t==='txt'&&it.bg===false?' nobg':'')+'" data-i="'+i+'" style="left:'+(it.x*100)+'%;top:'+(it.y*100)+'%;font-size:'+(it.t==='emo'?pw*.16:pw*.07)+'px"><em>'+(it.t==='txt'?stkInlineHTML(esc(it.v).replace(/\n/g,'<br>'),{ik:STK_IK}):esc(it.v).replace(/\n/g,'<br>'))+'</em><button type="button" data-rm="'+i+'" aria-label="'+__('حذف','Remove')+'">×</button></span>'}).join('');
   }
-  var drag=null;
+  var drag=null,txBg=true;   /* v405: text with / without a dark background */
   ov.addEventListener('pointerdown',function(e){
     var rm=e.target.closest('[data-rm]');if(rm){items.splice(+rm.dataset.rm,1);paint();return}
     var el=e.target.closest('.st-it2');if(!el)return;
-    drag={i:+el.dataset.i,el:el};try{el.setPointerCapture(e.pointerId)}catch(x){}
+    drag={i:+el.dataset.i,el:el,mv:0};try{el.setPointerCapture(e.pointerId)}catch(x){}
   });
   ov.addEventListener('pointermove',function(e){
-    if(!drag)return;var r=pv.getBoundingClientRect(),it=items[drag.i];if(!it)return;
+    if(!drag)return;var r=pv.getBoundingClientRect(),it=items[drag.i];if(!it)return;drag.mv=1;
     it.x=Math.max(.08,Math.min(.92,(e.clientX-r.left)/r.width));it.y=Math.max(.06,Math.min(.94,(e.clientY-r.top)/r.height));
     drag.el.style.left=(it.x*100)+'%';drag.el.style.top=(it.y*100)+'%';
   });
-  ov.addEventListener('pointerup',function(){drag=null});ov.addEventListener('pointercancel',function(){drag=null});
+  ov.addEventListener('pointerup',function(){var d=drag;drag=null;if(d&&!d.mv&&items[d.i]&&items[d.i].t==='txt'){items[d.i].bg=(items[d.i].bg===false);hap('tap');paint()}});ov.addEventListener('pointercancel',function(){drag=null});
   sw.w.addEventListener('click',async function(e){
     var b=e.target.closest('[data-gr]');if(!b)return;
     var k=b.dataset.gr;
     if(k==='close'){if(!busy){try{if(pk.url&&vid)URL.revokeObjectURL(pk.url)}catch(x){}sw.close()}return}
-    if(k==='addtx'){var ti=sw.w.querySelector('#stTx'),t=(ti.value||'').trim();if(!t)return;items.push({t:'txt',v:t,x:.5,y:.45});ti.value='';paint();return}
+    if(k==='stkin'){
+      var tx=sw.w.querySelector('#stTx'),tk='[[st:'+b.dataset.id+']]',a0=tx.selectionStart==null?tx.value.length:tx.selectionStart,z0=tx.selectionEnd==null?a0:tx.selectionEnd;
+      if(stkTokIds(tx.value).length>=8){toast(__('در یک نوشته حداکثر ۸ استیکر می‌شود.','Up to 8 stickers in one text.'),null,null,'warn');return}
+      tx.value=tx.value.slice(0,a0)+tk+tx.value.slice(z0);tx.selectionStart=tx.selectionEnd=a0+tk.length;tx.focus({preventScroll:true});hap('tap');return;
+    }
+    if(k==='addtx'){var ti=sw.w.querySelector('#stTx'),t=(ti.value||'').trim();if(!t)return;
+      await Promise.all(stkTokIds(t).filter(function(i){return /^my-/.test(i)}).map(function(i){return stkMyThumb(i.slice(3))}));
+      items.push({t:'txt',v:t,x:.5,y:.45,bg:txBg});ti.value='';paint();return}
+    if(k==='txbg'){txBg=!txBg;b.classList.toggle('on',txBg);b.setAttribute('aria-pressed',txBg?'true':'false');b.querySelector('span').textContent=txBg?__('با پس‌زمینه','With background'):__('بدون پس‌زمینه','No background');hap('tap');return}
     if(k==='emo'){items.push({t:'emo',v:b.dataset.e,x:.3+Math.random()*.4,y:.3+Math.random()*.4});paint();return}
     if(k!=='ok'||busy)return;
     busy=1;b.disabled=true;sw.msg(__('در حال آماده‌سازی…','Preparing…'));
@@ -11694,6 +12365,7 @@ actions.stOpen=function(d){
   var it=gs[gi].items,i=0;
   while(i<it.length&&stSeen(it[i].id))i++;
   if(i>=it.length)i=0;
+  if(d.id){var j0=it.findIndex(function(x){return x.id===d.id});if(j0>=0)i=j0}   /* v403: opened from a «پاسخ به استوری» bubble: start at that very story */
   STV.on=true;STV.gs=gs;STV.gi=gi;STV.i=i;
   var el=document.createElement('div');el.className='stv';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');
   el.innerHTML='<div class="stv-bg"></div><div class="stv-im"></div><video class="stv-vd" playsinline hidden></video><div class="stv-au" hidden><i class="stv-aic"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true">'+ST_IC.mic+'</svg></i><div class="stv-ab">'+new Array(31).join('<i></i>')+'</div></div><audio class="stv-ad" hidden></audio><div class="stv-bars"></div><div class="stv-hd"><i class="stv-av"></i><span class="stv-nm"><b dir="auto"></b><small></small></span><button type="button" class="stv-x del" data-sv="del" aria-label="'+__('حذف','Delete')+'">'+icon('trash')+'</button><button type="button" class="stv-x" data-sv="close" aria-label="'+__('بستن','Close')+'">'+icon('close')+'</button></div><p class="stv-cap" dir="auto"></p>'+
@@ -11750,6 +12422,14 @@ actions.stOpen=function(d){
   requestAnimationFrame(function(){requestAnimationFrame(function(){el.classList.add('open')})});
   stvShow();
 };
+/* v403: tap on the «پاسخ به استوری» bar of a chat bubble → that story opens over the chat; closing it (✕ / Back) leaves you on the same chat page */
+async function mcOpenStory(sid){
+  var find=function(){var gs=stGroups(),k,j;for(k=0;k<gs.length;k++){j=gs[k].items.findIndex(function(x){return x.id===sid});if(j>=0)return gs[k].uid}return ''};
+  var u=find();
+  if(!u){try{await stRefresh(true)}catch(e){}u=find()}
+  if(!u){toast(__('این استوری دیگر موجود نیست.','This story is no longer available.'),null,null,'info');return}
+  actions.stOpen({u:u,id:sid});
+}
 function stvCur(){var g=STV.gs[STV.gi];return g&&g.items[STV.i]}
 function stvVid(){return STV.el&&STV.el.querySelector('.stv-vd')}
 function stvShow(){
@@ -11764,7 +12444,7 @@ function stvShow(){
   var canRp=!g.mine&&s.allow_reply!==false&&grFriends().some(function(f){return f.id===g.uid});
   el.querySelector('.stv-bt').hidden=!canRp;el.classList.toggle('liked',stLiked(s.id));
   el.classList.toggle('has-ft',canRp||g.mine);
-  var vw=el.querySelector('.stv-vw');vw.hidden=!g.mine||!!pend;if(g.mine&&!pend){vw.textContent='👁 …';stvViewCount(s,tok)}
+  var vw=el.querySelector('.stv-vw');vw.hidden=!g.mine||!!pend;if(g.mine&&!pend){vw.innerHTML=icon('eye')+'<span>…</span>';stvViewCount(s,tok)}
   el.querySelector('.stv-bars').innerHTML=g.items.map(function(_,k){return '<i><b style="width:'+(k<STV.i?100:0)+'%"></b></i>'}).join('');
   el.querySelector('.stv-av').style.backgroundImage='url('+g.items[0].thumb+')';
   el.querySelector('.stv-nm b').textContent=g.name;
@@ -11810,21 +12490,28 @@ function stvUpUpdate(){
   if(!STV.ready&&STV.waitUp){STV.ready=1;STV.t0=performance.now();STV.dur=STV.waitUp;STV.waitUp=0;stvTick()}
 }
 async function stvViewCount(s,tok){
-  var r=await cnxReq('/rest/v1/friend_story_views?story_id=eq.'+encodeURIComponent(s.id)+'&select=viewer_id,at&order=at.desc&limit=500');
+  var qv='/rest/v1/friend_story_views?story_id=eq.'+encodeURIComponent(s.id)+'&order=at.desc&limit=500';
+  var r=await cnxReq(qv+'&select=viewer_id,at,liked');
+  if(!r.ok)r=await cnxReq(qv+'&select=viewer_id,at');   /* the SQL of v368 (liked column) is not run yet */
   s._vw=r.ok&&Array.isArray(r.j)?r.j:null;
   if(tok!==STV.tok||!STV.el)return;
-  var vw=STV.el.querySelector('.stv-vw');vw.textContent='👁 '+(s._vw?fa(s._vw.length):'—');
+  var vw=STV.el.querySelector('.stv-vw');vw.innerHTML=icon('eye')+'<span>'+(s._vw?fa(s._vw.length):'—')+'</span>';
 }
 function stvPanel(on,html){
   var p=STV.el&&STV.el.querySelector('.stv-pn');if(!p)return;
-  if(on){p.innerHTML=html;p.hidden=false;STV.pn=1;stvPause(1)}
-  else if(!p.hidden){p.hidden=true;p.innerHTML='';STV.pn=0;stvPause(0)}
+  /* v405: the panel slides up softly and quickly (and down again); the rows follow one after another */
+  clearTimeout(p._ht);
+  if(on){p.innerHTML=html;p.hidden=false;void p.offsetWidth;p.classList.add('in');STV.pn=1;stvPause(1)}
+  else if(!p.hidden&&STV.pn!==0){
+    STV.pn=0;stvPause(0);p.classList.remove('in');
+    p._ht=setTimeout(function(){if(!p.classList.contains('in')){p.hidden=true;p.innerHTML=''}},shMotionOff()?0:190);
+  }
 }
 function stvViews(){
   var s=stvCur();if(!s)return;
   var names={};grFriends().forEach(function(f){names[f.id]=f.name});
   var v=s._vw||[],h='<div class="stv-pt"><b>'+__('بینندگان','Viewers')+' · '+fa(v.length)+'</b><button type="button" data-sv="pnx" aria-label="'+__('بستن','Close')+'">'+icon('close')+'</button></div><div class="stv-pl">'+
-    (v.length?v.map(function(x){var n=names[x.viewer_id]||__('دوست','Friend');return '<div class="stv-pr"><i style="--h:'+mcHue(n)+'">'+esc(Array.from(n)[0]||'')+'</i><span dir="auto">'+esc(n)+'</span><small>'+frWhen(x.at)+'</small></div>'}).join(''):'<p class="hint2">'+__('هنوز کسی ندیده است.','No one has seen it yet.')+'</p>')+'</div>';
+    (v.length?v.map(function(x){var n=names[x.viewer_id]||__('دوست','Friend');return '<div class="stv-pr"><i style="--h:'+mcHue(n)+'">'+esc(Array.from(n)[0]||'')+'</i><span dir="auto">'+esc(n)+'</span>'+(x.liked?'<em class="stv-lk" role="img" aria-label="'+__('لایک کرد','Liked')+'">❤️</em>':'')+'<small>'+frWhen(x.at)+'</small></div>'}).join(''):'<p class="hint2">'+__('هنوز کسی ندیده است.','No one has seen it yet.')+'</p>')+'</div>';
   stvPanel(1,h);
 }
 async function stvReply(text,quick){
@@ -11873,16 +12560,14 @@ function stvLike(x,y,fromBtn){
   if(first){
     stLikeSet(s.id,1);
     var gr=g;
-    stvSendHeart(s,gr).then(function(ok){if(!ok){stLikeSet(s.id,0);if(STV.el&&stvCur()===s)STV.el.classList.remove('liked')}});
+    stvSendLike(s).then(function(ok){if(!ok){stLikeSet(s.id,0);if(STV.el&&stvCur()===s)STV.el.classList.remove('liked')}});
   }
 }
-async function stvSendHeart(s,g){
-  var f=grFriends().filter(function(x){return x.id===g.uid})[0];if(!f||!f.link)return false;
-  var row={id:mcNewId(),link_id:f.link.id,sender_id:CNX.uid||stSess(),kind:'t',body:'❤️',meta:{sr:{id:s.id,th:s.thumb,c:String(s.caption||'').slice(0,60)},av:mcMyAv()}};
-  var r=await cnxReq('/rest/v1/link_messages','POST',row,{Prefer:'return=minimal'});
+/* v368: a like is NOT a chat message any more; it is only saved on the viewer's row, and the owner sees a heart in front of the name in the viewers list */
+async function stvSendLike(s){
+  var r=await cnxReq('/rest/v1/rpc/story_like','POST',{p_story:s.id,p_on:true});
   if(!r.ok){toast(mcErrMsg({st:r.st,off:r.off}),null,null,'warn');return false}
-  var a=MC.msgs[f.link.id];if(a&&!a.some(function(x){return x.id===row.id})){row.created_at=new Date().toISOString();a.push(row);mcSort(a)}
-  MC.sum[f.link.id]=row;return true;
+  return true;
 }
 function stvTick(){
   var el=STV.el;if(!el||!STV.ready)return;
@@ -12217,7 +12902,7 @@ function grpInfo(l){
       var me=m.user_id===CNX.uid,nm=m.name||__('عضو','Member');
       return '<div class="gr-mr" data-gr="mp" data-u="'+esc(m.user_id)+'" role="button" tabindex="0">'+grMemAvHTML(g,m)+'<span dir="auto">'+esc(nm)+(me?' ('+__('تو','you')+')':'')+'</span>'+(m.user_id===g.counselor_id?'<em>'+__('مدیر','Owner')+'</em>':'')+(own&&!me?'<button type="button" class="mc-x" data-gr="rm" data-u="'+esc(m.user_id)+'" aria-label="'+__('حذف از گروه','Remove')+'">'+icon('close')+'</button>':'')+'</div>';
     }).join('')+'</div>';
-    h+='<div class="mc-gact">'+(own?'<button type="button" class="tt-btn pri" data-gr="add">'+icon('plus')+__('افزودن عضو','Add member')+'</button>':'')+'<button type="button" class="tt-btn" data-gr="mute">'+(mcMuted(id)?__('صدا را باز کن','Unmute'):__('بی‌صدا','Mute'))+'</button><button type="button" class="tt-btn bad" data-gr="leave">'+__('ترک گروه','Leave group')+'</button></div>';
+    h+='<div class="mc-gact">'+(own?'<button type="button" class="tt-btn pri" data-gr="add">'+icon('plus')+__('افزودن عضو','Add member')+'</button>':'')+'<button type="button" class="tt-btn" data-gr="mute">'+(mcMuted(id)?icon('bellx','bx'):icon('bell'))+'<span>'+(mcMuted(id)?__('صدا را باز کن','Unmute'):__('بی‌صدا','Mute'))+'</span></button><button type="button" class="tt-btn bad" data-gr="leave">'+__('ترک گروه','Leave group')+'</button></div>';
     box.innerHTML=h;
     if(window.gpgRefresh)window.gpgRefresh();
   }
@@ -12231,7 +12916,7 @@ function grpInfo(l){
     var b=e.target.closest('[data-gr]');if(!b)return;
     var k=b.dataset.gr,g=mcLink(id);if(!g&&k!=='close')return;
     if(k==='close'){sw.close();return}
-    if(k==='mute'){mcMuteSet(id,!mcMuted(id));paint();return}
+    if(k==='mute'){var mo=!mcMuted(id);mcMuteSet(id,mo);mcMuteMorph(b,icon('bellx','bx'),icon('bell'),__('صدا را باز کن','Unmute'),__('بی‌صدا','Mute'),mo);return}
     if(k==='mp'){var pm=grMember(g,b.dataset.u);mcpOpen(g,{uid:b.dataset.u,name:pm&&pm.name});return}
     if(k==='photo'||k==='nophoto'||k==='gal'){
       var setP=async function(ph,done){
@@ -12304,7 +12989,7 @@ var GPG_I={
   dots:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="19" r="2" fill="currentColor"/></svg>',
   msg:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.8c-5.5 0-9.6 3.600-9.600 8.300 0 2.400 1.100 4.500 2.900 6-.2 1.400-.9 2.700-2 3.600a.5.5 0 0 0 .4.9c2.100-.1 3.900-.8 5.200-1.900 1 .3 2 .4 3.100.4 5.500 0 9.600-3.600 9.600-8.300S17.500 2.800 12 2.800z"/></svg>',
   bell:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.500a6.500 6.500 0 0 0-6.500 6.500v3.700L3.800 16a1 1 0 0 0 .9 1.500h14.600a1 1 0 0 0 .9-1.500l-1.700-3.300V9A6.500 6.500 0 0 0 12 2.500zM9.500 19.200a2.500 2.500 0 0 0 5 0z"/></svg>',
-  bellOff:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path fill="currentColor" d="M12 2.500a6.500 6.500 0 0 0-6.500 6.500v3.700L3.800 16a1 1 0 0 0 .9 1.500h14.600a1 1 0 0 0 .9-1.500l-1.700-3.300V9A6.500 6.500 0 0 0 12 2.500zM9.500 19.200a2.500 2.500 0 0 0 5 0z" opacity=".55"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="2.200" stroke-linecap="round" fill="none"/></svg>',
+  bellOff:'<svg viewBox="0 0 24 24" class="ic bx" aria-hidden="true"><path fill="currentColor" d="M12 2.500a6.500 6.500 0 0 0-6.500 6.500v3.700L3.800 16a1 1 0 0 0 .9 1.500h14.600a1 1 0 0 0 .9-1.500l-1.700-3.300V9A6.500 6.500 0 0 0 12 2.500zM9.500 19.200a2.500 2.500 0 0 0 5 0z" opacity=".55"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="2.200" stroke-linecap="round" fill="none"/></svg>',
   leave:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M10.500 4H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h3.500M15 8l4 4-4 4M19 12H9.500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 /* ===== v350: group admins + Telegram-style «Edit group» page.
@@ -12612,7 +13297,7 @@ function grpPage(l){
     if(k==='back'){closeThen();return}
     if(k==='menu'){menuSet(!menuOn);return}
     if(k==='msg'){closeThen(function(){var t=document.getElementById('mcT');if(t)t.focus()});return}
-    if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);paintHead(g);toast(on?__('اعلان‌های این گروه بی‌صدا شد','Notifications of this group are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info');return}
+    if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);mcMuteMorph(b,GPG_I.bellOff,GPG_I.bell,__('باز کردن صدا','Unmute'),__('بی‌صدا','Mute'),on);toast(on?__('اعلان‌های این گروه بی‌صدا شد','Notifications of this group are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info');return}
     if(k==='leave'){menuSet(false);leaveAsk();return}
     if(k==='desc'){descEdit();return}
     if(k==='pic'){if(grCan(g))grPhotoSheet(g,refresh);return}
@@ -12636,6 +13321,16 @@ function mcSpHold(id){
   [60,180,420,800].forEach(function(t){setTimeout(function(){if(MC.spHold&&ui.mcl===id)mcSpApply(id)},t)});
   clearTimeout(MC.spT);MC.spT=setTimeout(function(){MC.spHold=0},900);
 }
+/* v410: the round "down arrow" above the message box (groups, friends, advisor): shows when I have scrolled up, with the number of new messages that arrived meanwhile; a tap glides to the newest one */
+MC.dn={};
+function mcDnPaint(){
+  var L=document.getElementById('mcL'),b=document.getElementById('mcDn'),nb=document.getElementById('mcDnN'),id=ui.mcl;if(!L||!b)return;
+  var far=L.scrollHeight-L.scrollTop-L.clientHeight>260;
+  if(!far)MC.dn[id]=0;
+  var n=MC.dn[id]||0;
+  if(nb){nb.hidden=!n;nb.textContent=n>99?fa(99)+'+':fa(n)}
+  b.classList.toggle('show',far);
+}
 function mcSpSave(id){var L=document.getElementById('mcL');if(!L||MC.spHold)return;MC.sp[id]={t:L.scrollTop,e:L.scrollHeight-L.scrollTop-L.clientHeight<80}}
 function mcOpenChat(id,from){
   if(ui.tab!=='kcm')ui.mcTab=ui.tab;
@@ -12651,6 +13346,30 @@ actions.mcOpen=function(d){mcOpenChat(d.id,d.from||'*')};
 function mcStop(){clearInterval(MC.poll);MC.poll=0;clearInterval(MC.prT);MC.prT=0;MC.typAt=0;mcpKill();if(typeof gpeKill==='function')gpeKill();if(typeof gpgKill==='function')gpgKill()}
 /* ---------- v281: the other person's profile page (like Telegram's, without phone / call) ---------- */
 function mcMutedMap(){try{return JSON.parse(localStorage.getItem('ario.mcmute')||'{}')||{}}catch(e){return {}}}
+/* v383: the bell icon and the word of a mute button change softly: the old bell shrinks and turns away, the new one swings in with a small bounce, the word fades through */
+function mcMuteMorph(b,icOn,icOff,txOn,txOff,on){
+  var tk=b._mm=(b._mm||0)+1,rm=false;
+  try{rm=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  var sv=b.querySelector('svg'),sp=b.querySelector('span'),ic=on?icOn:icOff,tx=on?txOn:txOff;
+  b.classList.toggle('on',on);
+  function put(){
+    var o=document.createElement('div');o.innerHTML=ic;var n=o.firstChild;
+    if(sv&&sv.parentNode&&n){sv.parentNode.replaceChild(n,sv);sv=n}
+    if(sp)sp.textContent=tx;
+  }
+  if(rm||(!sv&&!sp)){put();return}
+  b.classList.remove('mmx');void b.offsetWidth;b.classList.add('mmx');
+  if(sv)sv.classList.add('mm-out');if(sp)sp.classList.add('mm-tout');
+  setTimeout(function(){
+    if(b._mm!==tk)return;
+    put();
+    if(sv){sv.classList.add('mm-pre')}if(sp){sp.classList.remove('mm-tout');sp.classList.add('mm-tpre')}
+    void b.offsetWidth;
+    if(sv){sv.classList.remove('mm-pre');sv.classList.add('mm-in')}
+    if(sp){sp.classList.remove('mm-tpre');sp.classList.add('mm-tin')}
+    setTimeout(function(){if(b._mm!==tk)return;b.classList.remove('mmx');if(sv)sv.classList.remove('mm-in');if(sp)sp.classList.remove('mm-tin')},560);
+  },190);
+}
 function mcMuted(id){return kcMuted('lk:'+id)}
 function mcMuteSet(id,on){var m=mcMutedMap();if(on)m[id]=1;else delete m[id];try{localStorage.setItem('ario.mcmute',JSON.stringify(m))}catch(e){}if(!on){var D=kcD();if(D.mu&&D.mu['lk:'+id]){delete D.mu['lk:'+id];persist()}}}
 /* "Clear chat" in a friend / group / advisor chat hides the messages for me only (a cut-off time kept on this phone) */
@@ -12665,10 +13384,10 @@ function grMember(g,uid){var ms=(g&&g.members)||[],i;for(i=0;i<ms.length;i++)if(
 function grMemAv(g,uid,name){
   if(uid===CNX.uid)return mcMyAv();
   var a=MC.msgs[g.id]||[],i,v,nm=String(name||'');
-  for(i=a.length-1;i>=0;i--){if(a[i].sender_id===uid&&a[i].meta&&a[i].meta.av){v=a[i].meta.av;return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||''}}}
+  for(i=a.length-1;i>=0;i--){if(a[i].sender_id===uid&&a[i].meta&&a[i].meta.av){v=a[i].meta.av;return {p:okPhoto(v.p)&&!isVip(v.p)?v.p:'',h:isFinite(+v.h)?+v.h:mcHue(nm),n:Array.from(String(v.n||nm))[0]||'',f:frClean(v.f)}}}
   return {p:'',h:mcHue(nm),n:Array.from(nm)[0]||''};
 }
-function grMemAvHTML(g,m){var v=grMemAv(g,m.user_id,m.name||'');return '<i class="gr-av'+(v.p?' has-p':'')+'" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':esc(v.n||'ع'))+'</i>'}
+function grMemAvHTML(g,m){var v=grMemAv(g,m.user_id,m.name||'');return '<i class="gr-av'+(v.p?' has-p':'')+frCls(v.f)+'" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':esc(v.n||'ع'))+'</i>'}
 function mcpOpen(l,mem){
   var gm=null;
   if(mcGr(l)){
@@ -12688,8 +13407,8 @@ function mcpOpen(l,mem){
   var o=document.createElement('div');o.className='mcp';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-label',nm);
   o.innerHTML='<div class="mcp-hero" style="--h:'+av.h+'"><div class="mcp-ph">'+ph+'</div><div class="mcp-sh"></div>'+
     '<button type="button" class="mcp-back" data-mcp="close" aria-label="'+__('برگشت','Back')+'">'+icon('chev')+'</button>'+
-    '<div class="mcp-melt"></div><div class="mcp-bot"><div class="mcp-id"><h2 dir="auto">'+tkWrap(nm)+'</h2><p>'+esc(st)+'</p></div>'+
-    (gm?(gmFr?'<div class="mcp-acts"><button type="button" data-mcp="gmsg">'+icon('chat')+'<span>'+__('پیام خصوصی','Private message')+'</span></button></div>':''):'<div class="mcp-acts"><button type="button" data-mcp="msg">'+icon('chat')+'<span>'+__('پیام','Message')+'</span></button><button type="button" data-mcp="mute" class="'+(mcMuted(id)?'on':'')+'">'+icon('bell')+'<span>'+(mcMuted(id)?__('بی‌صدا شده','Muted'):__('بی‌صدا','Mute'))+'</span></button></div>')+'</div></div>'+
+    '<div class="mcp-melt"></div><div class="mcp-bot"><div class="mcp-id"><h2 dir="auto">'+tkWrap(nm)+frBadges(av.f)+'</h2><p>'+esc(st)+'</p></div>'+
+    (gm?(gmFr?'<div class="mcp-acts"><button type="button" data-mcp="gmsg">'+icon('chat')+'<span>'+__('پیام خصوصی','Private message')+'</span></button></div>':''):'<div class="mcp-acts"><button type="button" data-mcp="msg">'+icon('chat')+'<span>'+__('پیام','Message')+'</span></button><button type="button" data-mcp="mute" class="'+(mcMuted(id)?'on':'')+'">'+icon(mcMuted(id)?'bellx':'bell')+'<span>'+(mcMuted(id)?__('بی‌صدا شده','Muted'):__('بی‌صدا','Mute'))+'</span></button></div>')+'</div></div>'+
     '<div class="mcp-card glass"><div><b>'+esc(role)+'</b><small>'+(gm?__('نقش در گروه «','Role in the group “')+esc(l.name||'')+(__('»','”')):__('نقش در این گفتگو','Role in this chat'))+'</small></div>'+(gm?(gm.joined?'<div><b>'+esc(cnxDate(gm.joined))+'</b><small>'+__('تاریخ پیوستن','Joined on')+'</small></div>':''):(l.linked_at?'<div><b>'+esc(cnxDate(l.linked_at))+'</b><small>'+__('تاریخ اتصال','Connected on')+'</small></div>':''))+'<div><b>'+fa(a.length)+'</b><small>'+(gm?__('پیام‌ها در این گروه','Messages in this group'):__('پیام‌های بارگیری‌شده','Messages loaded'))+'</small></div></div>'+
     '<div class="mcp-tabs" role="tablist"></div><div class="mcp-body"></div>';
   document.body.appendChild(o);try{tkFit(o);setTimeout(function(){tkFit(o)},350)}catch(e){}
@@ -12738,7 +13457,7 @@ function mcpOpen(l,mem){
         var fid=gmFr.id,go=function(){var sh=document.querySelector('.gr-info');if(sh)sh.remove();mcOpenChat(fid,id)};
         if(history.state&&history.state.sub){history.back();setTimeout(go,350)}else{mcpKill();go()}
       }
-      else if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);b.classList.toggle('on',on);b.querySelector('span').textContent=on?__('بی‌صدا شده','Muted'):__('بی‌صدا','Mute');toast(on?__('اعلان‌های این گفتگو بی‌صدا شد','Notifications of this chat are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info')}
+      else if(k==='mute'){var on=!mcMuted(id);mcMuteSet(id,on);mcMuteMorph(b,icon('bellx'),icon('bell'),__('بی‌صدا شده','Muted'),__('بی‌صدا','Mute'),on);toast(on?__('اعلان‌های این گفتگو بی‌صدا شد','Notifications of this chat are muted'):__('اعلان‌ها دوباره روشن شد','Notifications are back on'),null,null,'info')}
       return;
     }
     if((b=e.target.closest('[data-mcpt]'))){var pv2=cur;cur=b.dataset.mcpt;if(pv2===cur)return;paint(true);tabGo(TB,BD,'data-mcpt',pv2,cur,tabs.map(function(t){return t[0]}));return}
@@ -12814,7 +13533,9 @@ actions.mcDash=function(){var l=mcLink(ui.mcl);if(l)cdOpen(l.id)};
    voice_sync is called about once a second while someone is in the voice chat, voice_who every few seconds while a chat is open.
    To make it work on every mobile network a TURN server can be added: put it in VC_TURN, e.g. {urls:'turn:host:3478',username:'u',credential:'p'}. */
 var VC_TURN=[];
-var VC={on:0,id:'',stream:null,pc:{},q:{},au:{},an:{},ctx:null,peers:[],out:[],muted:false,ns:true,t:0,m:0,busy:0,fails:0,rejoin:0,who:{},whoAt:0,whoBusy:0,w:null,pill:null,lv:{},title:'',wt:{},routes:[],route:'',rt:0,rtBusy:0,joinAt:0,intro:null,invAt:0};
+var VC={on:0,id:'',stream:null,pc:{},q:{},au:{},an:{},ctx:null,peers:[],out:[],muted:false,ns:true,t:0,m:0,busy:0,fails:0,rejoin:0,who:{},whoAt:0,whoBusy:0,w:null,pill:null,lv:{},title:'',wt:{},routes:[],route:'',rt:0,rtBusy:0,joinAt:0,intro:null,invAt:0,lastTick:0,failT:0,hold:0,kick:0,again:0,rs:'',ev:0,host:'',msgs:[],since:0,mq:[],unread:0,cho:0,forced:0};
+/* v367: 1 while the server knows the v367 block (messages + host); set to 0 for good if it answers «no such function», and the voice chat then works the old way */
+var VC_EXT=1;
 var VC_ICON={
   mic:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>',
   off:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M4 4l16 16"/></svg>',
@@ -12826,6 +13547,8 @@ var VC_ICON={
   pip:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M20.5 11V8.5a3 3 0 0 0-3-3h-11a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3H12"/><circle cx="18" cy="17.5" r="2.3" fill="currentColor" stroke="none"/></svg>',
   dots:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5.5" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.8" fill="currentColor" stroke="none"/></svg>',
   pen:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  chat:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 5.5h16v10.5H9.5L5.5 19.5V16H4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
+  kick:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="10" cy="8" r="3.6"/><path d="M3.5 19.5a6.5 6.5 0 0 1 13 0M16.5 9.5l5 5M21.5 9.5l-5 5"/></svg>',
   link:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8"/></svg>',
   stop:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
   chk:'<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5.5 12.5l4.5 4.5 8.5-9.5"/></svg>',
@@ -12853,10 +13576,22 @@ function vcName(l,uid){
 }
 function vcAv(l,uid){
   var v=uid===CNX.uid?mcMyAv():(l&&mcGr(l)?grMemAv(l,uid,vcName(l,uid)):(l?mcPeerAv(l):{p:'',h:200,n:'؟'}));
-  return '<i class="gr-av'+(v.p?' has-p':'')+'" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':esc(v.n||'ع'))+'</i>';
+  return '<i class="gr-av'+(v.p?' has-p':'')+frCls(v.f)+'" style="--h:'+v.h+'">'+(v.p?'<span class="aimg '+v.p+'"></span>':esc(v.n||'ع'))+'</i>';
 }
 /* in a group only its owner can end the voice chat for everybody; in a friend chat both friends can */
-function vcCanEnd(l){return !!l&&(mcGr(l)?l.counselor_id===CNX.uid:mcFr(l))}
+function vcCanEnd(l){
+  if(VC.on&&VC.host)return VC.host===CNX.uid;   /* v367: only the person who started the voice chat */
+  return !!l&&(mcGr(l)?l.counselor_id===CNX.uid:mcFr(l));
+}
+function vcIsHost(){return !!(VC.on&&VC.host&&VC.host===CNX.uid)}
+/* one request to the server for the whole call; asks for the v367 fields too, and falls back to the old call if the server has not got them */
+async function vcSyncReq(join,muted,out,msg){
+  var b={p_link:VC.id,p_join:join,p_muted:muted,p_out:out},r;
+  if(VC_EXT){b.p_since=VC.since||0;if(msg)b.p_msg=msg}
+  r=await cnxReq('/rest/v1/rpc/voice_sync','POST',b);
+  if(VC_EXT&&r.st===404){VC_EXT=0;delete b.p_since;delete b.p_msg;r=await cnxReq('/rest/v1/rpc/voice_sync','POST',b)}
+  return r;
+}
 /* ----- where the sound comes out: phone / speaker / Bluetooth / headphones (Android plugin ArioAudio) ----- */
 function vcAN(){try{var C=window.Capacitor;if(C&&C.isNativePlatform&&C.isNativePlatform())return (C.Plugins&&C.Plugins.ArioAudio)||(C.registerPlugin&&C.registerPlugin('ArioAudio'))||null}catch(e){}return null}
 function vcRouteName(r){
@@ -12900,9 +13635,11 @@ function vcPaint(){
     var p=ps[i],mine=p.user_id===me,c=VC.pc[p.user_id],st=mine?'ok':(c&&c.pc.connectionState==='connected'?'ok':'wait');
     if(!mine)others++;
     if(st==='ok'&&!mine)live++;
-    var muted=mine?VC.muted:!!p.muted,sub=st==='ok'?__('در حال گوش دادن','Listening'):__('در حال اتصال…','Connecting…');
+    var forced=mine?!!VC.forced:!!p.forced,muted=forced||(mine?VC.muted:!!p.muted),isH=!!VC.host&&p.user_id===VC.host;
+    var sub=forced?__('صدایش را سازنده بسته','Muted by the host'):(st==='ok'?__('در حال گوش دادن','Listening'):__('در حال اتصال…','Connecting…'));
     ids.push(p.user_id);
-    h+='<div class="vc-p'+(muted?' mu':'')+(L&&L.dataset.ids!=null&&seen.indexOf(p.user_id)<0?' vc-new':'')+'" data-u="'+esc(p.user_id)+'" data-s="'+esc(sub)+'"><span class="vc-av">'+vcAv(l,p.user_id)+'</span><span class="vc-nm"><b dir="auto">'+esc(vcName(l,p.user_id))+'</b><small>'+sub+'</small></span><span class="vc-mi">'+(muted?VC_ICON.off:VC_ICON.mic)+'</span></div>';
+    if(!mine){var au=VC.au[p.user_id];if(au)au.muted=!!p.forced}   /* v367: a closed microphone is also silent on every phone */
+    h+='<div class="vc-p'+(muted?' mu':'')+(L&&L.dataset.ids!=null&&seen.indexOf(p.user_id)<0?' vc-new':'')+'" data-u="'+esc(p.user_id)+'" data-s="'+esc(sub)+'"><span class="vc-av">'+vcAv(l,p.user_id)+'</span><span class="vc-nm"><b dir="auto">'+esc(vcName(l,p.user_id))+(isH?'<em class="vc-tg">'+__('سازنده','Host')+'</em>':'')+'</b><small>'+sub+'</small></span>'+(vcIsHost()&&!mine?'<button type="button" class="vc-ib vc-pm" data-vc="pm" data-u="'+esc(p.user_id)+'" aria-label="'+__('مدیریت','Manage')+'">'+VC_ICON.dots+'</button>':'')+'<span class="vc-mi">'+(muted?VC_ICON.off:VC_ICON.mic)+'</span></div>';
   }
   if(L&&L.dataset.h!==h){L.innerHTML=h;L.dataset.h=h;L.dataset.ids=ids.join(',')}
   var ti=w.querySelector('#vcTi');if(ti){var tt=VC.title||__('گفتگوی صوتی','Voice chat');if(ti.textContent!==tt)ti.textContent=tt}
@@ -12910,10 +13647,12 @@ function vcPaint(){
   var mb=w.querySelector('[data-vc="mute"]');
   if(mb){
     mb.classList.toggle('cn',cn);mb.classList.toggle('on',!VC.muted&&!cn);
-    var lab=cn?__('در حال اتصال…','Connecting…'):(VC.muted?__('روشن کردن','Unmute'):__('بی‌صدا','Mute'));
+    var lab=cn?__('در حال اتصال…','Connecting…'):(VC.forced?__('بسته شده','Closed'):VC.muted?__('روشن کردن','Unmute'):__('بی‌صدا','Mute'));
     var ic=(VC.muted||cn)?VC_ICON.off:VC_ICON.mic,k=ic+'|'+lab;
     if(mb.dataset.k!==k){mb.dataset.k=k;mb.innerHTML='<i>'+ic+'<svg class="vc-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"/></svg></i><span>'+lab+'</span>'}
   }
+  var cb=w.querySelector('[data-vc="chat"]');
+  if(cb){cb.classList.toggle('on',!!VC.cho);var bg=cb.querySelector('.vc-bg2');if(bg){bg.hidden=!VC.unread||!!VC.cho;bg.textContent=VC.unread>9?'9+':fa(VC.unread)}}
   var ab=w.querySelector('[data-vc="route"]');
   if(ab){ab.hidden=!VC.routes.length;if(VC.routes.length){var cr=vcRouteCur(),k2=cr.id+'|'+cr.name;if(ab.dataset.k!==k2){ab.dataset.k=k2;ab.innerHTML='<i>'+vcRouteIcon(cr.id)+'</i><span>'+esc(vcRouteName(cr))+'</span>'}}}
   vcPillPaint();
@@ -12924,6 +13663,8 @@ function vcPillPaint(){
   p.hidden=hidden;
   var t=p.querySelector('b');if(t)t.textContent=(VC.title||__('گفتگوی صوتی','Voice chat'))+' · '+fa(VC.peers.length)+' '+__('نفر','people');
   p.classList.toggle('mu',VC.muted);
+  try{musPillPaint()}catch(e){}
+  try{islSync()}catch(e){}
 }
 function vcDrag(w,hd,close){
   var y0=0,dy=0,on=0,sh=w.querySelector('.vc-sheet'),bd=w.querySelector('.vc-bd');
@@ -12938,13 +13679,16 @@ function vcBuild(){
   w.innerHTML='<div class="vc-bd" data-vc="min"></div><div class="vc-sheet">'+
     '<div class="vc-hd"><b id="vcTi" dir="auto"></b><button type="button" class="vc-ib" data-vc="min" aria-label="'+__('کوچک کردن','Minimize')+'">'+VC_ICON.pip+'</button><button type="button" class="vc-ib" data-vc="menu" aria-haspopup="menu" aria-label="'+__('بیشتر','More')+'">'+VC_ICON.dots+'</button></div>'+
     '<div class="vc-card"><div class="vc-list" id="vcL"></div><button type="button" class="vc-inv" data-vc="invite">'+VC_ICON.link+'<span>'+__('ارسال دعوت در چت','Send an invite in the chat')+'</span></button></div>'+
+    '<div class="vc-chat"><div class="vc-ch-hd"><b>'+__('پیام‌ها','Messages')+'</b><small>'+__('با بسته شدن گفتگوی صوتی پیام‌ها پاک می‌شوند','Messages are deleted when the voice chat ends')+'</small></div><div class="vc-ch-l" id="vcC"></div>'+
+    '<form class="vc-ch-f" id="vcF" autocomplete="off"><input id="vcCi" type="text" maxlength="500" dir="auto" autocomplete="off" enterkeyhint="send" placeholder="'+__('پیام بنویس…','Write a message…')+'"><button type="submit" class="vc-ch-s" aria-label="'+__('ارسال','Send')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3.5 11.5l16-7.5-5.2 16-3-6.3z"/><path d="M11.3 13.7l3.4-3.4"/></svg></button></form></div>'+
     '<div class="vc-sp"></div>'+
-    '<div class="vc-bar"><button type="button" class="vc-b" data-vc="route" hidden></button><button type="button" class="vc-b mic" data-vc="mute"></button><button type="button" class="vc-b end" data-vc="leave"><i>'+VC_ICON.end+'</i><span>'+__('خروج','Leave')+'</span></button></div></div>';
+    '<div class="vc-bar"><button type="button" class="vc-b" data-vc="route" hidden></button><button type="button" class="vc-b" data-vc="chat"><i>'+VC_ICON.chat+'<em class="vc-bg2" hidden></em></i><span>'+__('پیام‌ها','Messages')+'</span></button><button type="button" class="vc-b mic" data-vc="mute"></button><button type="button" class="vc-b end" data-vc="leave"><i>'+VC_ICON.end+'</i><span>'+__('خروج','Leave')+'</span></button></div></div>';
   w.addEventListener('click',vcClick);
+  w.addEventListener('submit',vcChatSend);
   document.body.appendChild(w);VC.w=w;
   vcDrag(w,w.querySelector('.vc-hd'),vcMin);
   var p=document.createElement('button');p.type='button';p.className='vc-pill';p.hidden=true;p.innerHTML=VC_ICON.bars+'<b></b><span>'+__('بازگشت','Return')+'</span>';
-  p.addEventListener('click',vcShow);document.body.appendChild(p);VC.pill=p;
+  p.addEventListener('click',vcShow);islAdopt('vc',p);VC.pill=p;
   requestAnimationFrame(function(){requestAnimationFrame(function(){w.classList.add('open')})});
   vcPaint();
 }
@@ -12956,6 +13700,7 @@ function vcBack(){
   var w=VC.w;if(!w||!w.classList.contains('open')||w.classList.contains('min'))return false;
   var d=w.querySelector('.vc-dlg');if(d){d.remove();return true}
   if(w.querySelector('.vc-menu')){vcMenuClose();return true}
+  if(VC.cho){vcChatToggle();return true}
   vcMin();return true;
 }
 function vcClick(e){
@@ -12965,6 +13710,11 @@ function vcClick(e){
   if(!b)return;
   var k=b.dataset.vc;
   if(k==='min'){vcMin();return}
+  if(k==='chat'){vcChatToggle();return}
+  if(k==='pm'){vcMenuOpen('p',b.dataset.u);return}
+  if(k==='fmute'){vcMenuClose();vcForceMute(b.dataset.u,b.dataset.on==='1');return}
+  if(k==='kick'){vcMenuClose();vcAskRemove(b.dataset.u);return}
+  if(k==='kickyes'){vcRemove(b.dataset.u);return}
   if(k==='mute'){vcMute(!VC.muted);return}
   if(k==='route'){vcRouteTap();return}
   if(k==='menu'){vcMenuOpen('top');return}
@@ -12980,13 +13730,18 @@ function vcClick(e){
 }
 /* ----- the «⋮» menu (and the audio-output list) ----- */
 function vcMenuClose(){var m=VC.w&&VC.w.querySelector('.vc-menu');if(m)m.remove()}
-function vcMenuOpen(kind){
+function vcMenuOpen(kind,uid){
   var w=VC.w,l=vcLink();if(!w||!l)return;
   if(w.querySelector('.vc-menu')){vcMenuClose();return}
   var m=document.createElement('div');m.className='vc-menu'+(kind==='up'?' up':'');m.setAttribute('role','menu');
   var it=function(ic,t,s,k,cls,extra){return '<button type="button" role="menuitem" class="vc-mt'+(cls?' '+cls:'')+'" data-vc="'+k+'"'+(extra||'')+'>'+ic+'<span><b>'+t+'</b>'+(s?'<small>'+esc(s)+'</small>':'')+'</span></button>'};
   var h='';
-  if(kind==='up'){
+  if(kind==='p'){
+    var pp=VC.peers.filter(function(x){return x.user_id===uid})[0];if(!pp||!vcIsHost())return;
+    h+='<div class="vc-mt me"><span class="vc-av">'+vcAv(l,uid)+'</span><span><b dir="auto">'+esc(vcName(l,uid))+'</b></span></div><div class="vc-mdv"></div>';
+    h+=it(pp.forced?VC_ICON.mic:VC_ICON.off,pp.forced?__('باز کردن صدای او','Let them speak again'):__('بستن صدای او','Close their microphone'),'','fmute','',' data-u="'+esc(uid)+'" data-on="'+(pp.forced?'0':'1')+'"');
+    h+=it(VC_ICON.kick,__('حذف از گفتگوی صوتی','Remove from the voice chat'),'','kick','bad',' data-u="'+esc(uid)+'"');
+  }else if(kind==='up'){
     VC.routes.forEach(function(r){h+=it(vcRouteIcon(r.id),esc(vcRouteName(r)),'','rt',r.id===VC.route?'cur':'',' data-r="'+esc(r.id)+'"')});
   }else{
     h+='<div class="vc-mt me"><span class="vc-av">'+vcAv(l,CNX.uid)+'</span><span><b>'+__('نمایش من به‌صورت…','Display me as…')+'</b><small dir="auto">'+esc(vcName(l,CNX.uid))+'</small></span></div>';
@@ -13025,16 +13780,79 @@ function vcInvite(){
   var l=vcLink();if(!l)return;
   if(Date.now()-VC.invAt<30000){toast(__('دعوت همین الان فرستاده شد','The invite was just sent'),null,null,'info',1);return}
   VC.invAt=Date.now();
-  if(mcSendText(l,__('🎙 گفتگوی صوتی روشن است؛ بیا بپیوند!','🎙 The voice chat is on — come and join!')))toast(__('دعوت در چت فرستاده شد','The invite was sent in the chat'),null,null,'info',1);
+  /* v404: the invite is a card (mic · «گفتگوی صوتی» · «به گفتگوی صوتی بپیوندید» · «پیوستن»); the body text stays for older versions */
+  mcPost(l,{id:mcNewId(),kind:'t',body:__('🎙 گفتگوی صوتی روشن است؛ بیا بپیوند!','🎙 The voice chat is on — come and join!'),meta:{vi:1}});
+  if(1)toast(__('دعوت در چت فرستاده شد','The invite was sent in the chat'),null,null,'info',1);
 }
 async function vcEndAll(){
   var id=VC.id;
   var r=await cnxReq('/rest/v1/rpc/voice_end','POST',{p_link:id});
   if(r.ok&&r.j&&r.j.ok){vcEnd();return}
   var d=VC.w&&VC.w.querySelector('.vc-dlg');if(d)d.remove();
-  toast(r.j&&r.j.err==='owner'?__('فقط سازنده‌ی گروه می‌تواند گفتگوی صوتی را برای همه تمام کند','Only the group owner can end the voice chat for everyone'):r.st===404?__('پایان گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v344 فایل supabase/setup.sql را اجرا کن).','Ending is not in Supabase yet (run the v344 block of supabase/setup.sql).'):cnxNetErr(r),null,null,'warn');
+  toast(r.j&&r.j.err==='owner'?__('فقط کسی که گفتگوی صوتی را شروع کرده می‌تواند آن را برای همه تمام کند','Only the person who started the voice chat can end it for everyone'):r.st===404?__('پایان گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v344 فایل supabase/setup.sql را اجرا کن).','Ending is not in Supabase yet (run the v344 block of supabase/setup.sql).'):cnxNetErr(r),null,null,'warn');
+}
+/* ----- v367: what only the host can do ----- */
+async function vcForceMute(uid,on){
+  var id=VC.id,pp=VC.peers.filter(function(x){return x.user_id===uid})[0];
+  if(pp){pp.forced=!!on;if(on)pp.muted=true;vcPaint()}
+  var r=await cnxReq('/rest/v1/rpc/voice_force_mute','POST',{p_link:id,p_user:uid,p_on:!!on});
+  if(!VC.on||VC.id!==id)return;
+  if(!r.ok||!r.j||!r.j.ok){if(pp){pp.forced=!on;vcPaint()}toast(r.st===404?__('این کار هنوز در Supabase ساخته نشده (بخش v367 فایل supabase/setup.sql را اجرا کن).','This is not in Supabase yet (run the v367 block of supabase/setup.sql).'):r.j&&r.j.err==='host'?__('فقط سازندهٔ گفتگوی صوتی می‌تواند این کار را بکند','Only the host can do this'):cnxNetErr(r),null,null,'warn')}
+}
+function vcAskRemove(uid){
+  var l=vcLink();if(!l)return;
+  vcDlg('<div class="vc-dc" role="alertdialog"><b>'+__('حذف از گفتگوی صوتی','Remove from the voice chat')+'</b><p>'+__('«','“')+esc(vcName(l,uid))+__('» از گفتگوی صوتی بیرون می‌رود و تا پایان همین گفتگو نمی‌تواند دوباره بپیوندد.','” leaves the voice chat and cannot join again until it ends.')+'</p><div><button type="button" data-vc="no">'+__('انصراف','Cancel')+'</button><button type="button" class="bad" data-vc="kickyes" data-u="'+esc(uid)+'">'+__('حذف','Remove')+'</button></div></div>');
+}
+async function vcRemove(uid){
+  var d=VC.w&&VC.w.querySelector('.vc-dlg');if(d)d.remove();
+  var id=VC.id;
+  VC.peers=VC.peers.filter(function(x){return x.user_id!==uid});vcDrop(uid);vcPaint();
+  var r=await cnxReq('/rest/v1/rpc/voice_kick','POST',{p_link:id,p_user:uid});
+  if(!VC.on||VC.id!==id)return;
+  if(!r.ok||!r.j||!r.j.ok)toast(r.st===404?__('این کار هنوز در Supabase ساخته نشده (بخش v367 فایل supabase/setup.sql را اجرا کن).','This is not in Supabase yet (run the v367 block of supabase/setup.sql).'):r.j&&r.j.err==='host'?__('فقط سازندهٔ گفتگوی صوتی می‌تواند کسی را حذف کند','Only the host can remove someone'):cnxNetErr(r),null,null,'warn');
+}
+/* ----- v367: messages inside the voice chat (they live only as long as the voice chat) ----- */
+function vcChatToggle(){
+  var w=VC.w;if(!w)return;
+  if(!VC.cho&&!VC_EXT){toast(__('پیام در گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v367 فایل supabase/setup.sql را اجرا کن).','Messages are not in Supabase yet (run the v367 block of supabase/setup.sql).'),null,null,'warn');return}
+  VC.cho=VC.cho?0:1;VC.unread=0;
+  var sh=w.querySelector('.vc-sheet');if(sh)sh.classList.toggle('chat',!!VC.cho);
+  vcMenuClose();
+  if(VC.cho){vcChatPaint(1);var i=w.querySelector('#vcCi');if(i)setTimeout(function(){try{i.focus()}catch(e){}},120)}
+  vcPaint();
+}
+function vcChatPaint(force){
+  var w=VC.w,L=w&&w.querySelector('#vcC');if(!L)return;
+  var l=vcLink(),me=CNX.uid,near=L.scrollHeight-L.scrollTop-L.clientHeight<70,h='',last='';
+  var key=VC.msgs.length+':'+(VC.msgs.length?VC.msgs[VC.msgs.length-1].id:0)+':'+VC.mq.length;
+  if(!force&&L.dataset.k===key)return;
+  if(!VC.msgs.length&&!VC.mq.length)h='<p class="vc-ce">'+__('هنوز پیامی نیست. اینجا می‌توانی در همین گفتگوی صوتی پیام بنویسی؛ با بسته شدن گفتگو همهٔ پیام‌ها پاک می‌شوند.','No messages yet. Write here, inside this voice chat; every message is deleted when the voice chat ends.')+'</p>';
+  VC.msgs.forEach(function(m){
+    var mine=m.from===me,d=new Date(m.at),tm=isNaN(d)?'':fa(('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2));
+    h+='<div class="vc-m'+(mine?' me':'')+'">'+(!mine&&last!==m.from?'<b dir="auto">'+esc(vcName(l,m.from))+'</b>':'')+'<span dir="auto">'+esc(m.body)+'</span><time>'+tm+'</time></div>';
+    last=m.from;
+  });
+  VC.mq.forEach(function(t){h+='<div class="vc-m me wait"><span dir="auto">'+esc(t)+'</span><time>…</time></div>'});
+  L.innerHTML=h;L.dataset.k=key;
+  if(near||force)L.scrollTop=L.scrollHeight;
+}
+function vcChatSend(e){
+  e.preventDefault();
+  var i=VC.w&&VC.w.querySelector('#vcCi');if(!i)return;
+  var t=String(i.value||'').trim().slice(0,500);if(!t)return;
+  if(!VC_EXT){toast(__('پیام در گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v367 فایل supabase/setup.sql را اجرا کن).','Messages are not in Supabase yet (run the v367 block of supabase/setup.sql).'),null,null,'warn');return}
+  if(VC.mq.length>=5){toast(__('چند لحظه صبر کن','Wait a moment'),null,null,'info',1);return}
+  VC.mq.push(t);i.value='';hap('send');vcChatPaint();vcKick();
+}
+function vcMsgsIn(list){
+  if(!list||!list.length)return;
+  var add=0;
+  list.forEach(function(m){if(m.id>VC.since){VC.since=m.id;VC.msgs.push(m);if(m.from!==CNX.uid)add++}});
+  if(VC.msgs.length>300)VC.msgs=VC.msgs.slice(-300);
+  if(VC.cho)vcChatPaint();else if(add){VC.unread+=add;vcPaint()}
 }
 function vcMute(m){
+  if(!m&&VC.forced){toast(__('سازنده صدای تو را بسته است','The host has closed your microphone'),null,null,'warn',1);return}
   VC.muted=!!m;
   if(VC.stream)VC.stream.getAudioTracks().forEach(function(t){t.enabled=!VC.muted});
   hap('tick');vcPaint();
@@ -13064,9 +13882,55 @@ function vcIntroClose(fast){
   w.classList.remove('open');setTimeout(function(){w.remove()},fast?30:340);
 }
 /* ----- connections between phones ----- */
-function vcSend(uid,kind,payload){VC.out.push({to:uid,kind:kind,payload:payload})}
+function vcSend(uid,kind,payload){VC.out.push({to:uid,kind:kind,payload:payload});vcKick()}
+/* v366: a message to the other phone no longer waits for the next second: it goes out within ~80 ms (candidates found in the same moment travel together) */
+function vcKick(){
+  if(!VC.on)return;
+  if(VC.busy){VC.again=1;return}
+  if(VC.kick)return;
+  VC.kick=setTimeout(function(){VC.kick=0;vcTick()},80);
+}
+/* v366: the sound settings of the call (Opus): error correction on, silence costs nothing, mono, a steady 32 kbit/s - good voice and kind to weak networks */
+function vcSdp(sdp){
+  try{
+    var m=/a=rtpmap:(\d+) opus\/48000\/2/i.exec(sdp);if(!m)return sdp;
+    var re=new RegExp('a=fmtp:'+m[1]+' ([^\\r\\n]*)'),f=re.exec(sdp);
+    var want={useinbandfec:'1',usedtx:'1',stereo:'0','sprop-stereo':'0',maxaveragebitrate:'32000',minptime:'10'};
+    if(!f)return sdp.replace(m[0],m[0]+'\r\na=fmtp:'+m[1]+' '+Object.keys(want).map(function(k){return k+'='+want[k]}).join(';'));
+    var cur={};f[1].split(';').forEach(function(x){var i=x.indexOf('=');if(i>0)cur[x.slice(0,i).trim()]=x.slice(i+1).trim()});
+    Object.keys(want).forEach(function(k){cur[k]=want[k]});
+    return sdp.replace(f[0],'a=fmtp:'+m[1]+' '+Object.keys(cur).map(function(k){return k+'='+cur[k]}).join(';'));
+  }catch(e){return sdp}
+}
+function vcTune(pc){
+  try{pc.getSenders().forEach(function(sn){
+    if(!sn.track||sn.track.kind!=='audio')return;
+    var pr=sn.getParameters();if(!pr.encodings||!pr.encodings.length)pr.encodings=[{}];
+    pr.encodings[0].maxBitrate=40000;pr.encodings[0].priority='high';pr.encodings[0].networkPriority='high';
+    var r=sn.setParameters(pr);if(r&&r.catch)r.catch(function(){});
+  })}catch(e){}
+}
+function vcFp(sd){try{var x=typeof sd==='string'?JSON.parse(sd).sdp:sd.sdp,m=/a=fingerprint:\S+ (\S+)/.exec(x||'');return m?m[1]:''}catch(e){return ''}}
+/* v366: the connection hiccups (wifi <-> mobile data, a lift, a tunnel): the same call looks for a new route by itself instead of being torn down */
+async function vcRestart(uid){
+  var c=VC.pc[uid];if(!c||!c.make||c.pc.signalingState!=='stable'||c.rst>=4)return;
+  c.rst++;
+  try{
+    try{c.pc.restartIce()}catch(e){}
+    var o=await c.pc.createOffer({iceRestart:true,offerToReceiveAudio:true});
+    o.sdp=vcSdp(o.sdp);
+    await c.pc.setLocalDescription(o);
+    vcSend(uid,'offer',JSON.stringify(c.pc.localDescription));
+  }catch(e){vcDrop(uid)}
+}
+function vcNetBack(){
+  if(!VC.on)return;
+  Object.keys(VC.pc).forEach(function(u){var c=VC.pc[u];if(c&&c.make&&c.pc.connectionState!=='connected'){c.rst=0;c.bad=c.bad||Date.now();vcRestart(u)}});
+  VC.hold=0;vcKick();
+}
 function vcDrop(uid){
   var c=VC.pc[uid];
+  if(c){clearTimeout(c.dt)}
   if(c){try{c.pc.onicecandidate=c.pc.ontrack=c.pc.onconnectionstatechange=null;c.pc.close()}catch(e){}}
   delete VC.pc[uid];
   var a=VC.au[uid];if(a){try{a.pause();a.srcObject=null;a.remove()}catch(e){}delete VC.au[uid]}
@@ -13074,13 +13938,21 @@ function vcDrop(uid){
 }
 function vcPc(uid,make){
   var c=VC.pc[uid];if(c)return c;
-  var pc=new RTCPeerConnection({iceServers:vcIce()});
-  c={pc:pc,at:Date.now(),make:!!make,offered:0};VC.pc[uid]=c;
+  var pc=new RTCPeerConnection({iceServers:vcIce(),iceCandidatePoolSize:2,bundlePolicy:'max-bundle',rtcpMuxPolicy:'require'});   /* v366: candidates are gathered ahead, one transport for everything */
+  c={pc:pc,at:Date.now(),make:!!make,offered:0,bad:0,rst:0,dt:0};VC.pc[uid]=c;
   VC.stream.getTracks().forEach(function(t){pc.addTrack(t,VC.stream)});
   pc.onicecandidate=function(e){if(e.candidate)vcSend(uid,'ice',JSON.stringify(e.candidate))};
   pc.ontrack=function(e){vcAttach(uid,e.streams&&e.streams[0]?e.streams[0]:new MediaStream([e.track]))};
   pc.onconnectionstatechange=function(){
-    if(pc.connectionState==='failed'&&VC.pc[uid]&&VC.pc[uid].pc===pc){vcDrop(uid)}   /* the offering side starts again by itself on the next tick */
+    var cc=VC.pc[uid];if(!cc||cc.pc!==pc)return;
+    var st=pc.connectionState;
+    clearTimeout(cc.dt);
+    if(st==='connected'){cc.bad=0;cc.rst=0;vcTune(pc)}
+    else{
+      if(!cc.bad)cc.bad=Date.now();
+      if(st==='failed'){if(cc.make&&cc.rst<4)vcRestart(uid)}   /* otherwise the stuck check of vcTick starts it again from scratch */
+      else if(st==='disconnected'){cc.dt=setTimeout(function(){var z=VC.pc[uid];if(z&&z.pc===pc&&pc.connectionState!=='connected'&&z.make)vcRestart(uid)},2500)}
+    }
     vcPaint();
   };
   return c;
@@ -13101,18 +13973,24 @@ async function vcOffer(uid){
   var c=vcPc(uid,true);if(c.offered)return;c.offered=1;
   try{
     var o=await c.pc.createOffer({offerToReceiveAudio:true});
+    o.sdp=vcSdp(o.sdp);
     await c.pc.setLocalDescription(o);
+    vcTune(c.pc);
     vcSend(uid,'offer',JSON.stringify(c.pc.localDescription));
   }catch(e){vcDrop(uid)}
 }
 async function vcOnOffer(uid,payload){
-  vcDrop(uid);
-  var c=vcPc(uid,false);
+  var ex=VC.pc[uid],c;
+  /* v366: an offer with the SAME fingerprint as before is the other phone looking for a new route (ICE restart): keep the call and answer it */
+  if(ex&&!ex.make&&ex.pc.remoteDescription&&ex.pc.signalingState==='stable'&&vcFp(payload)&&vcFp(payload)===vcFp(ex.pc.remoteDescription))c=ex;
+  else{vcDrop(uid);c=vcPc(uid,false)}
   try{
     await c.pc.setRemoteDescription(JSON.parse(payload));
     await vcFlushIce(uid);
     var a=await c.pc.createAnswer();
+    a.sdp=vcSdp(a.sdp);
     await c.pc.setLocalDescription(a);
+    vcTune(c.pc);
     vcSend(uid,'answer',JSON.stringify(c.pc.localDescription));
   }catch(e){vcDrop(uid)}
 }
@@ -13131,30 +14009,55 @@ async function vcFlushIce(uid){
   for(var i=0;i<q.length;i++){try{await c.pc.addIceCandidate(JSON.parse(q[i]))}catch(e){}}
 }
 /* ----- the once-a-second round trip ----- */
+function vcFast(){
+  /* v366: while a connection is being made (or a message waits) ask the server 4x a second; once everybody is connected go back to once a second */
+  if(VC.out.length||Date.now()-VC.joinAt<8000)return true;
+  var me=CNX.uid,i,p,c;
+  for(i=0;i<VC.peers.length;i++){p=VC.peers[i];if(p.user_id===me)continue;c=VC.pc[p.user_id];
+    if(!c)return true;
+    if(c.pc.connectionState!=='connected'&&Date.now()-(c.bad||c.at)<15000)return true}
+  return false;
+}
 async function vcTick(){
   if(!VC.on||VC.busy)return;
+  var nw=Date.now();
+  if(nw<VC.hold)return;
+  if(nw-VC.lastTick<(vcFast()?200:(VC.cho?450:1000)))return;
+  VC.lastTick=nw;
   VC.busy=1;
   var out=VC.out.splice(0),rank={offer:0,answer:1,ice:2};
   out.sort(function(a,b){return rank[a.kind]-rank[b.kind]});   /* an offer / answer always travels before its candidates */
   var join=!!VC.rejoin;VC.rejoin=0;
   try{
-    var r=await cnxReq('/rest/v1/rpc/voice_sync','POST',{p_link:VC.id,p_join:join,p_muted:VC.muted,p_out:out});
+    var sendMsg=VC.mq.length?VC.mq[0]:null;
+    var r=await vcSyncReq(join,VC.muted,out,sendMsg);
     if(!VC.on)return;
     if(!r.ok||!r.j||!r.j.ok){
       VC.out=out.concat(VC.out);
       if(r.j&&r.j.err==='member'){vcEnd();toast(__('دیگر عضو این گفتگو نیستی','You are no longer in this chat'),null,null,'warn');return}
-      if(++VC.fails>12){vcEnd();toast(__('ارتباط قطع شد؛ از گفتگوی صوتی خارج شدی','Connection lost; you left the voice chat'),null,null,'warn')}
+      /* v366: the internet may drop for a while (a lift, a tunnel): keep trying for 20 seconds, once a second, before giving up; the call's sound goes on in the meantime */
+      if(!VC.failT)VC.failT=Date.now();
+      VC.hold=Date.now()+1000;
+      if(Date.now()-VC.failT>20000){vcEnd();toast(__('ارتباط قطع شد؛ از گفتگوی صوتی خارج شدی','Connection lost; you left the voice chat'),null,null,'warn')}
       return;
     }
-    VC.fails=0;VC.t=1;
+    VC.fails=0;VC.failT=0;VC.t=1;
     var j=r.j;
+    if(sendMsg&&VC_EXT){VC.mq.shift();if(VC.cho)vcChatPaint()}
     if(j.dropped){
+      if(j.kicked){vcEnd();toast(__('سازنده تو را از گفتگوی صوتی حذف کرد','The host removed you from the voice chat'),null,null,'warn');return}
       if(j.ended){vcEnd();toast(__('گفتگوی صوتی تمام شد','The voice chat was ended'),null,null,'info');return}
       VC.rejoin=1;return;
     }
     VC.title=j.title||'';
     VC.peers=Array.isArray(j.peers)?j.peers:[];
+    VC.host=j.host||'';
+    vcMsgsIn(j.msgs);
     var me=CNX.uid,ids={},i;
+    /* v367: the host closed / opened my microphone */
+    var mp=VC.peers.filter(function(x){return x.user_id===me})[0],fo=!!(mp&&mp.forced);
+    if(fo&&!VC.forced){VC.forced=1;vcMute(true);toast(__('سازنده صدای تو را بسته است','The host has closed your microphone'),null,null,'warn')}
+    else if(!fo&&VC.forced){VC.forced=0;vcPaint();toast(__('سازنده اجازهٔ صحبت داد؛ می‌توانی صدایت را روشن کنی','The host let you speak again; you can unmute'),null,null,'info')}
     VC.peers.forEach(function(p){ids[p.user_id]=1});
     (j.signals||[]).forEach(function(s){
       if(s.kind==='offer')vcOnOffer(s.from,s.payload);
@@ -13164,12 +14067,12 @@ async function vcTick(){
     VC.peers.forEach(function(p){
       if(p.user_id===me)return;
       var c=VC.pc[p.user_id];
-      if(c&&c.pc.connectionState!=='connected'&&Date.now()-c.at>25000)vcDrop(p.user_id);   /* stuck: start over */
+      if(c&&c.pc.connectionState!=='connected'&&Date.now()-(c.bad||c.at)>14000)vcDrop(p.user_id);   /* stuck: start over (v366: 14 s, counted from when it went bad) */
       else if(!c&&me>p.user_id)vcOffer(p.user_id);   /* the person with the bigger id always makes the offer, so two phones never offer at once */
     });
     Object.keys(VC.pc).forEach(function(u){if(!ids[u])vcDrop(u)});
     vcPaint();
-  }finally{VC.busy=0}
+  }finally{VC.busy=0;if(VC.again){VC.again=0;vcKick()}}
 }
 function vcMeter(){
   if(!VC.on||!VC.w)return;
@@ -13192,36 +14095,39 @@ async function vcStart(id){
   if(!cnxOn()){toast(__('برای گفتگوی صوتی باید وارد حساب شوی و اینترنت داشته باشی','Sign in and be online to use voice chat'),null,null,'warn');return}
   if(!vcSupported()){toast(__('گفتگوی صوتی روی این دستگاه ممکن نیست','Voice chat is not available on this device'),null,null,'warn');return}
   var l=mcLink(id);if(!l)return;
-  VC.on=1;VC.id=id;VC.t=0;VC.fails=0;VC.muted=false;VC.out=[];VC.peers=[];VC.pc={};VC.q={};VC.title='';VC.routes=[];VC.route='';VC.rs='';VC.joinAt=Date.now();
+  VC.on=1;VC.id=id;VC.t=0;VC.fails=0;VC.failT=0;VC.hold=0;VC.lastTick=0;VC.muted=false;VC.host='';VC.msgs=[];VC.since=0;VC.mq=[];VC.unread=0;VC.cho=0;VC.forced=0;VC.out=[];VC.peers=[];VC.pc={};VC.q={};VC.title='';VC.routes=[];VC.route='';VC.rs='';VC.joinAt=Date.now();
   var st;
-  try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:VC.ns,autoGainControl:true}})}
+  try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:VC.ns,autoGainControl:true,channelCount:1}})}
   catch(e){VC.on=0;VC.id='';toast(__('اجازهٔ میکروفون داده نشد؛ از تنظیمات گوشی برای Ario روشنش کن','Microphone permission was not granted; enable it for Ario in your phone settings'),null,null,'warn');return}
   VC.stream=st;
   vcBuild();
-  var r=await cnxReq('/rest/v1/rpc/voice_sync','POST',{p_link:id,p_join:true,p_muted:false,p_out:[]});
+  var r=await vcSyncReq(true,false,[],null);
   if(!r.ok||!r.j||!r.j.ok){
     var msg=r.st===404?__('گفتگوی صوتی هنوز در Supabase ساخته نشده (بخش v343 و v344 فایل supabase/setup.sql را اجرا کن).','Voice chat is not in Supabase yet (run the v343 and v344 blocks of supabase/setup.sql).'):
-      (r.j&&r.j.err==='full'?__('گفتگوی صوتی پر است (حداکثر ۸ نفر)','The voice chat is full (8 people at most)'):cnxNetErr(r));
+      (r.j&&r.j.err==='full'?__('گفتگوی صوتی پر است (حداکثر ۸ نفر)','The voice chat is full (8 people at most)'):r.j&&r.j.err==='kicked'?__('سازنده تو را از این گفتگوی صوتی حذف کرده است','The host removed you from this voice chat'):cnxNetErr(r));
     vcEnd(1);toast(msg,null,null,'warn');return;
   }
-  VC.fails=0;VC.t=1;VC.peers=r.j.peers||[];VC.title=r.j.title||'';
+  VC.fails=0;VC.t=1;VC.peers=r.j.peers||[];VC.title=r.j.title||'';VC.host=r.j.host||'';vcMsgsIn(r.j.msgs);
   try{if(VC.ctx&&VC.ctx.state==='suspended')VC.ctx.resume()}catch(e){}
   try{VC.ctx=VC.ctx||new (window.AudioContext||window.webkitAudioContext)();var an=VC.ctx.createAnalyser();an.fftSize=256;VC.ctx.createMediaStreamSource(st).connect(an);VC.an[CNX.uid]={an:an,d:new Uint8Array(an.frequencyBinCount)}}catch(e){}
   clearInterval(VC.timer);clearInterval(VC.mt);clearInterval(VC.rt);
-  VC.timer=setInterval(vcTick,1000);VC.mt=setInterval(vcMeter,160);
+  VC.timer=setInterval(vcTick,200);VC.mt=setInterval(vcMeter,160);
+  /* v366: offers to the people already there start right now, not on the next round trip; coming back online / to the app wakes the call up */
+  (VC.peers||[]).forEach(function(p){if(p.user_id!==CNX.uid&&CNX.uid>p.user_id)vcOffer(p.user_id)});
+  if(!VC.ev){VC.ev=1;window.addEventListener('online',vcNetBack);document.addEventListener('visibilitychange',function(){if(!document.hidden)vcNetBack()});try{if(navigator.connection&&navigator.connection.addEventListener)navigator.connection.addEventListener('change',vcNetBack)}catch(e){}}
   VC.rt=setInterval(vcRouteLoad,3500);vcRouteLoad();
   hap('done');vcTick();vcPaint();vcWhoPaint();
 }
 function vcEnd(quiet){
   var id=VC.id;
-  clearInterval(VC.timer);clearInterval(VC.mt);clearInterval(VC.rt);VC.timer=VC.mt=VC.rt=0;
+  clearInterval(VC.timer);clearInterval(VC.mt);clearInterval(VC.rt);VC.timer=VC.mt=VC.rt=0;clearTimeout(VC.kick);VC.kick=0;VC.again=0;
   Object.keys(VC.pc).forEach(vcDrop);
   if(VC.stream){VC.stream.getTracks().forEach(function(t){try{t.stop()}catch(e){}});VC.stream=null}
   try{if(VC.ctx){VC.ctx.close();VC.ctx=null}}catch(e){}
   try{var A=vcAN();if(A&&A.release)A.release()}catch(e){}
   if(VC.w){var w=VC.w;w.classList.remove('open');setTimeout(function(){w.remove()},340);VC.w=null}
   if(VC.pill){VC.pill.remove();VC.pill=null}
-  VC.an={};VC.au={};VC.peers=[];VC.out=[];VC.q={};VC.on=0;VC.id='';VC.t=0;VC.title='';VC.routes=[];VC.route='';VC.rs='';
+  VC.an={};VC.au={};VC.peers=[];VC.out=[];VC.q={};VC.on=0;VC.id='';VC.t=0;VC.title='';VC.routes=[];VC.route='';VC.rs='';VC.host='';VC.msgs=[];VC.since=0;VC.mq=[];VC.unread=0;VC.cho=0;VC.forced=0;
   if(id&&cnxOn())cnxReq('/rest/v1/rpc/voice_leave','POST',{p_link:id});
   if(!quiet)hap('tick');
   vcWhoPaint();
@@ -13360,19 +14266,167 @@ function emjSpan(cp){
 }
 /* already-escaped text -> the same text with every emoji of the set drawn as a picture */
 function emjText(h){return h;emjInit();return EMJ_RX?String(h).replace(EMJ_RX,function(m){return emjSpan(m.codePointAt(0))}):h}
+/* v365: the emoji panel is split into framed collections: a row of framed category chips (the chosen one gets a see-through, slightly blurred layer), and the
+   emoji of that collection sit in their own framed box with a title, each emoji in its own small frame */
+function emjName(k){return {smile:__('چهره‌ها','Smileys'),hand:__('دست‌ها','Hands'),heart:__('قلب‌ها','Hearts'),animal:__('حیوانات','Animals'),food:__('خوراکی','Food'),sport:__('ورزش','Sports'),travel:__('سفر','Travel'),obj:__('اشیا','Objects')}[k]||k}
 function emjPanel(ci){
   emjInit();var c=EMJ_CATS[ci]||EMJ_CATS[0];
-  return '<div class="stk-tabs emj-cats">'+EMJ_CATS.map(function(k,i){return '<button type="button" class="'+(i===ci?'on':'')+'" data-emc="'+i+'" aria-label="'+k[0]+'">'+emjSpan(k[1])+'</button>'}).join('')+'</div>'+
-    '<div class="emj-g">'+c[2].map(function(cp){return '<button type="button" data-emj="'+cp+'" aria-label="'+String.fromCodePoint(cp)+'">'+emjSpan(cp)+'</button>'}).join('')+'</div>';
+  return '<div class="stk-tabs emj-cats">'+EMJ_CATS.map(function(k,i){return '<button type="button" class="'+(i===ci?'on':'')+'" data-emc="'+i+'" aria-label="'+emjName(k[0])+'" aria-pressed="'+(i===ci)+'">'+emjSpan(k[1])+'</button>'}).join('')+'</div>'+
+    '<section class="emj-box"><header class="emj-hd"><b>'+emjName(c[0])+'</b><small>'+fa(c[2].length)+'</small></header>'+
+    '<div class="emj-g">'+c[2].map(function(cp){return '<button type="button" data-emj="'+cp+'" aria-label="'+String.fromCodePoint(cp)+'">'+emjSpan(cp)+'</button>'}).join('')+'</div></section>';
 }
 function stkRender(mode,th,ec){
   return '<div class="stk-mode"><button type="button" class="'+(mode==='e'?'on':'')+'" data-stm="e">'+__('ایموجی','Emoji')+'</button><button type="button" class="'+(mode==='s'?'on':'')+'" data-stm="s">'+__('استیکر','Stickers')+'</button></div>'+(mode==='e'?emjPanel(ec):stkPanel(th));
+}
+/* ---------- v386: stickers INSIDE a text ----------
+   A sticker is written into the text as a token  [[st:<id>]]  (id = def-knight | angel-bell | my-<sticker id>) and drawn as a small picture beside the words
+   (about the height of a line). Chat: the «در متن / In text» switch of the sticker panel puts the sticker into the message box instead of sending it alone.
+   «My stickers» are not uploaded for this: a small still copy (96 px) travels in the message (meta.ik[id]), so every phone can show it.
+   Phones without this version show the token as plain text. */
+var STK_IRX=/\[\[st:([a-z0-9-]{3,40})\]\]/gi,STK_IK={},STK_IA={},STK_INL=false,STK_MAXT=20,STK_MAXMY=8,STK_MAXANIM=3;
+function stkTokIds(t){var o=[],m;STK_IRX.lastIndex=0;while((m=STK_IRX.exec(String(t||''))))o.push(m[1]);return o}
+function stkHasTok(t){STK_IRX.lastIndex=0;var r=STK_IRX.test(String(t||''));STK_IRX.lastIndex=0;return r}
+function stkPlain(t){return String(t||'').replace(STK_IRX,'🧸')}
+/* ---------- v393: channel-only stickers ----------
+   Nine moving stickers (www/img/st/ch-<name>.webm, transparent) that exist ONLY inside the TEXT of Ario Channel posts, written as [[st:ch-<name>]].
+   They are NOT in the sticker panel, cannot be sent alone, and are not drawn in chats: stkInlineHTML shows them only when the channel page asks (3rd argument),
+   so a forwarded post loses them (stkChStrip) and a hand-typed token in a chat shows nothing.
+   Add a new one: put the .webm in www/img/st/ as ch-<name>.webm and add <name> to STK_CH. */
+var STK_CH={dancecat:1,pinkgirl:1,cool:1,kittens:1,beard:1,rat:1,shock:1,stare:1,blackcat:1};
+function stkChBy(b){var m=/^ch-([a-z0-9]+)$/.exec(String(b||'').toLowerCase());return m&&STK_CH[m[1]]?'img/st/ch-'+m[1]+'.webm':''}
+function stkChStrip(t){return String(t||'').replace(/\[\[st:ch-[a-z0-9-]{1,36}\]\]/gi,'')}
+/* a channel sticker plays only while it is on screen (many posts = many videos) */
+var STK_IO=null;
+function stkChWatch(v){
+  if(!('IntersectionObserver' in window)){try{var p0=v.play();p0&&p0.catch&&p0.catch(function(){})}catch(e){}return}
+  if(!STK_IO)STK_IO=new IntersectionObserver(function(es){es.forEach(function(e){
+    var x=e.target;if(!x.isConnected){STK_IO.unobserve(x);return}
+    if(e.isIntersecting){try{var p=x.play();p&&p.catch&&p.catch(function(){})}catch(er){}}else{try{x.pause()}catch(er){}}
+  })},{threshold:.05});
+  STK_IO.observe(v);
+}
+document.addEventListener('loadedmetadata',function(e){var v=e.target;if(v&&v.tagName==='VIDEO'&&v.hasAttribute('data-stch'))stkChWatch(v)},true);
+/* a small picture (data URL) of one of «my stickers»; a video sticker gives its first frame, with a black background cut out */
+function stkBlobThumb(b,key){
+  if(STK_IK[key])return Promise.resolve(STK_IK[key]);
+  return new Promise(function(res){
+    var S=96,cv=document.createElement('canvas'),isv=/^video\//.test(b.type||''),url=URL.createObjectURL(b),done=function(el,w,h){
+      try{
+        var k=Math.min(S/w,S/h),dw=Math.max(1,Math.round(w*k)),dh=Math.max(1,Math.round(h*k)),cx;
+        cv.width=dw;cv.height=dh;cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(el,0,0,dw,dh);
+        if(isv){var im=cx.getImageData(0,0,dw,dh);if(stkBlackEdge(im.data,dw,dh)){stkKeyFrame(im.data,dw,dh,new Uint8Array(dw*dh),new Int32Array(dw*dh));cx.putImageData(im,0,0)}}
+        var u=cv.toDataURL('image/webp',.8);if(!/^data:image\/webp/.test(u))u=cv.toDataURL('image/png');
+        if(u.length<60000){STK_IK[key]=u;res(u)}else res('');
+      }catch(e){res('')}
+    };
+    if(isv){
+      var v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';
+      v.onloadeddata=function(){try{v.currentTime=Math.min(.1,(v.duration||1)/2)}catch(e){}};
+      v.onseeked=function(){var w=v.videoWidth,h=v.videoHeight;URL.revokeObjectURL(url);w&&h?done(v,w,h):res('')};
+      v.onerror=function(){URL.revokeObjectURL(url);res('')};v.src=url;
+    }else{
+      var im2=new Image();im2.onload=function(){URL.revokeObjectURL(url);done(im2,im2.naturalWidth||1,im2.naturalHeight||1)};im2.onerror=function(){URL.revokeObjectURL(url);res('')};im2.src=url;
+    }
+  });
+}
+function stkMyThumb(id){
+  if(STK_IK['my-'+id])return Promise.resolve(STK_IK['my-'+id]);
+  return fdbGet('mystk_'+id).then(function(b){return b?stkBlobThumb(b,'my-'+id):''}).catch(function(){return ''});
+}
+/* v386: a VIDEO sticker inside a text keeps moving: its first 4 s are cut into up to 36 small frames (72 px, black background cut out) laid side by side in ONE picture
+   (a «sprite»); the picture + {n frames, d seconds} travel in meta.ia[id] and a CSS animation steps through the frames. No video upload is needed. */
+function stkAnimOk(a){return !!a&&typeof a==='object'&&typeof a.u==='string'&&/^data:image\/(webp|png);base64,[A-Za-z0-9+\/=]+$/.test(a.u)&&a.u.length<260000&&a.n>=2&&a.n<=40&&a.d>=.2&&a.d<=6}
+function stkVidAnim(b,key){
+  return new Promise(function(res){
+    var url=URL.createObjectURL(b),v=document.createElement('video'),tm=0,fin=function(r){clearTimeout(tm);try{URL.revokeObjectURL(url)}catch(e){}try{v.removeAttribute('src');v.load()}catch(e){}STK_IA[key]=r||0;res(r||null)};
+    tm=setTimeout(function(){fin(null)},12000);
+    v.muted=true;v.playsInline=true;v.preload='auto';v.onerror=function(){fin(null)};
+    v.onloadeddata=async function(){
+      try{
+        var W=v.videoWidth,H=v.videoHeight,D=v.duration;if(!W||!H||!isFinite(D)||D<=0){fin(null);return}
+        var Dc=Math.min(D,4),n=Math.max(2,Math.min(36,Math.round(Dc*10))),dt=Dc/n,S=72,k=Math.min(S/W,S/H),dw=Math.max(1,Math.round(W*k)),dh=Math.max(1,Math.round(H*k)),
+            sp=document.createElement('canvas'),sc,fr=document.createElement('canvas'),fc,bgA=null,stA=null,keyIt=null,i,im,u;
+        sp.width=S*n;sp.height=S;sc=sp.getContext('2d');fr.width=dw;fr.height=dh;fc=fr.getContext('2d',{willReadFrequently:true});
+        for(i=0;i<n;i++){
+          await new Promise(function(r){v.onseeked=r;v.currentTime=Math.min(Math.max(0,D-.001),i*dt+.001)});
+          fc.clearRect(0,0,dw,dh);fc.drawImage(v,0,0,dw,dh);
+          if(keyIt===null){im=fc.getImageData(0,0,dw,dh);keyIt=stkBlackEdge(im.data,dw,dh);bgA=new Uint8Array(dw*dh);stA=new Int32Array(dw*dh)}
+          if(keyIt){im=fc.getImageData(0,0,dw,dh);stkKeyFrame(im.data,dw,dh,bgA,stA);fc.putImageData(im,0,0)}
+          sc.drawImage(fr,i*S+(S-dw)/2,(S-dh)/2);
+        }
+        u=sp.toDataURL('image/webp',.7);
+        if(/^data:image\/webp/.test(u)&&u.length>110000)u=sp.toDataURL('image/webp',.45);
+        if(!/^data:image\/webp/.test(u)||u.length>110000){fin(null);return}
+        fin({u:u,n:n,d:+Dc.toFixed(2)});
+      }catch(e){fin(null)}
+    };
+    v.src=url;
+  });
+}
+function stkMyAnim(id){
+  var key='my-'+id;
+  if(STK_IA[key]!==undefined)return Promise.resolve(STK_IA[key]||null);
+  return fdbGet('mystk_'+id).then(function(b){
+    if(!b||!/^video\//.test(b.type||'')){STK_IA[key]=0;return null}
+    return stkVidAnim(b,key);
+  }).catch(function(){STK_IA[key]=0;return null});
+}
+/* a small still of any sticker id (def-… / theme / my-…) as a data URL or file path; '' when there is none */
+function stkThumbOf(id){
+  var d=stkDefBy(id);
+  if(d){
+    if(STK_IK[id])return Promise.resolve(STK_IK[id]);
+    if(!d.v)return Promise.resolve(d.file);
+    return fetch(d.file).then(function(r){return r.blob()}).then(function(b){return stkBlobThumb(b,id)}).catch(function(){return ''});
+  }
+  if(stkOk(id))return Promise.resolve('img/st/'+id+'.webp');
+  if(/^my-/.test(id))return stkMyThumb(id.slice(3));
+  return Promise.resolve('');
+}
+function stkLoadImg(u){return new Promise(function(res){if(!u){res(null);return}var im=new Image();im.onload=function(){res(im)};im.onerror=function(){res(null)};im.src=u})}
+/* the HTML of escaped text with its tokens drawn as small pictures; meta.ik gives the pictures of «my stickers» */
+function stkInlineHTML(h,me,chan){
+  if(String(h).indexOf('[[st:')<0)return h;
+  var ik=(me&&me.ik&&typeof me.ik==='object')?me.ik:null,ia=(me&&me.ia&&typeof me.ia==='object')?me.ia:null;
+  return String(h).replace(STK_IRX,function(all,id){
+    if(/^ch-/i.test(id)){var cf=chan===true?stkChBy(id):'';return cf?'<video class="stki stkc" muted loop playsinline disablepictureinpicture preload="metadata" aria-hidden="true" data-stch="'+id.toLowerCase()+'" src="'+cf+'"></video>':''}
+    var d=stkDefBy(id),u,an;
+    if(d)return d.v?'<video class="stki" muted loop autoplay playsinline disablepictureinpicture data-stdi="'+d.id+'" src="'+d.file+'"></video>':'<img class="stki" alt="" draggable="false" src="'+d.file+'">';
+    if(stkOk(id))return '<img class="stki" alt="" draggable="false" src="img/st/'+id+'.webp">';
+    if(/^my-/i.test(id)){
+      an=(ia&&ia[id])||STK_IA[id];
+      if(stkAnimOk(an))return '<span class="stki stka" role="img" style="background-image:url('+an.u+');--n:'+(+an.n)+';--s:'+(+an.n-1)+';--d:'+(+an.d)+'s"></span>';
+      u=(ik&&ik[id])||STK_IK[id]||'';
+      if(typeof u==='string'&&/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+\/=]+$/.test(u))return '<img class="stki" alt="" draggable="false" src="'+u+'">';
+      return '<span class="stki stki0" aria-hidden="true"></span>';
+    }
+    return '';
+  });
+}
+/* the sticker is put into the message box where the cursor is */
+function mcInsTok(T,id){
+  var ids=stkTokIds(T.value),my=ids.filter(function(x,i,a){return /^my-/.test(x)&&a.indexOf(x)===i});
+  if(ids.length>=STK_MAXT){toast(__('در یک پیام حداکثر '+fa(STK_MAXT)+' استیکر می‌شود.','A message can hold up to '+STK_MAXT+' stickers.'),null,null,'warn');return}
+  if(/^my-/.test(id)&&my.indexOf(id)<0&&my.length>=STK_MAXMY){toast(__('در یک پیام حداکثر '+fa(STK_MAXMY)+' استیکر متفاوت از «استیکرهای من» می‌شود.','Up to '+STK_MAXMY+' different “My stickers” in one message.'),null,null,'warn');return}
+  var tk='[[st:'+id+']]',a=T.selectionStart==null?T.value.length:T.selectionStart,z=T.selectionEnd==null?a:T.selectionEnd;
+  if(T.value.length-(z-a)+tk.length>3000)return;
+  T.value=T.value.slice(0,a)+tk+T.value.slice(z);T.selectionStart=T.selectionEnd=a+tk.length;
+  T.dispatchEvent(new Event('input'));
+  if(/^my-/.test(id)){
+    stkMyThumb(id.slice(3)).then(function(u){if(u)T.dispatchEvent(new Event('input'))});
+    stkMyAnim(id.slice(3)).then(function(a){if(a)T.dispatchEvent(new Event('input'))});
+  }
 }
 /* ---------- v313: sticker keyboard (the stickers of the app, free for every chat) ---------- */
 var STK_TH=[['angel',__('فرشته','Angel')],['candy',__('آب‌نبات','Candy')],['sheikh',__('شیخ','Sheikh')]];
 function stkOk(b){var m=/^(angel|candy|sheikh)-([a-z]+)$/.exec(String(b||''));return !!m&&VS_SLOTS.indexOf(m[2])>-1}
 /* v353: the «+» button of the sticker panel — the person adds a picture of their own as a sticker (kept on this phone, shown in the «my stickers» tab) */
 var STK_PLUS='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+/* v364: stickers that come with the app (shown first in the panel, same for everyone). Each is a file in www/img/st/ and is sent like one of «my stickers». */
+var STK_DEF=[{id:'knight',file:'img/st/def-knight.webm',v:1}];
+/* v380: a default sticker is sent as just its name («def-knight») — no upload, so it always goes through in groups and private chats; every phone shows it from its own app file */
+function stkDefBy(b){var m=/^def-([a-z0-9]+)$/.exec(String(b||''));return m?STK_DEF.filter(function(x){return x.id===m[1]})[0]||null:null}
+function stkDefHTML(){return STK_DEF.map(function(d){return '<button type="button" data-stdef="'+d.id+'" aria-label="'+__('استیکر پیش‌فرض','Default sticker')+'">'+(d.v?'<video muted loop autoplay playsinline disablepictureinpicture data-stdi="'+d.id+'" src="'+d.file+'"></video>':'<img alt="" src="'+d.file+'">')+'</button>'}).join('')}
 function stkMyIds(){try{var a=JSON.parse(localStorage.getItem('ario.mystk')||'[]');return Array.isArray(a)?a.filter(function(x){return /^[a-z0-9]{4,24}$/i.test(String(x))}):[]}catch(e){return []}}
 function stkMySave(a){try{localStorage.setItem('ario.mystk',JSON.stringify(a.slice(0,60)))}catch(e){}}
 function stkIsVid(f){return /^video\//i.test(f&&f.type||'')||/\.(webm|mp4|mov|m4v)$/i.test(f&&f.name||'')}
@@ -13397,13 +14451,108 @@ function stkMyAdd(file){
     return fdbPut('mystk_'+id,b).then(function(){var a=stkMyIds();a.unshift(id);stkMySave(a);return id});
   });
 }
+/* v363: a video sticker on a plain BLACK background (an .mp4 cannot be transparent) is shown with that background cut out, so it sits on the chat like a
+   real sticker. Done while it is shown (chat + «my stickers»), so old stickers and ones received from friends are fixed too; the saved file is not changed.
+   - only the black that touches the picture's edge is removed (dark eyes / shadows inside the figure stay), with a soft edge.
+   - a video that already has a transparent background (WebM) or no black edge is left exactly as it is. */
+var STK_T=34;
+function stkBlackEdge(d,w,h){
+  var n=0,dk=0,tr=0,i,x,y,chk=function(p){var a=d[p+3];n++;if(a<200)tr++;else if(Math.max(d[p],d[p+1],d[p+2])<STK_T+10)dk++};
+  for(x=0;x<w;x++){chk(x*4);chk(((h-1)*w+x)*4)}
+  for(y=1;y<h-1;y++){chk(y*w*4);chk((y*w+w-1)*4)}
+  if(tr>n*.05)return false;                       /* already transparent */
+  return dk>=n*.7;
+}
+function stkKeyFrame(d,w,h,bg,st){
+  var n=w*h,sp=0,i,p,x,y,m,a;
+  bg.fill(0);
+  var seed=function(i){if(!bg[i]&&Math.max(d[i*4],d[i*4+1],d[i*4+2])<STK_T){bg[i]=1;st[sp++]=i}};
+  for(x=0;x<w;x++){seed(x);seed((h-1)*w+x)}
+  for(y=1;y<h-1;y++){seed(y*w);seed(y*w+w-1)}
+  while(sp){
+    i=st[--sp];x=i%w;
+    if(x>0)seed(i-1);if(x<w-1)seed(i+1);if(i>=w)seed(i-w);if(i<n-w)seed(i+w);
+  }
+  for(i=0;i<n;i++){
+    p=i*4;
+    if(bg[i]){d[p+3]=0;continue}
+    x=i%w;
+    if((x>0&&bg[i-1])||(x<w-1&&bg[i+1])||(i>=w&&bg[i-w])||(i<n-w&&bg[i+w])){
+      /* the rim: its colour is mixed with black, so make it partly see-through and brighten the colour back */
+      m=Math.max(d[p],d[p+1],d[p+2]);a=Math.min(1,Math.max(0,(m-STK_T*.5)/(STK_T*2.2)));
+      if(a<1){if(a>0.04){d[p]=Math.min(255,d[p]/a);d[p+1]=Math.min(255,d[p+1]/a);d[p+2]=Math.min(255,d[p+2]/a)}d[p+3]=Math.round(a*255)}
+    }
+  }
+}
+function stkKey(v){
+  if(v._k||!v.videoWidth||!v.parentNode)return;v._k=1;
+  var W=v.videoWidth,H=v.videoHeight,inP=!!v.closest('.kcx-em'),gap=inP?90:60,last=0,k=Math.min(1,(inP?144:200)/Math.max(W,H)),w=Math.max(1,Math.round(W*k)),h=Math.max(1,Math.round(H*k));
+  var cv=document.createElement('canvas');cv.width=w;cv.height=h;
+  var cx=cv.getContext('2d',{willReadFrequently:true}),im,bg,st,src,io,vis=true,done=false;
+  if(!cx)return;
+  try{cx.drawImage(v,0,0,w,h);im=cx.getImageData(0,0,w,h)}catch(e){return}
+  if(!stkBlackEdge(im.data,w,h))return;
+  bg=new Uint8Array(w*h);st=new Int32Array(w*h);
+  stkKeyFrame(im.data,w,h,bg,st);cx.putImageData(im,0,0);
+  /* the picture is now a canvas; a hidden copy of the video feeds it */
+  cv.className=v.className;for(var a in v.dataset)cv.dataset[a]=v.dataset[a];
+  cv.setAttribute('role','img');
+  src=document.createElement('video');src.muted=true;src.loop=true;src.playsInline=true;src.setAttribute('playsinline','');src.setAttribute('disablepictureinpicture','');
+  src.src=v.currentSrc||v.src;
+  v.parentNode.replaceChild(cv,v);
+  function stop(){done=true;try{src.pause();src.removeAttribute('src');src.load()}catch(e){}if(io)io.disconnect()}
+  function tick(now){
+    if(done)return;
+    if(!cv.isConnected){stop();return}
+    now=now||performance.now();
+    if(vis&&src.readyState>=2&&now-last>=gap){
+      last=now;try{cx.drawImage(src,0,0,w,h);var f=cx.getImageData(0,0,w,h);stkKeyFrame(f.data,w,h,bg,st);cx.putImageData(f,0,0)}catch(e){}
+    }
+    if(src.requestVideoFrameCallback)src.requestVideoFrameCallback(tick);else requestAnimationFrame(tick);
+  }
+  if(window.IntersectionObserver){
+    io=new IntersectionObserver(function(es){
+      if(!cv.isConnected){stop();return}
+      vis=es[es.length-1].isIntersecting;
+      if(vis){var r=src.play();if(r&&r.catch)r.catch(function(){})}else src.pause();
+    });io.observe(cv);
+  }
+  var r0=src.play();if(r0&&r0.catch)r0.catch(function(){});
+  if(src.requestVideoFrameCallback)src.requestVideoFrameCallback(tick);else requestAnimationFrame(tick);
+}
+document.addEventListener('loadeddata',function(e){var v=e.target;if(v&&v.tagName==='VIDEO'&&(v.classList.contains('mc-stki')||v.hasAttribute('data-stmi')||v.hasAttribute('data-stdi')))try{stkKey(v)}catch(x){}},true);
+/* v358: select «my stickers» (long-press or the select button) and delete one or many at once */
+var stkSel=null; /* null = normal; otherwise the list of selected sticker ids */
+var STK_CHK='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3.5 6.5l2 2 3-3.5M3.5 12.5l2 2 3-3.5M3.5 18.5l2 2 3-3.5M12 7h8.5M12 13h8.5M12 19h8.5"/></svg>';
+function stkSelCount(){return stkSel?stkSel.length:0}
+function stkSelBar(ids){
+  var n=stkSelCount();
+  return '<div class="stk-selbar"><button type="button" class="stk-sx" data-stx="1" aria-label="'+__('لغو انتخاب','Cancel selection')+'">'+icon('close')+'</button>'+
+    '<b class="stk-sc">'+(n?fa(n)+' '+__('انتخاب','selected'):__('استیکرها را انتخاب کن','Pick stickers'))+'</b>'+
+    '<button type="button" class="stk-sa" data-stall="1">'+(n&&n===ids.length?__('هیچ‌کدام','None'):__('همه','All'))+'</button>'+
+    '<button type="button" class="stk-sd" data-stdel="1"'+(n?'':' disabled')+' aria-label="'+__('حذف','Delete')+'">'+icon('trash')+'</button></div>';
+}
+/* updates the ticks, the counter and the buttons without redrawing the pictures */
+function stkSelRefresh(root){
+  if(!root||!stkSel)return;var ids=stkMyIds(),n=stkSel.length;
+  [].forEach.call(root.querySelectorAll('[data-stmy]'),function(b){b.classList.toggle('sel',stkSel.indexOf(b.dataset.stmy)>-1)});
+  var c=root.querySelector('.stk-sc');if(c)c.textContent=n?fa(n)+' '+__('انتخاب','selected'):__('استیکرها را انتخاب کن','Pick stickers');
+  var a=root.querySelector('.stk-sa');if(a)a.textContent=n&&n===ids.length?__('هیچ‌کدام','None'):__('همه','All');
+  var d=root.querySelector('.stk-sd');if(d)d.disabled=!n;
+}
+function stkMyDel(del){
+  var set={};del.forEach(function(i){set[i]=1});
+  stkMySave(stkMyIds().filter(function(i){return !set[i]}));
+  del.forEach(function(id){var k='mystk_'+id;try{fdbDel(k).catch(function(){})}catch(e){}if(SP.mem[k]){try{URL.revokeObjectURL(SP.mem[k])}catch(e){}delete SP.mem[k]}});
+}
 function stkPanel(th){
   var my=th==='my',ids=my?stkMyIds():[];
   th='my';my=true;ids=stkMyIds();
-  return '<div class="stk-tabs">'+
+  if(stkSel){stkSel=stkSel.filter(function(i){return ids.indexOf(i)>-1});if(!ids.length)stkSel=null}
+  return (stkSel?stkSelBar(ids):'<div class="stk-tabs">'+
     '<button type="button" class="stk-my'+(my?' on':'')+'" data-stt="my" aria-label="'+__('استیکرهای من','My stickers')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/></svg></button>'+
-    '<button type="button" class="stk-plus" data-stadd="1" aria-label="'+__('افزودن استیکر','Add a sticker')+'">'+STK_PLUS+'</button></div>'+
-    (my?'<div class="stk-g"><button type="button" class="stk-addt" data-stadd="1" aria-label="'+__('افزودن استیکر','Add a sticker')+'">'+STK_PLUS+'<small>'+__('افزودن','Add')+'</small></button>'+ids.map(function(id){return '<button type="button" data-stmy="'+id+'" aria-label="'+__('استیکر من','My sticker')+'">'+(id.slice(0,2)==='mv'?'<video muted loop autoplay playsinline disablepictureinpicture data-stmi="'+id+'"></video>':'<img alt="" data-stmi="'+id+'">')+'</button>'}).join('')+'</div>'+(ids.length?'':'<p class="stk-empty">'+__('با دکمهٔ + یک عکس یا ویدیوی بدون پس‌زمینه را به استیکر تبدیل کن.','Tap + to turn a picture or video (already without background) into a sticker.')+'</p>'):
+    '<button type="button" class="stk-plus" data-stadd="1" aria-label="'+__('افزودن استیکر','Add a sticker')+'">'+STK_PLUS+'</button>'+(ids.length?'<button type="button" class="stk-selb" data-stsel="1" aria-label="'+__('انتخاب','Select')+'">'+STK_CHK+'</button>':'')+'<button type="button" class="stk-in'+(STK_INL?' on':'')+'" data-stin="1" aria-pressed="'+(STK_INL?'true':'false')+'" title="'+__('اضافه شدن استیکر کنار متن','Put the sticker inside the text')+'"><b>Aa</b><span>'+__('در متن','In text')+'</span></button></div>')+
+    (my?'<div class="stk-g'+(stkSel?' selmode':'')+'">'+(stkSel?'':'<button type="button" class="stk-addt" data-stadd="1" aria-label="'+__('افزودن استیکر','Add a sticker')+'">'+STK_PLUS+'<small>'+__('افزودن','Add')+'</small></button>'+stkDefHTML())+ids.map(function(id){return '<button type="button" data-stmy="'+id+'"'+(stkSel&&stkSel.indexOf(id)>-1?' class="sel"':'')+' aria-label="'+__('استیکر من','My sticker')+'">'+(id.slice(0,2)==='mv'?'<video muted loop autoplay playsinline disablepictureinpicture data-stmi="'+id+'"></video>':'<img alt="" data-stmi="'+id+'">')+(stkSel?'<i class="stk-ck" aria-hidden="true"></i>':'')+'</button>'}).join('')+'</div>'+(ids.length?'':'<p class="stk-empty">'+__('با دکمهٔ + یک عکس یا ویدیوی بدون پس‌زمینه را به استیکر تبدیل کن.','Tap + to turn a picture or video (already without background) into a sticker.')+'</p>'):
     '<div class="stk-g">'+VS_SLOTS.map(function(sl){return '<button type="button" data-stk="'+th+'-'+sl+'" aria-label="'+sl+'"><img alt="" loading="lazy" src="img/st/'+th+'-'+sl+'.webp"></button>'}).join('')+'</div>');
 }
 function stkMyPaint(root){
@@ -13423,7 +14572,7 @@ function mcView(){
       rep='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19M10 12.5h6M10 16h6"/></svg>';
   var wk='lk:'+l.id,dots='<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor" stroke="none"/></svg>';
   return '<div class="kcx mcx'+(kcMuted(wk)?' muted':'')+(kcWpGet(wk)?' haswp':'')+'" data-lk="'+esc(l.id)+'"'+(kcWpGet(wk)?' data-wp="'+kcWpGet(wk)+'"':'')+(mcCt(l.id)?' data-ct="'+mcCt(l.id)+'"':'')+'>'+kcWpHTML(wk)+'<div class="kcx-top"><button type="button" class="kcx-rb glass" data-act="mcBack" aria-label="'+__('برگشت','Back')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>'+
-    '<div class="kcx-pill glass"><div class="kcx-av'+(gr&&grPhoto(l)?' has-p':'')+'" style="background:'+(gr?'linear-gradient(145deg,#34d399,#0f9d6e)':fr?'linear-gradient(145deg,#f472b6,#e11d48)':'linear-gradient(145deg,#38bdf8,#2563eb)')+'">'+(gr?grAvIn(l):esc(mcIni(l)))+'</div><div class="kcx-ti"><b><span class="kcx-nm" id="mcNm"><span class="kcx-nt" dir="auto">'+esc(mcPeer(l))+'</span></span><svg class="ic kcx-mi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg></b><small id="mcSub">'+mcSubHTML(l)+'</small></div></div>'+
+    '<div class="kcx-pill glass"><div class="kcx-av'+(gr&&grPhoto(l)?' has-p':'')+'" style="background:'+(gr?'linear-gradient(145deg,#34d399,#0f9d6e)':fr?'linear-gradient(145deg,#f472b6,#e11d48)':'linear-gradient(145deg,#38bdf8,#2563eb)')+'">'+(gr?grAvIn(l):esc(mcIni(l)))+'</div><div class="kcx-ti"><b><span class="kcx-nm" id="mcNm"><span class="kcx-nt" dir="auto">'+esc(mcPeer(l))+'</span></span><svg class="ic kcx-mi bx" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17v-6a6 6 0 1112 0v6l1.5 2h-15zM10 21.5h4M4 4l16 16"/></svg></b><small id="mcSub">'+mcSubHTML(l)+'</small></div></div>'+
     '<div class="kcx-acts glass">'+(cn&&!fr&&!gr?'<button type="button" class="kcx-rb" data-act="mcDash" aria-label="'+__('داشبورد','Dashboard')+'">'+icon('stats')+'</button>':'')+
     (gr||fr?'<button type="button" class="kcx-rb vc-hb" data-act="vcOpen" aria-label="'+__('گفتگوی صوتی','Voice chat')+'">'+VC_ICON.bars+'</button>':'')+
     '<button type="button" class="kcx-rb" id="mcCtB" aria-label="'+__('رنگ گفتگو','Chat colour')+'">'+icon('palette')+'</button>'+
@@ -13437,7 +14586,8 @@ function mcView(){
     '<div class="kcx-em mc-stt glass" id="mcSt" aria-hidden="true"></div>'+
     '<div class="kcx-sb"><button type="button" class="kcx-sbb glass" data-sel="reply">'+SVREPLY+'<span>'+__('پاسخ','Reply')+'</span></button><button type="button" class="kcx-sbb glass" data-sel="fwd">'+SVFWD+'<span>'+__('هدایت','Forward')+'</span></button></div>'+
     '<div class="mc-rpb glass" id="mcRp" hidden></div>'+
-    '<form class="kcx-in" id="mcF" autocomplete="off"><div class="kcx-box glass"><textarea id="mcT" rows="1" maxlength="3000" enterkeyhint="send" placeholder="'+__('پیام','Message')+'" aria-label="'+__('پیام','Message')+'"></textarea>'+
+    '<div class="mc-pv glass" id="mcPv" dir="auto" hidden aria-live="polite"></div>'+
+    '<form class="kcx-in" id="mcF" autocomplete="off"><button type="button" class="mc-dn glass" id="mcDn" aria-label="'+__('رفتن به آخرین پیام','Jump to the latest message')+'"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/></svg><b id="mcDnN" hidden></b></button><div class="kcx-box glass"><textarea id="mcT" rows="1" maxlength="3000" enterkeyhint="send" placeholder="'+__('پیام','Message')+'" aria-label="'+__('پیام','Message')+'"></textarea>'+
     (gr||cn&&!fr?'':'<button type="button" class="kcx-ib" id="mcE" aria-label="'+__('ارسال گزارش‌کار','Send a daily report')+'" aria-expanded="false">'+rep+'</button>')+
     '<button type="button" class="kcx-ib" id="mcSk" aria-label="'+__('ایموجی و استیکر','Emoji & stickers')+'" aria-expanded="false"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.3 14.2c.9 1.5 2.2 2.3 3.7 2.3s2.8-.8 3.7-2.3M9 9.8h.01M15 9.8h.01"/></svg></button>'+
     '<button type="button" class="kcx-ib kcx-at" id="mcA" aria-label="'+__('ارسال عکس، ویدیو یا فایل','Send a photo, video or file')+'">'+clip+'</button></div>'+
@@ -13455,8 +14605,9 @@ function mcThreadHTML(l){
 function mcTk(m){if(m.failed)return '<i class="mc-tk bad">!</i>';if(m.pending)return '<i class="mc-tk">…</i>';var sn=m.seen_at&&!mcGr(mcLink(m.link_id));return '<i class="mc-tk'+(sn?' on':'')+'">'+(sn?'✓✓':'✓')+'</i>'}
 function mcRow(m){
   var mine=m.sender_id===CNX.uid,c=mine?'u':'a',tm=kcxTime(mcMs(m.created_at)),tt=tm+(mine?' '+mcTk(m):''),h,me=m.meta||{};
-  if(m.kind==='t'&&me.fc)h=mcFwcHTML(m,me,c,tt);
-  else if(m.kind==='t')h='<div class="kcx-m '+c+mcBigEm(m,me)+'">'+(me.sr&&stIsThumb(me.sr.th)?'<div class="mc-sq"><i style="background-image:url('+me.sr.th+')"></i><span><b>'+__('پاسخ به استوری','Story reply')+'</b>'+(me.sr.c?'<small dir="auto">'+esc(String(me.sr.c).slice(0,60))+'</small>':'')+'</span></div>':'')+'<p dir="auto">'+emjText(esc(m.body||'').replace(/\n/g,'<br>'))+'</p><time>'+tt+'</time></div>';
+  if(m.kind==='t'&&me.vi)h='<div class="kcx-m '+c+' mc-vi"><div class="mc-vib"><i class="mc-vim">'+VC_ICON.mic+'</i><span class="mc-vit"><b>'+__('گفتگوی صوتی','Voice chat')+'</b><small>'+__('به گفتگوی صوتی بپیوندید','Join the voice chat')+'</small></span><button type="button" class="mc-vij" data-vcj="1"><span>'+__('پیوستن','Join')+'</span></button></div><time>'+tt+'</time></div>';
+  else if(m.kind==='t'&&me.fc)h=mcFwcHTML(m,me,c,tt);
+  else if(m.kind==='t')h='<div class="kcx-m '+c+mcBigEm(m,me)+'">'+(me.sr&&stIsThumb(me.sr.th)?'<div class="mc-sq"'+(me.sr.id?' data-sq="'+esc(String(me.sr.id))+'" role="button" tabindex="0"':'')+'><i style="background-image:url('+me.sr.th+')"></i><span><b>'+__('پاسخ به استوری','Story reply')+'</b>'+(me.sr.c?'<small dir="auto">'+esc(String(me.sr.c).slice(0,60))+'</small>':'')+'</span></div>':'')+'<p dir="auto">'+stkInlineHTML(emjText(esc(m.body||'').replace(/\n/g,'<br>')),me)+'</p><time>'+tt+'</time></div>';
   else if(m.kind==='p'||m.kind==='v'){
     var v=m.kind==='v';
     h='<div class="kcx-m '+c+' sp-m" data-spid="'+esc(m.id)+'" data-spk="'+m.kind+'" data-spd="'+(+me.d||0)+'"><button type="button" class="sp-pv" data-spo="'+esc(m.id)+'" aria-label="'+(v?__('پخش ویدیو','Play video'):__('دیدن عکس','View photo'))+'"><img alt="" data-spimg="'+esc(m.id)+'" draggable="false">'+(v?'<span class="sp-pl">'+SP_PLAY+'</span>':'')+'</button><time>'+tt+'</time></div>';
@@ -13466,7 +14617,7 @@ function mcRow(m){
     h='<div class="kcx-m '+c+' '+vnCls(vv)+'" data-vid="'+esc(m.id)+'" data-d="'+(+vv.d||0)+'">'+vnInner(vv,tt)+'</div>';
   }
   else if(m.kind==='f')h='<div class="kcx-m '+c+' mc-file"><button type="button" class="mc-fb" data-mcf="'+esc(m.id)+'"><span class="mc-fi"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M7 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 7 20z"/><path d="M14.5 3.5V8H19"/></svg></span><span class="mc-ft"><b dir="auto">'+esc(lsKind(m)==='pdf'?(m.mname||__('فایل','File')):lsTitle(m))+'</b><small>'+lsSub(m)+'</small></span></button><time>'+tt+'</time></div>';
-  else if(m.kind==='s')h='<div class="kcx-m '+c+' mc-stk">'+(m.body==='my'?(m.meta&&m.meta.v?'<video class="mc-stki" muted loop autoplay playsinline disablepictureinpicture data-stkimg="'+esc(m.id)+'"'+(SP.mem['stk_'+m.id]?' src="'+SP.mem['stk_'+m.id]+'"':'')+'></video>':'<img class="mc-stki" alt="" draggable="false" data-stkimg="'+esc(m.id)+'"'+(SP.mem['stk_'+m.id]?' src="'+SP.mem['stk_'+m.id]+'"':'')+'>'):stkOk(m.body)?'<img class="mc-stki" alt="" draggable="false" src="img/st/'+m.body+'.webp">':'<p>…</p>')+'<time>'+tt+'</time></div>';
+  else if(m.kind==='s')h='<div class="kcx-m '+c+' mc-stk">'+(m.body==='my'?(m.meta&&m.meta.v?'<video class="mc-stki" muted loop autoplay playsinline disablepictureinpicture data-stkimg="'+esc(m.id)+'"'+(SP.mem['stk_'+m.id]?' src="'+SP.mem['stk_'+m.id]+'"':'')+'></video>':'<img class="mc-stki" alt="" draggable="false" data-stkimg="'+esc(m.id)+'"'+(SP.mem['stk_'+m.id]?' src="'+SP.mem['stk_'+m.id]+'"':'')+'>'):stkDefBy(m.body)?(stkDefBy(m.body).v?'<video class="mc-stki" muted loop autoplay playsinline disablepictureinpicture src="'+stkDefBy(m.body).file+'"></video>':'<img class="mc-stki" alt="" draggable="false" src="'+stkDefBy(m.body).file+'">'):stkOk(m.body)?'<img class="mc-stki" alt="" draggable="false" src="img/st/'+m.body+'.webp">':'<p>…</p>')+'<time>'+tt+'</time></div>';
   else if(m.kind==='q')h='<div class="kcx-m '+c+' mc-q'+(me.mu&&!(+me.ok>=0)?' mu':'')+'" data-q="'+esc(m.id)+'"><div class="mc-qin">'+mcPollInner(m)+'</div><time>'+tt+'</time></div>';
   else if(m.kind==='g'){
     var nums=[];
@@ -13481,7 +14632,7 @@ function mcRow(m){
   if(rx)h=h.replace('class="kcx-m ','class="kcx-m hre ').replace(/<\/div>$/,'<span class="kcx-re mc-rxp">'+rx+'</span></div>');
   if(me.rp&&me.rp.i&&!me.fc){var qh=mcRqHTML(me.rp);h=h.replace(/^(<div[^>]*>)/,function(a){return a+qh})}
   var lk=mine?null:mcLink(m.link_id),gp=lk&&mcGr(lk),sn='';
-  if(gp){sn=mcSnd(lk,m);h=h.replace(/^(<div[^>]*>)/,'$1<b class="mc-sn" dir="auto" style="color:hsl('+mcHue(m.sender_id)+',62%,52%)">'+esc(sn)+'</b>')}
+  if(gp){sn=mcSnd(lk,m);h=h.replace(/^(<div[^>]*>)/,'$1<b class="mc-sn" dir="auto" style="color:hsl('+mcHue(m.sender_id)+',62%,52%)">'+esc(sn)+frBadges(mcMsgAv(m,sn).f)+'</b>')}
   return '<div class="kcx-row'+(m.failed?' mc-failed':'')+(lk?' mc-hasav':'')+'" data-mid="'+esc(m.id)+'" data-snd="'+esc(m.sender_id)+'" data-t="'+mcMs(m.created_at)+'" data-mine="'+(mine?1:0)+'"><span class="kcx-ck"></span>'+(lk?(gp?mcAvHTMLv(mcMsgAv(m,sn)):mcAvHTML(lk)):'')+h+'</div>';
 }
 /* thumbnails, pictures of round videos and voice files arrive after the bubble is on the screen */
@@ -13533,7 +14684,7 @@ function mcSync0(stick){
   var near=!L||L.scrollHeight-L.scrollTop-L.clientHeight<120;
   if(!th.querySelector('.kcx-row')&&!a.length){th.innerHTML=mcThreadHTML(l);return}
   var ld=th.querySelector('.mc-ld,.kcx-e0');if(ld)th.innerHTML='';
-  var have={},added=[];
+  var have={},added=[],newRows=[];
   [].forEach.call(th.querySelectorAll('.kcx-row[data-mid]'),function(r){have[r.dataset.mid]=r});
   var ids={};a.forEach(function(m){ids[m.id]=1});
   Object.keys(have).forEach(function(k){if(!ids[k])have[k].remove()});
@@ -13549,11 +14700,16 @@ function mcSync0(stick){
     var dk=new Date(mcMs(m.created_at)).toDateString(),h='';
     if(dk!==ldk){h+='<div class="kcx-day" data-d="'+dk+'"><span>'+kcxDay(mcMs(m.created_at))+'</span></div>';ldk=dk}
     var tp=document.createElement('div');tp.innerHTML=h+mcRow(m);
-    while(tp.firstChild)th.appendChild(tp.firstChild);
+    while(tp.firstChild){var nd=tp.firstChild;th.appendChild(nd);if(nd.classList&&nd.classList.contains('kcx-row'))newRows.push(nd)}
     added.push(m);
   });
+  /* v367 speed: bubbles are drawn without animation (opening a chat no longer animates 100+ bubbles at once); only a few fresh ones fade in */
+  if(added.length&&added.length<=5)newRows.forEach(function(e){e.classList.add('mc-in')});
   if(added.length){
     mcHydrate(added);
+    var inc=added.filter(function(m){return m.sender_id!==CNX.uid}).length;
+    if(inc&&!stick&&!near)MC.dn[l.id]=(MC.dn[l.id]||0)+inc;   /* v410: new messages from others while I am scrolled up */
+    mcDnPaint();
     if(L&&(stick||near||added.some(function(m){return m.sender_id===CNX.uid&&m.pending}))){try{L.scrollTo({top:L.scrollHeight,behavior:'smooth'})}catch(e){L.scrollTop=L.scrollHeight}}
   }
 }
@@ -13655,8 +14811,18 @@ async function mcSend(l,m){
   if(ui.mcl===l.id)mcSync(false);
 }
 function mcSendText(l,t){
-  t=String(t||'').trim();if(!t)return false;
-  mcPost(l,{id:mcNewId(),kind:'t',body:t.slice(0,3000)});return true;
+  t=String(t||'').trim();if(!t)return false;t=t.slice(0,3000);
+  /* v386: a «my sticker» inside the text travels as a small picture in meta.ik; a video sticker also as moving frames in meta.ia (3 per message at most) */
+  var my=stkTokIds(t).filter(function(x,i,a){return /^my-/.test(x)&&a.indexOf(x)===i}).slice(0,STK_MAXMY),
+      go=function(){
+        var meta={},na=0;
+        if(my.length){meta.ik={};my.forEach(function(x){if(STK_IK[x])meta.ik[x]=STK_IK[x];if(na<STK_MAXANIM&&stkAnimOk(STK_IA[x])){(meta.ia=meta.ia||{})[x]=STK_IA[x];na++}})}
+        mcPost(l,{id:mcNewId(),kind:'t',body:t,meta:meta});
+      },
+      need=[];
+  my.forEach(function(x){need.push(stkMyThumb(x.slice(3)));need.push(stkMyAnim(x.slice(3)))});
+  if(need.length)Promise.all(need).then(go,go);else go();
+  return true;
 }
 async function mcSendFile(l,file,asFile){
   try{
@@ -13933,7 +15099,7 @@ function mcBigEm(m,me){
   if(me&&me.sr)return '';
   return emoBigCls(m.body);
 }
-function mcTextOf(m){return m.kind==='t'||m.kind==='g'?String(m.body||''):''}
+function mcTextOf(m){return m.kind==='t'||m.kind==='g'?stkPlain(m.body||''):''}
 function mcCopy(t){
   function ok(){toast('کپی شد',null,null,'ok')}
   function fb(){var x=document.createElement('textarea');x.value=t;x.style.cssText='position:fixed;opacity:0;top:0';document.body.appendChild(x);x.select();try{document.execCommand('copy');ok()}catch(er){}x.remove()}
@@ -14048,7 +15214,7 @@ function mcSelInit(root,L,th,l){
     var r=e.target.closest('.kcx-row[data-mid]');
     if(on()){e.stopPropagation();e.preventDefault();if(r){r.classList.toggle('sel');upd()}return}
     /* buttons keep their own job (play, open a photo, vote ...); a tap on the rest of the bubble opens the reaction bar + menu */
-    if(!r||e.target.closest('button,a,video,input,textarea,[data-spo],[data-fch],[data-rq]'))return;
+    if(!r||e.target.closest('button,a,video,input,textarea,[data-spo],[data-fch],[data-rq],[data-sq]'))return;
     var m=mcMsg(r.dataset.mid);if(!m||m.failed)return;
     e.stopPropagation();e.preventDefault();mcMenu(root,l,r,m);
   },true);
@@ -14409,8 +15575,9 @@ function mcInit(){
   var root=document.querySelector('.mcx');if(!root)return;
   var l=mcLink(root.dataset.lk);if(!l)return;
   mcNameFit();setTimeout(mcNameFit,350);
-  var id=l.id,L=document.getElementById('mcL'),th=document.getElementById('mcTh'),F=document.getElementById('mcF'),T=document.getElementById('mcT'),E=document.getElementById('mcE'),EM=document.getElementById('mcEm'),A=document.getElementById('mcA');
-  function fit(){T.style.height='auto';T.style.height=Math.min(120,T.scrollHeight)+'px';F.classList.toggle('tx',!!T.value.trim());MC.draft[id]=T.value}
+  var id=l.id,L=document.getElementById('mcL'),th=document.getElementById('mcTh'),F=document.getElementById('mcF'),T=document.getElementById('mcT'),E=document.getElementById('mcE'),EM=document.getElementById('mcEm'),A=document.getElementById('mcA'),PV=document.getElementById('mcPv');
+  function pv(){if(!PV)return;var v=T.value;if(!stkHasTok(v)){PV.hidden=true;PV.innerHTML='';return}PV.hidden=false;PV.innerHTML=stkInlineHTML(emjText(esc(v).replace(/\n/g,'<br>')),{ik:STK_IK,ia:STK_IA})}
+  function fit(){T.style.height='auto';T.style.height=Math.min(120,T.scrollHeight)+'px';F.classList.toggle('tx',!!T.value.trim());MC.draft[id]=T.value;pv()}
   if(MC.draft[id]){T.value=MC.draft[id];fit()}
   var RP=document.getElementById('mcRp');
   if(RP){
@@ -14424,7 +15591,14 @@ function mcInit(){
   F.addEventListener('submit',function(e){e.preventDefault();send();T.focus({preventScroll:true})});
   T.addEventListener('input',function(){fit();if(T.value.trim()){var f=Date.now()-MC.typAt>2500;mcTypeKey();if(f)mcPulseTick()}});
   T.addEventListener('blur',function(){MC.typAt=0});
-  T.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+  T.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();return}
+    /* v386: Backspace right after a sticker removes the whole sticker */
+    if(e.key==='Backspace'&&T.selectionStart===T.selectionEnd){
+      var c=T.selectionStart,m=/\[\[st:[a-z0-9-]{3,40}\]\]$/i.exec(T.value.slice(0,c));
+      if(m){e.preventDefault();T.value=T.value.slice(0,c-m[0].length)+T.value.slice(c);T.selectionStart=T.selectionEnd=c-m[0].length;T.dispatchEvent(new Event('input'))}
+    }
+  });
   A.addEventListener('click',function(){mcChoose(function(f,asFile){return mcSendFile(l,f,asFile)},function(){mcPollSheet(l)},function(){lsChoose(l)})});
   /* daily report (student side) */
   function tray(open){
@@ -14442,7 +15616,7 @@ function mcInit(){
   function stk(open){
     if(!ST)return;
     if(open&&EM&&EM.classList.contains('open'))tray(false);
-    SK.setAttribute('aria-expanded',open?'true':'false');ST.setAttribute('aria-hidden',open?'false':'true');
+    stkSel=null;SK.setAttribute('aria-expanded',open?'true':'false');ST.setAttribute('aria-hidden',open?'false':'true');
     var dk=stkDesk();
     if(open){ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST);
       /* desktop: a floating panel that opens ABOVE the emoji button; phone: the tray under the messages as before */
@@ -14469,8 +15643,44 @@ function mcInit(){
     if(hov&&ST.classList.contains('open')){hov=0;clearTimeout(hovT);return}   /* opened by hovering: the click pins it open */
     hov=0;stk(!ST.classList.contains('open'));
   });
+  /* v358: a long press on one of «my stickers» starts selecting with that sticker ticked */
+  var stkLP=0,stkLT=0,stkLX=0,stkLY=0;
+  if(ST){
+    ST.addEventListener('pointerdown',function(e){
+      var b=e.target.closest&&e.target.closest('[data-stmy]');clearTimeout(stkLT);if(!b||stkSel)return;
+      stkLX=e.clientX;stkLY=e.clientY;
+      stkLT=setTimeout(function(){stkLP=1;stkSel=[b.dataset.stmy];ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST);hap('tap');setTimeout(function(){stkLP=0},700)},450);
+    });
+    ['pointerup','pointercancel','pointerleave'].forEach(function(n){ST.addEventListener(n,function(){clearTimeout(stkLT)})});
+    ST.addEventListener('pointermove',function(e){if(Math.abs(e.clientX-stkLX)>8||Math.abs(e.clientY-stkLY)>8)clearTimeout(stkLT)});
+    ST.addEventListener('contextmenu',function(e){if(e.target.closest&&e.target.closest('[data-stmy]'))e.preventDefault()});
+  }
   if(ST)ST.addEventListener('click',function(e){
-    var t=e.target.closest('[data-stt]'),k=e.target.closest('[data-stk]'),m=e.target.closest('[data-stm]'),ec=e.target.closest('[data-emc]'),em=e.target.closest('[data-emj]'),ad=e.target.closest('[data-stadd]'),my=e.target.closest('[data-stmy]');
+    var t=e.target.closest('[data-stt]'),k=e.target.closest('[data-stk]'),m=e.target.closest('[data-stm]'),ec=e.target.closest('[data-emc]'),em=e.target.closest('[data-emj]'),ad=e.target.closest('[data-stadd]'),my=e.target.closest('[data-stmy]'),df=e.target.closest('[data-stdef]');
+    /* v358: selecting and deleting «my stickers» */
+    if(stkLP){stkLP=0;if(my){e.preventDefault();return}}   /* the click that ends a long-press must not toggle / send */
+    function stkDraw(){ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST)}
+    if(e.target.closest('[data-stin]')){STK_INL=!STK_INL;stkDraw();hap('tap');return}
+    /* v386: with «In text» on, a tap puts the sticker into the message box (small, beside the words) instead of sending it alone */
+    if(STK_INL&&!stkSel&&(df||my||k)){
+      mcInsTok(T,df?'def-'+df.dataset.stdef:my?'my-'+my.dataset.stmy:k.dataset.stk);hap('tap');return;
+    }
+    if(e.target.closest('[data-stsel]')){stkSel=[];stkDraw();hap('tap');return}
+    if(e.target.closest('[data-stx]')){stkSel=null;stkDraw();return}
+    if(e.target.closest('[data-stall]')){var all=stkMyIds();stkSel=stkSel&&stkSel.length===all.length?[]:all.slice();stkSelRefresh(ST);return}
+    if(e.target.closest('[data-stdel]')){
+      var dl=(stkSel||[]).slice(),dn=dl.length;if(!dn)return;
+      askConfirm({title:dn>1?__('حذف '+fa(dn)+' استیکر؟','Delete '+dn+' stickers?'):__('حذف این استیکر؟','Delete this sticker?'),
+        msg:__('از «استیکرهای من» پاک می‌شود. پیام‌هایی که قبلاً فرستاده‌ای می‌مانند.','They are removed from “My stickers”. Messages you already sent stay.'),
+        btns:[{t:__('حذف','Delete'),cls:'bad',fn:function(){stkMyDel(dl);stkSel=stkMyIds().length?[]:null;if(ST.isConnected)stkDraw();toast(dn>1?__(fa(dn)+' استیکر حذف شد','Deleted '+dn+' stickers'):__('استیکر حذف شد','Sticker deleted'))}}]});
+      return;
+    }
+    if(df&&!stkSel){
+      var dd=STK_DEF.filter(function(x){return x.id===df.dataset.stdef})[0];if(!dd)return;
+      mcPost(l,{id:mcNewId(),kind:'s',body:'def-'+dd.id});stk(false);
+      return;
+    }
+    if(my&&stkSel){var q=my.dataset.stmy,ix=stkSel.indexOf(q);if(ix>-1)stkSel.splice(ix,1);else stkSel.push(q);hap('tap');stkSelRefresh(ST);return}
     if(ad){
       var fi=document.createElement('input');fi.type='file';fi.accept='image/*,video/*';fi.style.display='none';document.body.appendChild(fi);
       fi.addEventListener('change',function(){
@@ -14491,7 +15701,7 @@ function mcInit(){
       }).catch(function(){});
       return;
     }
-    if(m){smode=m.dataset.stm;ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST);return}
+    if(m){smode=m.dataset.stm;stkSel=null;ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST);return}
     if(ec){ecat=+ec.dataset.emc||0;ST.innerHTML=stkRender(smode,sth,ecat);stkMyPaint(ST);return}
     if(em){var ch=String.fromCodePoint(+em.dataset.emj),a=T.selectionStart==null?T.value.length:T.selectionStart,z=T.selectionEnd==null?a:T.selectionEnd;
       if(T.value.length-(z-a)+ch.length<=3000){T.value=T.value.slice(0,a)+ch+T.value.slice(z);T.selectionStart=T.selectionEnd=a+ch.length;T.dispatchEvent(new Event('input'))}
@@ -14555,6 +15765,14 @@ function mcInit(){
       return;
     }
     if((b=e.target.closest('[data-fch]'))){e.stopPropagation();mcOpenFwc(b.dataset.fch);return}
+    if((b=e.target.closest('[data-sq]'))){e.stopPropagation();mcOpenStory(b.dataset.sq);return}
+    if((b=e.target.closest('[data-vcj]'))){
+      e.stopPropagation();
+      if(b.classList.contains('go'))return;
+      b.classList.add('go');setTimeout(function(){b.classList.remove('go')},1300);   /* soft press: the word fades, the button squeezes and a wave runs */
+      setTimeout(function(){actions.vcOpen()},260);
+      return;
+    }
     if((b=e.target.closest('[data-mcf]'))){
       mcSaveMsg(b.dataset.mcf);
       return;
@@ -14570,7 +15788,9 @@ function mcInit(){
   L.addEventListener('contextmenu',function(e){if(e.target.closest('.kcx-row'))e.preventDefault()});
   /* show what we have at once, then ask the server */
   mcAvFix();
-  L.addEventListener('scroll',function(){mcSpSave(id)},{passive:true});
+  L.addEventListener('scroll',function(){mcSpSave(id);mcDnPaint()},{passive:true});
+  var DN=document.getElementById('mcDn');
+  if(DN)DN.addEventListener('click',function(){MC.dn[id]=0;try{L.scrollTo({top:L.scrollHeight,behavior:'smooth'})}catch(e){L.scrollTop=L.scrollHeight}mcDnPaint()});
   ['touchstart','wheel','pointerdown','keydown'].forEach(function(n){L.addEventListener(n,function(){MC.spHold=0},{passive:true,capture:true})});
   if(MC.msgs[id]){mcHydrate(MC.msgs[id]);mcSpHold(id)}else{MC.spHold=1;clearTimeout(MC.spT);MC.spT=setTimeout(function(){MC.spHold=0},900)}
   mcStop();
@@ -14715,8 +15935,8 @@ actions.kcMenu=function(d){
   requestAnimationFrame(function(){requestAnimationFrame(function(){wrap.classList.add('in')})});
   function go(name,back){
     if(busy)return;busy=true;cp=name;
-    var cur=W.querySelector('.kcm-p.on'),nx=document.createElement('div'),dx=(back?-1:1)*(rtl?-1:1)*16;
-    nx.className='kcm-p nx';nx.innerHTML=kcmPanel(name,sec);stagger(nx);
+    var cur=W.querySelector('.kcm-p.on'),nx=document.createElement('div'),dx=(back?-1:1)*(rtl?-1:1)*6;   /* v409: a soft cross-fade with only a tiny drift */
+    nx.className='kcm-p kcm-nx';nx.innerHTML=kcmPanel(name,sec);stagger(nx);
     nx.style.setProperty('--dx',dx+'px');cur.style.setProperty('--dx',(-dx)+'px');
     W.style.height=W.offsetHeight+'px';
     W.appendChild(nx);
@@ -14724,7 +15944,7 @@ actions.kcMenu=function(d){
     void W.offsetHeight;
     W.style.height=h+'px';
     cur.classList.remove('on');cur.classList.add('off');
-    requestAnimationFrame(function(){requestAnimationFrame(function(){nx.classList.remove('nx');nx.classList.add('on')})});
+    requestAnimationFrame(function(){requestAnimationFrame(function(){nx.classList.remove('kcm-nx');nx.classList.add('on')})});
     setTimeout(function(){if(cur.parentNode)cur.remove();W.style.height='';busy=false},360);
   }
   function done(msg){kcmClose(wrap);if(msg)toast(msg,null,null,'ok')}
@@ -14924,10 +16144,10 @@ function tbCard(){
   return '<button type="button" class="wrcard glass" data-act="tbOpen"><span class="ib" style="background:linear-gradient(145deg,#fbbf24,#e07b0b)">'+icon('book')+'</span><div><b>'+__("کتابخانه و یادداشت‌ها","Library & notes")+'</b><small>'+sm+'</small></div></button>';
 }
 /* ---------- Progress garden (باغچه‌ی پیشرفت) ----------
-   Built only from the study hours in state.profile.kk, so it needs no new saved data and is backed up with the profile.
-   Every day with any study grows the current plant one step; PG_NEED study days make a plant complete and it moves into the garden.
-   A day without study makes the growing plant wilt (days of the past only; today is never counted as missed).
-   One study day makes it green again, and it keeps the growth it already had. Finished plants never wilt. */
+   v371: built only from the saved daily reports (state.profile.rp), so it needs no new saved data and is backed up with the profile.
+   Every day with a saved report grows the current plant one step; PG_NEED report days make a plant complete and it moves into the garden.
+   A day without a report makes the growing plant wilt (days of the past only; today is never counted as missed).
+   One saved report makes it green again, and it keeps the growth it already had. Finished plants never wilt. Study entries alone do not grow it. */
 var PG_NEED=7;
 var PG_SP=[
   {n:'رز',e:'Rose',c:'#e8416b',t:'f'},
@@ -14951,20 +16171,22 @@ var PG_CYCLE=6;
 function pgSpFor(n){var o=state.profile&&state.profile.pgo&&state.profile.pgo[n];return typeof o==='number'&&o>=0&&o<PG_SP.length?o:n%PG_CYCLE}
 function pgName(i){var s=PG_SP[i%PG_SP.length];return EN?s.e:s.n}
 function pgState(){
-  var td=todayKey(),d=kkD().d,ks=Object.keys(d).filter(function(k){return k<=td&&kkDay(k)>0}).sort();
+  var td=todayKey(),rd=rpD(),ks=Object.keys(rd).filter(function(k){return k<=td&&rd[k]&&typeof rd[k]==='object'}).sort();
   var o={done:[],g:0,sp:pgSpFor(0),wilt:false,days:ks.length,today:false,none:!ks.length};
   if(!ks.length)return o;
   var k=ks[0],g=0,sp=pgSpFor(0),wilt=false,n=0;
   while(k<=td&&n++<4000){
-    if(kkDay(k)>0){
+    if(rd[k]){
       g++;wilt=false;
       if(g>=PG_NEED){o.done.push({sp:sp,k:k});sp=pgSpFor(o.done.length);g=0}
     }else if(k<td)wilt=true;
     k=addDays(k,1);
   }
-  o.g=g;o.sp=sp;o.wilt=wilt;o.today=kkDay(td)>0;
+  o.g=g;o.sp=sp;o.wilt=wilt;o.today=!!rd[td];
   return o;
 }
+/* consecutive days with a saved report, counted back from today (or from yesterday while today's report is not written yet) */
+function pgStreak(){var rd=rpD(),td=todayKey(),k=rd[td]?td:addDays(td,-1),n=0;while(rd[k]&&n<4000){n++;k=addDays(k,-1)}return n}
 function pgStage(g){return g<=0?0:Math.min(5,Math.ceil(g*5/PG_NEED))}
 function pgSvg(st,spi,wilt,id){
   var S=PG_SP[spi%PG_SP.length],tree=S.t==='t';
@@ -14991,30 +16213,30 @@ function pgSvg(st,spi,wilt,id){
   return '<svg viewBox="0 0 100 120" aria-hidden="true">'+o+'</svg>';
 }
 function pgMsg(S){
-  if(S.none)return __('هنوز بذری نکاشته‌ای؛ با اولین ثبت مطالعه، بذر تو کاشته می‌شود 🌰','No seed planted yet; your first study entry plants it 🌰');
-  if(S.wilt)return __('گیاهت پژمرده شده 🥀 غیبت کرده‌ای؛ با یک روز مطالعه دوباره سبز می‌شود','Your plant has wilted 🥀 you missed a day; one day of study turns it green again');
-  if(S.today)return __('امروز آبیاری شد 💧 گیاهت یک قدم بزرگ‌تر شد','Watered today 💧 your plant grew one step');
-  return __('امروز کمی مطالعه کن تا گیاهت رشد کند 🌱','Study a little today so your plant grows 🌱');
+  if(S.none)return __('هنوز بذری نکاشته‌ای؛ با اولین ثبت گزارش، بذر تو کاشته می‌شود 🌰','No seed planted yet; your first saved report plants it 🌰');
+  if(S.wilt)return __('گیاهت پژمرده شده 🥀 گزارش یک روز را ثبت نکرده‌ای؛ با ثبت یک گزارش دوباره سبز می‌شود','Your plant has wilted 🥀 you missed a report; saving one report turns it green again');
+  if(S.today)return __('با گزارش امروز آبیاری شد 💧 گیاهت یک قدم بزرگ‌تر شد','Today’s report watered it 💧 your plant grew one step');
+  return __('امشب گزارش‌کارت را ثبت کن تا گیاهت رشد کند 🌱','Save your daily report so your plant grows 🌱');
 }
 function pgCard(){
-  var sm=__('هر روز مطالعه یک گیاه را بزرگ می‌کند','Every study day grows a plant');
+  var sm=__('با ثبت گزارش هر روز یک گیاه بزرگ می‌شود','Every saved daily report grows a plant');
   try{
     var S=pgState();
-    if(!S.none)sm=(S.wilt?__('پژمرده است؛ یک روز مطالعه نجاتش می‌دهد','Wilted; one study day saves it'):fa(S.g)+' '+__('از','of')+' '+fa(PG_NEED)+' '+__('روز تا گیاه کامل','days to a full plant'))+(S.done.length?' · '+fa(S.done.length)+' '+__('گیاه در باغچه','in the garden'):'');
+    if(!S.none)sm=(S.wilt?__('پژمرده است؛ ثبت یک گزارش نجاتش می‌دهد','Wilted; saving one report revives it'):fa(S.g)+' '+__('از','of')+' '+fa(PG_NEED)+' '+__('گزارش تا گیاه کامل','reports to a full plant'))+(S.done.length?' · '+fa(S.done.length)+' '+__('گیاه در باغچه','in the garden'):'');
   }catch(er){}
   return '<button type="button" class="wrcard glass" data-act="pgOpen"><span class="ib" style="background:linear-gradient(145deg,#4ade80,#15803d)">'+icon('leaf')+'</span><div><b>'+__('باغچه‌ی پیشرفت','Progress garden')+'</b><small>'+sm+'</small></div></button>';
 }
 function pgBody(S){
   var st=pgStage(S.g),dots='',i,h;
-  for(i=0;i<PG_NEED;i++)dots+='<i class="'+(i<S.g?'on':'')+(S.wilt&&i<S.g?' wl':'')+'"></i>';
+  for(i=0;i<PG_NEED;i++)dots+='<i class="'+(i<S.g?'on':'')+(S.wilt&&i<S.g?' pg-wl':'')+'"></i>';
   h='<section class="pg-hero glass"><div class="pg-big'+(S.wilt?' wilt':'')+'">'+pgSvg(st,S.sp,S.wilt)+'</div><div class="pg-side"><small>'+(S.none?'':__('گیاه در حال رشد','Growing now'))+'</small><b>'+esc(pgName(S.sp))+'</b><p>'+pgMsg(S)+'</p><small class="pg-tip">'+__('برای عوض کردن گیاه، روی آن نگه دار 👆','Hold the plant to change it 👆')+'</small></div></section>';
   h+='<div class="pg-dots" aria-label="'+fa(S.g)+' / '+fa(PG_NEED)+'">'+dots+'</div>';
-  var cur=0;try{cur=kkStreak()}catch(er){}
-  h+='<div class="hstats"><div><b>'+fa(S.days)+'</b><small>'+__('روز مطالعه','study days')+'</small></div><div><b>'+fa(S.done.length)+'</b><small>'+__('گیاه کامل','full plants')+'</small></div><div><b>'+fa(cur)+'</b><small>'+__('روز پیاپی','day streak')+'</small></div></div>';
+  var cur=0;try{cur=pgStreak()}catch(er){}
+  h+='<div class="hstats"><div><b>'+fa(S.days)+'</b><small>'+__('روز گزارش','report days')+'</small></div><div><b>'+fa(S.done.length)+'</b><small>'+__('گیاه کامل','full plants')+'</small></div><div><b>'+fa(cur)+'</b><small>'+__('گزارش پیاپی','report streak')+'</small></div></div>';
   h+='<h3 class="gh"><span>'+__('باغچه‌ی تو','Your garden')+'</span></h3>';
   if(S.done.length)h+='<div class="pg-grid">'+S.done.map(function(x){return '<div class="pg-cell glass"><div class="pg-sm">'+pgSvg(5,x.sp,false)+'</div><b>'+esc(pgName(x.sp))+'</b><small>'+esc(relDate(x.k))+'</small></div>'}).join('')+'</div>';
-  else h+='<p class="hint">'+__('هر گیاهی که ۷ روز مطالعه کند، کامل می‌شود و برای همیشه در باغچه‌ات می‌ماند.','A plant that gets '+PG_NEED+' study days is complete and stays in your garden for good.')+'</p>';
-  h+='<p class="hint">'+__('هر روز مطالعه (هر مقدار) گیاه را رشد می‌دهد. روزی که غیبت کنی گیاه پژمرده می‌شود، ولی نمی‌میرد: با یک روز مطالعه دوباره سبز می‌شود و رشدش حفظ می‌ماند.','Any study on a day grows the plant. Miss a day and it wilts, but it never dies: one day of study makes it green again and keeps its growth.')+'</p>';
+  else h+='<p class="hint">'+__('هر گیاهی که ۷ روز گزارش بگیرد، کامل می‌شود و برای همیشه در باغچه‌ات می‌ماند.','A plant that gets '+PG_NEED+' report days is complete and stays in your garden for good.')+'</p>';
+  h+='<p class="hint">'+__('هر روز که گزارش‌کار ذخیره کنی گیاه رشد می‌کند (فقط ثبت مطالعه کافی نیست). روزی که گزارش نگذاری گیاه پژمرده می‌شود، ولی نمی‌میرد: با ثبت یک گزارش دوباره سبز می‌شود و رشدش حفظ می‌ماند.','Every day you save a daily report grows the plant (a study entry alone is not enough). Skip a report and it wilts, but it never dies: saving one report makes it green again and keeps its growth.')+'</p>';
   return h;
 }
 function pgOpen(){
@@ -15053,7 +16275,7 @@ function pgPick(host){
     toast(v<0?__('گیاه دوباره خودکار شد','The plant is automatic again'):__('گیاهت شد ','Your plant is now ')+pgName(pgState().sp),null,null,'ok');
   });
 }
-/* a short note after a study entry changes the plant (runs from kkPut, so every way of adding study shows it) */
+/* a short note after saving a daily report changes the plant (runs from rpStore) */
 function pgFeedback(b){
   if(!b)return;
   var a=pgState(),m='';
@@ -15185,6 +16407,13 @@ function rkFormHTML(){
     '<div><div class="rk-l">نوع آزمون</div>'+rkSel('ty',[['mock','آزمون آزمایشی'],['real','کنکور سراسری']],x.ty,'نوع آزمون')+'</div></div>'+
     '<div class="rk-l">سختی آزمون</div>'+rkChips('rkdf',Object.keys(RK_DF).map(function(k){return [k,RK_DF[k].n]}),x.df)+
     '<p class="hint">سختی آزمون روی تخمین اثر می‌گذارد: درصد یکسان در آزمون آسان، رتبه‌ی ضعیف‌تری می‌دهد.</p></section>';
+  var W=rkWt(x.g),gq=rkGpa(),pc=function(v){return fa(Math.round(v*100))+'٪'};
+  var gpf=function(f,lbl,val){return '<div><div class="rk-l">'+lbl+'</div><input class="field rk-in rk-gp" data-rk="gpa" data-f="'+f+'" type="text" inputmode="decimal" maxlength="5" placeholder="'+__('۰ تا ۲۰','0 to 20')+'" value="'+(val!==null?fa(String(val).replace('.','٫')):'')+'" aria-label="'+lbl+'"></div>'};
+  var gpa='<section class="glass rk-card"><h3 class="rk-h">'+__('معدل نهایی (سوابق تحصیلی)','Final GPA (school records)')+'</h3>'+
+    '<div class="rk-wt" aria-hidden="true"><i style="width:'+W.b*100+'%;background:var(--accent)"></i><i style="width:'+W.a*100+'%;background:var(--ok)"></i><i style="width:'+W.k*100+'%;background:var(--warn)"></i></div>'+
+    '<div class="rk-wl"><span><u style="background:var(--accent)"></u>'+__('دوازدهم','12th')+' '+pc(W.b)+'</span><span><u style="background:var(--ok)"></u>'+__('یازدهم','11th')+' '+pc(W.a)+'</span><span><u style="background:var(--warn)"></u>'+__('کنکور','Konkur')+' '+pc(W.k)+'</span></div>'+
+    '<div class="rk-two">'+gpf('b',__('معدل نهایی دوازدهم','12th-grade final GPA'),gq.b)+gpf('a',__('معدل نهایی یازدهم','11th-grade final GPA'),gq.a)+'</div>'+
+    '<p class="hint">'+(RK_W.m===W?__('در ریاضی، تجربی و انسانی ۶۰٪ نمره‌ی کل از سوابق تحصیلی است (۴۳٪ دوازدهم + ۱۷٪ یازدهم) و ۴۰٪ از کنکور.','In maths, experimental and humanities, 60% of the total score comes from school records (43% 12th + 17% 11th) and 40% from the konkur.'):__('در هنر و زبان ۳۰٪ نمره‌ی کل از سوابق تحصیلی است (۲۰٪ دوازدهم + ۱۰٪ یازدهم) و ۷۰٪ از کنکور.','In art and languages 30% of the total score comes from school records (20% 12th + 10% 11th) and 70% from the konkur.'))+' '+__('معدل خالی بماند، رتبه فقط از روی درصد کنکور حساب می‌شود. اگر فقط یکی را بنویسی، برای دیگری همان عدد فرض می‌شود.','Leave the GPA empty and the rank uses only the konkur percent. If you enter only one, the same number is assumed for the other.')+'</p></section>';
   var rows=G.L.map(function(l){
     var nm=l[0],inp;
     if(x.mode==='cnt'){
@@ -15202,7 +16431,7 @@ function rkFormHTML(){
     '<div class="rk-rows">'+rows+'</div>'+
     (x.mode==='cnt'?'<p class="hint">درصد با نمره‌ی منفی حساب می‌شود: هر پاسخ غلط یک‌سوم نمره‌ی پاسخ درست را کم می‌کند. «نزده» را هم وارد کن تا تعداد کل سؤال‌ها مشخص شود.</p>':'<p class="hint">درصد می‌تواند منفی هم باشد. درسی که وارد نکنی در محاسبه نمی‌آید.</p>')+
     '<div class="rk-btns"><button type="button" class="chip rk-main" data-act="rkSave">'+(x.eid?'به‌روزرسانی آزمون':'ذخیره‌ی آزمون')+'</button><button type="button" class="chip" data-act="rkNew">آزمون تازه</button></div></section>';
-  return info+inputs+'<div id="rkRes">'+rkResHTML()+'</div>';
+  return anBox()+info+gpa+inputs+'<div id="rkRes">'+rkResHTML()+'</div>';
 }
 function rkBand(lbl,cls,a,b){return '<div class="rk-bd '+cls+'"><small>'+lbl+'</small><b>'+rkFmt(rkRound(a))+'</b></div>'}
 function rkResHTML(){
@@ -15213,10 +16442,18 @@ function rkResHTML(){
     '<div class="rk-big"><small>رتبه در سهمیه ('+esc(qlbl)+')</small><b>'+rkRange(e.q.o,e.q.p)+'</b></div>'+
     '<div class="rk-big rk-nat"><small>رتبه‌ی کشوری</small><b>'+rkRange(e.nat.o,e.nat.p)+'</b></div>'+
     '<div class="rk-bands">'+rkBand('خوش‌بینانه','g',e.q.o)+rkBand('واقع‌بینانه','m',e.q.m)+rkBand('بدبینانه','b',e.q.p)+'</div>'+
-    '<p class="hint rk-bn">عددهای سه‌حالت، رتبه‌ی سهمیه‌اند. درصد وزنی: '+rkPctTxt(e.cp.p)+'٪ · '+fa(e.cp.n)+' درس از '+fa(RK_G[x.g].L.length)+'</p>'+
+    '<p class="hint rk-bn">'+(e.gp?__('با معدل نهایی حساب شد. ','Calculated with the final GPA. '):'')+'عددهای سه‌حالت، رتبه‌ی سهمیه‌اند. درصد وزنی: '+rkPctTxt(e.cp.p)+'٪ · '+fa(e.cp.n)+' درس از '+fa(RK_G[x.g].L.length)+'</p>'+
     '<div class="rk-conf"><div class="rk-ct"><span>میزان اطمینان</span><b>'+rkConfLbl(e.conf)+' · '+fa(e.conf)+'٪</b></div><div class="rk-bar"><i style="width:'+e.conf+'%"></i></div>'+
     '<p class="hint">'+(e.n>1?'با '+fa(e.n)+' آزمون (آخرین‌ها) محاسبه شد؛ هرچه آزمون‌های بیشتر و پایدارتر داشته باشی، بازه باریک‌تر می‌شود.':'با یک آزمون محاسبه شد؛ چند آزمون ذخیره کنی بازه دقیق‌تر می‌شود.')+(e.cp.cov<.7?' همه‌ی دروس را وارد نکرده‌ای و اطمینان کمتر است.':'')+'</p></div>'+
     '<p class="rk-disc">این برآورد با منحنی تقریبیِ درصد به رتبه و تعداد داوطلبان قابل‌ویرایش محاسبه می‌شود، نه با آمار رسمی داوطلبان. رتبه‌ی رسمی را فقط سازمان سنجش اعلام می‌کند. برای دقت بیشتر، در تنظیمات (دکمه‌ی بالا) تعداد داوطلبان و سهم سهمیه‌ها را با آمار رسمی همان سال به‌روز کن.</p></section>';
+  var gpc='';
+  if(e.gp){
+    var up=e.nat.m<e.kn.m,eq=Math.abs(e.nat.m-e.kn.m)<=Math.max(2,e.kn.m*.02);
+    gpc='<section class="glass rk-card"><h3 class="rk-h">'+__('اثر معدل روی رتبه','How the GPA changes your rank')+'</h3>'+
+      '<div class="rk-two"><div class="rk-bd"><small>'+__('فقط کنکور','Konkur only')+'</small><b>'+rkFmt(rkRound(e.kn.m))+'</b></div><div class="rk-bd m"><small>'+__('با معدل','With GPA')+'</small><b>'+rkFmt(rkRound(e.nat.m))+'</b></div></div>'+
+      '<p class="hint">'+(eq?__('معدلت تقریباً هم‌سطح درصد کنکورت است و رتبه‌ی کشوری عوض نشده.','Your GPA is about as strong as your konkur percent, so the national rank hardly changes.'):up?__('معدل بالا رتبه‌ی کشوری‌ات را بهتر کرده است.','Your high GPA improves your national rank.'):__('معدل نسبت به درصد کنکورت پایین‌تر است و رتبه‌ی کشوری را بدتر می‌کند.','Your GPA is weaker than your konkur percent and worsens the national rank.'))+'</p>'+
+      '<p class="hint">'+__('معدل با میانگین و انحراف معیار فرضی داوطلبان به تراز تبدیل می‌شود (در تنظیمات قابل‌تغییر است). سازمان سنجش با آمار واقعی همان سال تراز می‌کند.','The GPA is turned into a standardised score with an assumed mean and spread of candidates (editable in settings). Sanjesh standardises with that year\'s real statistics.')+'</p></section>';
+  }else gpc='<section class="glass rk-card rk-empty"><b>'+__('معدل نهایی را وارد کن','Enter your final GPA')+'</b><p>'+__('۶۰٪ نمره‌ی کل از معدل یازدهم و دوازدهم است. بدون آن، رتبه فقط از روی کنکور حساب می‌شود و دقیق نیست.','60% of the total score comes from the 11th and 12th grade GPA. Without it the rank uses only the konkur and is not accurate.')+'</p></section>';
   var u=rkUni(x,e),uh='';
   [['hi','شانس بالا','g'],['mid','شانس متوسط','m'],['lo','شانس پایین','b']].forEach(function(t){
     if(u[t[0]].length)uh+='<div class="rk-ug"><span class="rk-tag '+t[2]+'">'+t[1]+'</span><div class="rk-uc">'+u[t[0]].map(function(n){return '<em>'+esc(n)+'</em>'}).join('')+'</div></div>';
@@ -15229,7 +16466,7 @@ function rkResHTML(){
     return '<div class="rk-ar"><div class="rk-at"><b>'+esc(r.n)+'</b>'+tg+'<small>'+rkPctTxt(r.p)+'٪</small></div><div class="rk-bar"><i style="width:'+Math.max(4,Math.round(r.gain/mx*100))+'%"></i></div><small>۱۰ درصد بیشتر ≈ '+rkFmt(rkRound(r.gain))+' رتبه بهتر در کشور</small></div>';
   }).join('')+'<p class="hint">درس‌ها بر اساس بیشترین فرصت بهبود (ضریب × درصدِ باقی‌مانده) مرتب شده‌اند.</p></section>';
   var act='<div class="rk-btns rk-end"><button type="button" class="chip" data-act="rkSim">'+icon('target')+' شبیه‌ساز درصدها</button><button type="button" class="chip" data-act="rkRep">'+icon('download')+' گزارش قابل ذخیره</button></div>';
-  return res+act+uni+an;
+  return res+gpc+act+uni+an;
 }
 function rkChart(list){
   var a=list.slice(0,8).reverse();if(a.length<1)return '';
@@ -15254,11 +16491,245 @@ function rkHistHTML(){
   }).join('');
   return top+'<h3 class="gh"><span>آزمون‌های ذخیره‌شده</span></h3>'+rows;
 }
-function viewRK(){
-  var D=rkD(),x=D.cur,hist=ui.rksec==='hist';
-  var sub=hist?(D.exams.length?fa(D.exams.length)+' آزمون ذخیره‌شده':'هنوز آزمونی ذخیره نشده'):RK_G[x.g].n+' · '+fa(x.yr);
-  return head(sub,'تخمین رتبه',{back:1,backAct:'rkBack',backTxt:'کنکوریا',right:'<span class="kk-rb">'+(qaMicOK()?'<button type="button" id="rkMic" class="round glass" data-act="rkVoice" aria-label="ثبت آزمون با صدا">'+icon('mic')+'</button>':'')+'<button type="button" class="round glass" data-act="rkSet" aria-label="تنظیمات داده‌ها">'+icon('tools')+'</button></span>'})+segG([['est','تخمین'],['hist','تاریخچه']],'rksec',hist?'hist':'est')+(hist?rkHistHTML():rkFormHTML());
+function anBox(){
+  return '<button type="button" class="glass rk-anbox" data-act="rksec" data-v="an"><span class="ib">'+icon('rank')+'</span><div><b>'+__('تحلیل آزمون','Exam analysis')+'</b><small>'+__('دایره، رادار، نمودار و تحلیل هوشمند آزمونت','Rings, radar, charts and a smart analysis of your exam')+'</small></div><i aria-hidden="true">‹</i></button>';
 }
+function viewRK(){
+  var D=rkD(),x=D.cur,an=ui.rksec==='an',hist=ui.rksec==='hist';
+  var sub=an?__('تحلیل آزمون','Exam analysis'):hist?(D.exams.length?fa(D.exams.length)+' آزمون ذخیره‌شده':'هنوز آزمونی ذخیره نشده'):RK_G[x.g].n+' · '+fa(x.yr);
+  return head(sub,'تخمین رتبه',{back:1,backAct:'rkBack',backTxt:'کنکوریا',right:'<span class="kk-rb">'+(qaMicOK()?'<button type="button" id="rkMic" class="round glass" data-act="rkVoice" aria-label="ثبت آزمون با صدا">'+icon('mic')+'</button>':'')+'<button type="button" class="round glass" data-act="rkSet" aria-label="تنظیمات داده‌ها">'+icon('tools')+'</button></span>'})+segG([['est','تخمین'],['hist','تاریخچه'],['an','تحلیل آزمون']],'rksec',an?'an':hist?'hist':'est')+(an?anHTML():hist?rkHistHTML():rkFormHTML());
+}
+/* ---------- تحلیل آزمون: exam analysis box inside rank estimation ----------
+   Works from the exam the person typed (or any saved one): circles, radar, bubble chart, trend line, rule-based insights, and the books of every lesson.
+   Numbers come from the same engine as the rank estimate (rkComp / rkEst / rkLessons), so the two screens never disagree. */
+ui.rkan='';
+var AN_COL=['#0a84ff','#22b45b','#ef8a00','#a855f7','#ec4899','#14b8a6','#eab308'];
+/* Sanjesh 1405 booklets (totals checked against the official announcement of the exam shape) */
+var AN_EX={
+  tj:{q:155,m:180,t:['زیست‌شناسی ۴۵ سؤال · ۴۵ دقیقه','فیزیک ۳۰ + شیمی ۳۵ سؤال · ۷۵ دقیقه','ریاضی ۳۰ + زمین‌شناسی ۱۵ سؤال · ۶۰ دقیقه'],e:['Biology 45 questions · 45 min','Physics 30 + Chemistry 35 questions · 75 min','Maths 30 + Geology 15 questions · 60 min']},
+  ri:{q:105,m:145,t:['ریاضیات ۴۰ سؤال · ۷۰ دقیقه','فیزیک و شیمی ۶۵ سؤال · ۷۵ دقیقه'],e:['Mathematics 40 questions · 70 min','Physics and chemistry 65 questions · 75 min']},
+  en:{q:160,m:160,t:['دفترچه‌ی ۱: ریاضی، ادبیات فارسی، علوم اجتماعی و روان‌شناسی · ۸۰ سؤال · ۸۵ دقیقه','دفترچه‌ی ۲: عربی، تاریخ و جغرافیا، فلسفه و منطق، اقتصاد · ۸۰ سؤال · ۷۵ دقیقه'],e:['Booklet 1: maths, Persian literature, social sciences and psychology · 80 questions · 85 min','Booklet 2: Arabic, history and geography, philosophy and logic, economics · 80 questions · 75 min']},
+  ho:{q:100,m:115,t:['درک عمومی هنر، درک عمومی ریاضی و فیزیک و خلاقیت تصویری · ۱۰۰ سؤال · ۱۱۵ دقیقه'],e:['Art perception, maths and physics perception, visual creativity · 100 questions · 115 min']},
+  zb:{q:70,m:105,t:['زبان تخصصی · ۷۰ سؤال · ۱۰۵ دقیقه'],e:['Specialised language · 70 questions · 105 min'],g:1}   /* g:1 = the question count and time are not from the Sanjesh announcement (read off an infographic) */
+};
+/* official textbooks of each lesson, in the same order as the lessons of RK_G[group].L.
+   Only the tajrobi list was checked against an official source (ok:1); the others follow the structure of the Ministry of Education textbooks. */
+var AN_BK={
+  tj:[['زمین‌شناسی (یازدهم)'],['ریاضی ۱ (دهم)','ریاضی ۲ (یازدهم)','ریاضی ۳ (دوازدهم)'],['زیست‌شناسی ۱ (دهم)','زیست‌شناسی ۲ (یازدهم)','زیست‌شناسی ۳ (دوازدهم)'],['فیزیک ۱ (دهم)','فیزیک ۲ (یازدهم)','فیزیک ۳ (دوازدهم)'],['شیمی ۱ (دهم)','شیمی ۲ (یازدهم)','شیمی ۳ (دوازدهم)']],
+  ri:[['ریاضی ۱ (دهم)','هندسه ۱ (دهم)','حسابان ۱ (یازدهم)','هندسه ۲ (یازدهم)','آمار و احتمال (یازدهم)','حسابان ۲ (دوازدهم)','هندسه ۳ (دوازدهم)','ریاضیات گسسته (دوازدهم)'],['فیزیک ۱ (دهم)','فیزیک ۲ (یازدهم)','فیزیک ۳ (دوازدهم)'],['شیمی ۱ (دهم)','شیمی ۲ (یازدهم)','شیمی ۳ (دوازدهم)']],
+  en:[['عربی، زبان قرآن ۱ (دهم)','عربی، زبان قرآن ۲ (یازدهم)','عربی، زبان قرآن ۳ (دوازدهم)'],['ریاضی و آمار ۱ (دهم)','ریاضی و آمار ۲ (یازدهم)','ریاضی و آمار ۳ (دوازدهم)'],['فارسی ۱ (دهم)','فارسی ۲ (یازدهم)','فارسی ۳ (دوازدهم)','علوم و فنون ادبی ۱ (دهم)','علوم و فنون ادبی ۲ (یازدهم)','علوم و فنون ادبی ۳ (دوازدهم)'],['تاریخ ۱ (دهم)','تاریخ ۲ (یازدهم)','تاریخ ۳ (دوازدهم)','جغرافیا ۱ (دهم)','جغرافیا ۲ (یازدهم)','جغرافیا ۳ (دوازدهم)'],['منطق (دهم)','فلسفه ۱ (یازدهم)','فلسفه ۲ (دوازدهم)'],['اقتصاد (دهم)'],['جامعه‌شناسی ۱ (دهم)','جامعه‌شناسی ۲ (یازدهم)','جامعه‌شناسی ۳ (دوازدهم)'],['روان‌شناسی']],
+  ho:[['ریاضی (کتاب‌های درسی دهم تا دوازدهم)'],['کتاب‌های درسی هنر (دهم تا دوازدهم)'],['کتاب‌های درسی و عملی رشته‌ی هنر']],
+  zb:[['زبان انگلیسی ۱ (دهم)','زبان انگلیسی ۲ (یازدهم)','زبان انگلیسی ۳ (دوازدهم)']]
+};
+function anSh(s,n){s=String(s);return s.length>n?s.slice(0,n-1)+'…':s}
+function anLvl(p){return p>=75?[__('عالی','Excellent'),'g']:p>=55?[__('خوب','Good'),'g']:p>=35?[__('متوسط','Average'),'m']:p>=15?[__('نیازمند تقویت','Needs work'),'b']:[__('شروع مسیر','Starting out'),'b']}
+function anSrc(){
+  var D=rkD(),cur=D.cur,hasCur=!!rkComp(cur),L=D.exams.slice().sort(function(a,b){return b.ts-a.ts}),id=ui.rkan,x=null,saved=false;
+  if(id==='cur'&&hasCur)x=cur;
+  else if(id&&id!=='cur'){var f=L.filter(function(e){return e.id===id})[0];if(f){x=f;saved=true}}
+  if(!x){if(hasCur)x=cur;else if(L.length){x=L[0];saved=true}}
+  return {x:x,saved:saved,list:L,hasCur:hasCur,cur:cur};
+}
+function anRows(x){
+  var rows=[];
+  RK_G[x.g].L.forEach(function(l,i){
+    var p=rkPct(x,l[0]);if(p===null)return;
+    rows.push({i:i,n:l[0],c:l[1],p:p,col:AN_COL[i%AN_COL.length],cn:x.mode==='cnt'?x.cn[l[0]]:null});
+  });
+  return rows;
+}
+function anRing(p,sub){
+  var C=2*Math.PI*52,v=Math.max(0,Math.min(100,p)),d=v/100*C;
+  return '<svg class="an-ring" viewBox="0 0 140 140" role="img" aria-label="'+esc(sub)+' '+rkPctTxt(p)+'٪"><circle class="an-tr" cx="70" cy="70" r="52"/><circle class="an-pg" cx="70" cy="70" r="52" stroke-dasharray="'+d.toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 70 70)"/><text class="an-rv" x="70" y="76" text-anchor="middle">'+rkPctTxt(p)+'٪</text><text class="an-rs" x="70" y="96" text-anchor="middle">'+esc(sub)+'</text></svg>';
+}
+function anDonut(cx,r,w,parts){
+  var C=2*Math.PI*r,s=0,o='<circle class="an-tr" cx="'+cx+'" cy="'+cx+'" r="'+r+'" style="stroke-width:'+w+'px"/>';
+  parts.forEach(function(p){
+    var len=p.f*C,dl=Math.max(0,len-(parts.length>1?1.6:0));if(len<=0)return;
+    o+='<circle cx="'+cx+'" cy="'+cx+'" r="'+r+'" fill="none" stroke="'+p.col+'" stroke-width="'+w+'" stroke-dasharray="'+dl.toFixed(2)+' '+(C-dl).toFixed(2)+'" stroke-dashoffset="'+(-s*C).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cx+')"/>';
+    s+=p.f;
+  });
+  return o;
+}
+/* a glass bowl of "liquid" that splits a lesson (or the whole exam) into right / wrong / blank answers.
+   Bottom to top: right (green), wrong (orange), blank (grey); every layer has a wavy surface (it gently moves) and a thin line on it.
+   The middle shows the share of right answers; small ticks on the side read like the scale of a measuring glass. */
+var anQid=0;
+var AN_LQ=[['#34d3a6','#0b8f78'],['#ff8fa3','#e0365b'],['#d5dbe6','#a3adbf']];   /* right = teal-emerald, wrong = rose, blank = cool grey */
+function anWave(y,a,ph){
+  var o='M-60,'+(y).toFixed(1),x;
+  for(x=-60;x<=180;x+=6)o+=' L'+x+','+(y+a*Math.sin(x/60*2*Math.PI+ph)).toFixed(2);
+  return o+' L180,130 L-60,130 Z';
+}
+function anQCircle(c,w,n,big){
+  var t=c+w+n;if(!t)return '';
+  var id='aq'+(++anQid),H=104,T=8,v=[c,w,n],ly=[],k,cum=0;
+  for(k=0;k<3;k++)if(v[k]>0)ly.push(k);
+  var defs='<defs><clipPath id="'+id+'c"><circle cx="60" cy="60" r="52"/></clipPath>'+
+    [0,1,2].map(function(q){return '<linearGradient id="'+id+'g'+q+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+AN_LQ[q][0]+'"/><stop offset="1" stop-color="'+AN_LQ[q][1]+'"/></linearGradient>'}).join('')+
+    '<radialGradient id="'+id+'s" cx=".5" cy=".5" r=".5"><stop offset=".72" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#0a1428" stop-opacity=".22"/></radialGradient>'+
+    '<linearGradient id="'+id+'r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".5" stop-color="#9aa3b5" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity=".8"/></linearGradient></defs>';
+  /* layer surfaces: boundary after k layers from the bottom */
+  var bnd=[],top=ly[ly.length-1];
+  ly.forEach(function(q,m){cum+=v[q];bnd.push({q:q,y:T+H*(1-cum/t)})});
+  var liq='<rect x="0" y="0" width="120" height="120" fill="url(#'+id+'g'+top+')"/>';
+  for(k=ly.length-2;k>=0;k--){
+    var b=bnd[k],a=big?2.8:2.4;
+    liq+='<g class="an-w2"><path d="'+anWave(b.y,a*1.25,1.9)+'" fill="url(#'+id+'g'+b.q+')" opacity=".55"/></g>'+
+         '<g class="an-w1"><path d="'+anWave(b.y,a,0)+'" fill="url(#'+id+'g'+b.q+')"/><path d="'+anWave(b.y,a,0).split(' L180')[0]+'" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width=".9"/></g>';
+  }
+  /* the line between the layers also shows when there is only one layer: a thin level line is drawn for the right answers */
+  var ticks='';[.25,.5,.75].forEach(function(f){var y=T+H*(1-f),len=f===.5?9:5;ticks+='<line x1="'+(8+0)+'" y1="'+y+'" x2="'+(8+len)+'" y2="'+y+'" stroke="#fff" stroke-opacity=".75" stroke-width="1.2" stroke-linecap="round"/>'});
+  var bub=c>0?'<g class="an-bb"><circle cx="38" cy="100" r="2.2"/><circle cx="74" cy="104" r="1.6"/><circle cx="88" cy="98" r="2.6"/></g>':'';
+  return '<svg class="an-qc'+(big?' big':'')+'" viewBox="0 0 120 120" role="img" aria-label="'+fa(c)+' '+__('صحیح','right')+' · '+fa(w)+' '+__('غلط','wrong')+' · '+fa(n)+' '+__('نزده','blank')+'">'+defs+
+    '<ellipse cx="60" cy="112" rx="38" ry="5" fill="rgba(20,30,60,.13)"/><circle cx="60" cy="60" r="54" fill="rgba(150,160,180,.14)"/>'+
+    '<g clip-path="url(#'+id+'c)">'+liq+bub+'<circle cx="60" cy="60" r="52" fill="url(#'+id+'s)"/>'+ticks+'<ellipse cx="42" cy="27" rx="17" ry="6.5" fill="#fff" opacity=".16" transform="rotate(-28 42 27)"/></g>'+
+    '<circle cx="60" cy="60" r="53" fill="none" stroke="url(#'+id+'r)" stroke-width="1.8"/>'+
+    '<text class="an-lv" x="60" y="67" text-anchor="middle">'+rkPctTxt(c/t*100)+'٪</text><text class="an-ls" x="60" y="84" text-anchor="middle">'+__('صحیح','right')+'</text></svg>';
+}
+function anRadar(rows){
+  var n=rows.length;if(n<3)return '';
+  var cx=170,cy=150,R=78,f=function(z){return z.toFixed(1)},o='<svg class="an-svg" viewBox="0 0 340 300" role="img" aria-label="'+__('نمودار راداری درصد دروس','Radar chart of lesson percents')+'">';
+  var pt=function(i,v,k){var a=-Math.PI/2+i*2*Math.PI/n;return [cx+Math.cos(a)*R*v*(k||1),cy+Math.sin(a)*R*v*(k||1)]};
+  [.25,.5,.75,1].forEach(function(g){o+='<polygon class="an-gr" points="'+rows.map(function(r,i){var q=pt(i,g);return f(q[0])+','+f(q[1])}).join(' ')+'"/>'});
+  rows.forEach(function(r,i){var q=pt(i,1);o+='<line class="an-gr" x1="'+cx+'" y1="'+cy+'" x2="'+f(q[0])+'" y2="'+f(q[1])+'"/>'});
+  var pts=rows.map(function(r,i){return pt(i,Math.max(.03,Math.min(1,r.p/100)))});
+  o+='<polygon class="an-rd" points="'+pts.map(function(q){return f(q[0])+','+f(q[1])}).join(' ')+'"/>';
+  pts.forEach(function(q,i){o+='<circle class="an-dot" cx="'+f(q[0])+'" cy="'+f(q[1])+'" r="4.5" fill="'+rows[i].col+'"/>'});
+  rows.forEach(function(r,i){
+    var q=pt(i,1,1.2),anc=q[0]<cx-8?'end':q[0]>cx+8?'start':'middle';
+    o+='<text class="an-lb" x="'+f(q[0])+'" y="'+f(q[1]+4)+'" text-anchor="'+anc+'">'+esc(anSh(r.n,11))+'</text>';
+  });
+  return o+'</svg>';
+}
+function anBubble(rows){
+  if(!rows.length)return '';
+  var W=330,H=240,l=36,r=14,t=16,b=30,mc=Math.max.apply(null,rows.map(function(z){return z.c}))+1,mp=Math.max.apply(null,rows.map(function(z){return z.c*(100-Math.max(0,z.p))}))||1;
+  var X=function(p){return l+(W-l-r)*Math.max(0,Math.min(100,p))/100},Y=function(c){return H-b-(H-b-t)*c/mc};
+  var cs=rows.map(function(z){return z.c}).sort(function(a,z){return a-z}),med=cs[Math.floor(cs.length/2)];
+  var o='<svg class="an-svg" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+__('نمودار حبابی اولویت دروس','Bubble chart of lesson priority')+'">';
+  o+='<rect class="an-zone" x="'+l+'" y="'+t+'" width="'+(X(50)-l)+'" height="'+(Y(med-.5)-t)+'" rx="8"/>';
+  [0,25,50,75,100].forEach(function(v){o+='<line class="an-gr" x1="'+X(v)+'" x2="'+X(v)+'" y1="'+t+'" y2="'+(H-b)+'"/><text class="an-ax" x="'+X(v)+'" y="'+(H-b+14)+'" text-anchor="middle">'+fa(v)+'</text>'});
+  o+='<line class="an-gr" x1="'+l+'" x2="'+(W-r)+'" y1="'+(H-b)+'" y2="'+(H-b)+'"/>';
+  o+='<text class="an-ax" x="'+(W-r)+'" y="'+(H-4)+'" text-anchor="end">'+__('درصد','Percent')+'</text><text class="an-ax" x="'+(l+2)+'" y="'+(t-4)+'">'+__('ضریب','Coefficient')+'</text>';
+  var side={};rows.slice().sort(function(a,z){return a.p-z.p}).forEach(function(z,i){side[z.i]=i%2});
+  rows.slice().sort(function(a,z){return z.c*(100-Math.max(0,z.p))-a.c*(100-Math.max(0,a.p))}).forEach(function(z){
+    var pot=z.c*(100-Math.max(0,z.p)),rr=7+15*Math.sqrt(pot/mp),cx=X(z.p),cy=Y(z.c),ly=side[z.i]?cy-rr-4:cy+rr+11;
+    o+='<circle class="an-bb" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+rr.toFixed(1)+'" fill="'+z.col+'"/><text class="an-lb" x="'+cx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle">'+esc(anSh(z.n,11))+'</text>';
+  });
+  return o+'</svg>';
+}
+function anTrend(list){
+  var n=list.length,vals=list.map(function(e){return rkComp(e).p});
+  var W=330,H=170,l=30,r=14,t=16,b=30,mn=Math.min(0,Math.min.apply(null,vals)),mx=100;
+  var X=function(i){return l+14+(W-l-r-28)*(n===1?.5:i/(n-1))},Y=function(v){return t+(H-t-b)*(1-(v-mn)/(mx-mn))};
+  var o='<svg class="an-svg" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+__('روند درصد وزنی آزمون‌ها','Trend of the weighted percent')+'">';
+  [0,50,100].forEach(function(v){o+='<line class="an-gr" x1="'+l+'" x2="'+(W-r)+'" y1="'+Y(v)+'" y2="'+Y(v)+'"/><text class="an-ax" x="'+(l-4)+'" y="'+(Y(v)+3)+'" text-anchor="end">'+fa(v)+'</text>'});
+  var pts=vals.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1)}).join(' ');
+  if(n>1)o+='<polygon class="an-ar" points="'+X(0).toFixed(1)+','+Y(mn).toFixed(1)+' '+pts+' '+X(n-1).toFixed(1)+','+Y(mn).toFixed(1)+'"/><polyline class="an-ln" points="'+pts+'"/>';
+  vals.forEach(function(v,i){
+    o+='<circle class="an-pt" cx="'+X(i).toFixed(1)+'" cy="'+Y(v).toFixed(1)+'" r="4.5"/><text class="an-vv" x="'+X(i).toFixed(1)+'" y="'+(Y(v)-8).toFixed(1)+'" text-anchor="middle">'+rkPctTxt(v)+'</text><text class="an-ax" x="'+X(i).toFixed(1)+'" y="'+(H-10)+'" text-anchor="middle">'+esc(anSh(String(list[i].nm||'').replace(/^آزمون\s*/,'')||fa(i+1),7))+'</text>';
+  });
+  return o+'</svg>';
+}
+function anInsights(x,e,rows,S){
+  var out=[],cp=e.cp,P=cp.p,lv=anLvl(P),G=RK_G[x.g],tc=rows.reduce(function(a,z){return a+z.c},0);
+  out.push([lv[1],__('سطح کلی: ','Overall level: ')+lv[0],__('درصد وزنی تو '+rkPctTxt(P)+'٪ است. این عدد میانگینِ درصد دروس با احتساب ضریب هر درس است و رتبه از روی همین حساب می‌شود.','Your weighted percent is '+rkPctTxt(P)+'%. It is the average of your lesson percents counted with each lesson coefficient, and the rank is worked out from it.')]);
+  if(rows.length>1){
+    var s=rows.slice().sort(function(a,z){return z.p-a.p}),hi=s[0],lo=s[s.length-1],gap=hi.p-lo.p;
+    out.push(['m',__('قوی‌ترین و ضعیف‌ترین درس','Strongest and weakest lesson'),__('قوی‌ترین: '+hi.n+' ('+rkPctTxt(hi.p)+'٪) و ضعیف‌ترین: '+lo.n+' ('+rkPctTxt(lo.p)+'٪). فاصله‌ی این دو '+rkPctTxt(gap)+' درصد است'+(gap>=30?' و یعنی پیشرفت تو ناهمگون است.':'.'),'Strongest: '+hi.n+' ('+rkPctTxt(hi.p)+'%), weakest: '+lo.n+' ('+rkPctTxt(lo.p)+'%). The gap is '+rkPctTxt(gap)+' points'+(gap>=30?', so your progress is uneven.':'.'))]);
+    var mean=rows.reduce(function(a,z){return a+z.p},0)/rows.length,sd=Math.sqrt(rows.reduce(function(a,z){return a+(z.p-mean)*(z.p-mean)},0)/rows.length);
+    out.push([sd<10?'g':sd>20?'b':'m',__('تعادل بین دروس','Balance between lessons'),sd<10?__('درصدها به هم نزدیک‌اند و تعادل خوبی داری.','Your percents are close to each other, which is a good balance.'):sd>20?__('پراکندگی درصدها زیاد است ('+rkPctTxt(sd)+' واحد). بالا بردن درس ضعیف‌تر معمولاً ساده‌تر از بالاتر بردن درس قوی است.','Your percents are far apart ('+rkPctTxt(sd)+' points). Lifting the weakest lesson is usually easier than lifting the strongest.'):__('پراکندگی متوسط است ('+rkPctTxt(sd)+' واحد).','The spread is moderate ('+rkPctTxt(sd)+' points).')]);
+  }
+  var ls=rkLessons(x,e).sort(function(a,z){return z.pot-a.pot}),top=ls[0];
+  if(top&&top.pot>0)out.push(['b',__('اولویت اول: ','First priority: ')+top.n,__('ضریب '+fa(top.c)+' و '+rkPctTxt(Math.max(0,100-top.p))+' درصد باقی‌مانده، بیشترین فرصت را می‌سازد. ۱۰ درصد رشد در آن ≈ '+rkFmt(rkRound(top.gain))+' رتبه بهتر در کشور.','Coefficient '+top.c+' and '+rkPctTxt(Math.max(0,100-top.p))+'% still open make the biggest chance. +10 points here is worth about '+rkFmt(rkRound(top.gain))+' ranks nationally.')]);
+  var hv=rows.slice().sort(function(a,z){return z.c-a.c})[0];
+  if(hv&&rows.length>1&&hv.p<P-5)out.push(['b',__('درس پرضریب عقب است','A heavy lesson is behind'),__(hv.n+' بیشترین ضریب ('+fa(hv.c)+' از '+fa(tc)+') را دارد اما درصدش ('+rkPctTxt(hv.p)+'٪) پایین‌تر از میانگین وزنی‌ات است.',hv.n+' has the biggest coefficient ('+hv.c+' of '+tc+') but its percent ('+rkPctTxt(hv.p)+'%) is below your weighted average.')]);
+  if(x.mode==='cnt'){
+    var C=0,Wr=0,N=0,lost=0,cw=0;
+    rows.forEach(function(z){if(!z.cn)return;var t=z.cn.c+z.cn.w+z.cn.n;if(!t)return;C+=z.cn.c;Wr+=z.cn.w;N+=z.cn.n;lost+=z.c*(z.cn.w/(3*t)*100);cw+=z.c});
+    var tot=C+Wr+N,att=tot?(C+Wr)/tot*100:0,acc=(C+Wr)?C/(C+Wr)*100:0,ls2=cw?lost/cw:0;
+    if(tot){
+      out.push([acc>=80?'g':acc>=65?'m':'b',__('دقت پاسخ‌دهی','Answer accuracy'),__('از '+fa(C+Wr)+' سؤالی که زدی، '+fa(C)+' تا درست بود (دقت '+rkPctTxt(acc)+'٪) و '+rkPctTxt(att)+'٪ سؤال‌ها را زدی.','Of the '+(C+Wr)+' questions you answered, '+C+' were right ('+rkPctTxt(acc)+'% accuracy), and you answered '+rkPctTxt(att)+'% of all questions.')]);
+      if(Wr>0)out.push(['b',__('هزینه‌ی غلط‌ها','Cost of wrong answers'),__('نمره‌ی منفی غلط‌ها حدود '+rkPctTxt(ls2)+' درصد از درصد وزنی‌ات کم کرده است. '+(acc<65?'اول دقت را بالا ببر، بعد سرعت را.':att<70?'سؤال‌هایی که مطمئن نیستی را اگر دو گزینه را حذف کرده‌ای بزن، وگرنه رها کن.':'تعادل بین زدن و نزدن خوب است.'),'Negative marks from wrong answers took about '+rkPctTxt(ls2)+' points from your weighted percent. '+(acc<65?'Raise accuracy first, then speed.':att<70?'Answer when you have removed two options, otherwise skip.':'Your balance between answering and skipping is fine.'))]);
+    }
+  }
+  {
+    var same=S.list.filter(function(z){return z.g===x.g&&rkComp(z)&&(!S.saved||z.id!==x.id)}).sort(function(a,z){return z.ts-a.ts});
+    var prev=same.filter(function(z){return !S.saved||z.ts<x.ts})[0];
+    if(prev){
+      var pc=rkComp(prev).p,d=P-pc;
+      var pm={};anRows(prev).forEach(function(z){pm[z.n]=z.p});
+      var best=null,worst=null;rows.forEach(function(z){if(pm[z.n]===undefined)return;var dz=z.p-pm[z.n];if(!best||dz>best.d)best={n:z.n,d:dz};if(!worst||dz<worst.d)worst={n:z.n,d:dz}});
+      out.push([d>=2?'g':d<=-2?'b':'m',__('نسبت به آزمون قبلی','Compared with the previous exam'),__((d>=0?'+':'−')+rkPctTxt(Math.abs(d))+' درصد وزنی ('+esc(prev.nm||'آزمون قبل')+')'+(best&&best.d>0?'. بیشترین پیشرفت: '+best.n+' (+'+rkPctTxt(best.d)+')':'')+(worst&&worst.d<0?'. بیشترین افت: '+worst.n+' ('+'−'+rkPctTxt(Math.abs(worst.d))+')':'')+'.',(d>=0?'+':'−')+rkPctTxt(Math.abs(d))+' weighted points ('+esc(prev.nm||'previous exam')+')'+(best&&best.d>0?'. Biggest gain: '+best.n+' (+'+rkPctTxt(best.d)+')':'')+(worst&&worst.d<0?'. Biggest drop: '+worst.n+' (−'+rkPctTxt(Math.abs(worst.d))+')':'')+'.')]);
+    }
+  }
+  if(cp.cov<1)out.push(['m',__('همه‌ی دروس وارد نشده','Not every lesson entered'),__(fa(G.L.length-rows.length)+' درس از '+fa(G.L.length)+' درس وارد نشده و تحلیل و رتبه با '+fa(Math.round(cp.cov*100))+'٪ از ضریب‌ها حساب شده است.',(G.L.length-rows.length)+' of '+G.L.length+' lessons are missing, so the analysis and rank use '+Math.round(cp.cov*100)+'% of the coefficients.')]);
+  return out;
+}
+function anHTML(){
+  var D=rkD(),S=anSrc(),x=S.x;
+  var back='<button type="button" class="chip" data-act="rksec" data-v="est">'+__('رفتن به بخش تخمین','Go to Estimate')+'</button>';
+  if(!x)return '<section class="glass rk-card rk-empty"><b>'+__('هنوز آزمونی برای تحلیل نیست','No exam to analyse yet')+'</b><p>'+__('درصد دروس یک آزمون را در بخش «تخمین» وارد کن یا یک آزمون را ذخیره کن؛ تحلیل خودکار ساخته می‌شود.','Enter the lesson percents of an exam in “Estimate” or save one; the analysis is built automatically.')+'</p><div class="rk-btns" style="justify-content:center">'+back+'</div></section>';
+  var e=S.saved?rkEst(x,[]):rkEst(x,D.exams),rows=anRows(x),G=RK_G[x.g],sel=S.saved?x.id:'cur',P=e.cp.p;
+  var items=[];if(S.hasCur)items.push(['cur',__('آزمون در حال ورود','Exam being entered')]);
+  S.list.slice(0,6).forEach(function(z){items.push([z.id,anSh(z.nm||__('بدون نام','Unnamed'),14)])});
+  var sw=items.length>1?'<div class="an-sw">'+rkChips('rkan',items,sel)+'</div>':'';
+  var lv=anLvl(P),qlbl=x.sq?RK_SQ[x.sq].n:RK_QS[x.rg].n;
+  /* 1 - header with the weighted-percent ring */
+  var nm=S.saved?(x.nm||__('آزمون بدون نام','Unnamed exam')):(x.ty==='real'?rkAutoNm(x):(x.nm||__('آزمون در حال ورود','Exam being entered')));
+  var head='<section class="glass rk-card an-hd"><div class="an-hl"><h3 class="rk-h">'+esc(nm)+'</h3><small>'+G.n+' · '+(S.saved?esc(F.long.format(new Date(x.ts))):fa(x.yr))+' · '+(x.mode==='cnt'?__('تعداد پاسخ','answer counts'):__('درصد','percents'))+'</small>'+
+    '<div class="an-kp"><div><small>'+__('رتبه‌ی کشوری','National rank')+'</small><b>'+rkRange(e.nat.o,e.nat.p)+'</b></div><div><small>'+__('رتبه در ','Rank in ')+esc(qlbl)+'</small><b>'+rkRange(e.q.o,e.q.p)+'</b></div></div>'+
+    '<div class="an-tgs"><span class="rk-tag '+lv[1]+'">'+lv[0]+'</span><span class="rk-tag m">'+__('اطمینان ','Confidence ')+fa(e.conf)+'٪</span><span class="rk-tag m">'+fa(e.cp.n)+' '+__('از','of')+' '+fa(G.L.length)+' '+__('درس','lessons')+'</span></div></div>'+anRing(P,__('درصد وزنی','weighted'))+'</section>';
+  /* 2 - insights */
+  var ins=anInsights(x,e,rows,S).map(function(z){return '<div class="an-in"><i class="an-d '+z[0]+'"></i><div><b>'+z[1]+'</b><p>'+z[2]+'</p></div></div>'}).join('');
+  var insC='<section class="glass rk-card"><h3 class="rk-h">'+__('تحلیل هوشمند','Smart analysis')+'</h3>'+ins+'</section>';
+  /* 3 - radar + per lesson bars */
+  var bars=rows.map(function(z){return '<div class="an-bl"><span class="an-nm"><u style="background:'+z.col+'"></u>'+esc(z.n)+'</span><div class="rk-bar"><i style="width:'+Math.max(2,Math.min(100,z.p))+'%;background:'+z.col+'"></i></div><b>'+rkPctTxt(z.p)+'٪</b></div>'}).join('');
+  var radar='<section class="glass rk-card"><h3 class="rk-h">'+__('نقشه‌ی دروس','Lesson map')+'</h3>'+anRadar(rows)+'<div class="an-bars">'+bars+'</div><p class="hint">'+__('هرچه رأس‌های رادار از مرکز دورتر باشد، درصد آن درس بالاتر است. درصد منفی روی مرکز نشان داده می‌شود.','The farther a corner is from the centre, the higher that lesson percent. Negative percents sit at the centre.')+'</p></section>';
+  /* 4 - what the exam asks vs what you earned (two rings) */
+  var tc=rows.reduce(function(a,z){return a+z.c},0),te=rows.reduce(function(a,z){return a+z.c*Math.max(0,z.p)},0);
+  var pa=rows.map(function(z){return {f:z.c/tc,col:z.col}}),pb=te>0?rows.map(function(z){return {f:z.c*Math.max(0,z.p)/te,col:z.col}}):[];
+  var leg=rows.map(function(z){var a=z.c/tc*100,b=te>0?z.c*Math.max(0,z.p)/te*100:0,df=b-a;return '<div class="an-lg"><span class="an-nm"><u style="background:'+z.col+'"></u>'+esc(z.n)+'</span><small>'+rkPctTxt(a)+'٪</small><small>'+rkPctTxt(b)+'٪</small><em class="'+(df>=3?'g':df<=-3?'b':'')+'">'+(df>=0?'+':'−')+rkPctTxt(Math.abs(df))+'</em></div>'}).join('');
+  var dn='<section class="glass rk-card"><h3 class="rk-h">'+__('آزمون چه می‌خواهد، تو چه گرفته‌ای','What the exam asks vs what you earned')+'</h3><svg class="an-svg an-dn" viewBox="0 0 160 160" role="img" aria-label="'+__('دو حلقه‌ی سهم ضریب و سهم نمره','Two rings: coefficient share and earned share')+'">'+anDonut(80,66,13,pa)+anDonut(80,44,13,pb)+'<text class="an-rs" x="80" y="78" text-anchor="middle">'+__('بیرون: ضریب','outer: weight')+'</text><text class="an-rs" x="80" y="94" text-anchor="middle">'+__('درون: نمره','inner: earned')+'</text></svg>'+
+    '<div class="an-lg an-lh"><span></span><small>'+__('سهم ضریب','Weight')+'</small><small>'+__('سهم نمره','Earned')+'</small><em></em></div>'+leg+'<p class="hint">'+__('اگر سهم نمره‌ی یک درس از سهم ضریبش کمتر باشد (عدد قرمز)، آن درس تراز کلی‌ات را پایین می‌کشد.','When a lesson earns a smaller share than its weight (red number), it is pulling your overall score down.')+'</p></section>';
+  /* 5 - bubble priority chart + top list */
+  var pr=rkLessons(x,e).sort(function(a,z){return z.pot-a.pot}).slice(0,4),mxg=1;pr.forEach(function(z){if(z.gain>mxg)mxg=z.gain});
+  var prl=pr.map(function(z,i){return '<div class="an-pr"><b>'+fa(i+1)+'</b><div><span>'+esc(z.n)+' <small>'+__('ضریب ','coef ')+fa(z.c)+' · '+rkPctTxt(z.p)+'٪</small></span><div class="rk-bar"><i style="width:'+Math.max(4,Math.round(z.gain/mxg*100))+'%"></i></div><small>'+__('۱۰ درصد بیشتر ≈ ','+10 points ≈ ')+rkFmt(rkRound(z.gain))+__(' رتبه بهتر',' ranks better')+'</small></div></div>'}).join('');
+  var sum=rows.reduce(function(a,z){return a+z.c*(100-Math.max(0,z.p))},0),tm=rows.slice().sort(function(a,z){return z.c*(100-Math.max(0,z.p))-a.c*(100-Math.max(0,a.p))}).map(function(z){var s=sum>0?z.c*(100-Math.max(0,z.p))/sum*100:0;return '<div class="an-bl"><span class="an-nm"><u style="background:'+z.col+'"></u>'+esc(z.n)+'</span><div class="rk-bar"><i style="width:'+Math.max(2,s)+'%;background:'+z.col+'"></i></div><b>'+rkPctTxt(s)+'٪</b></div>'}).join('');
+  var bub='<section class="glass rk-card"><h3 class="rk-h">'+__('اولویت مطالعه','Study priority')+'</h3>'+anBubble(rows)+'<p class="hint">'+__('هر حباب یک درس است؛ هرچه بزرگ‌تر باشد فرصت بهبودش (ضریب × درصد باقی‌مانده) بیشتر است. ناحیه‌ی رنگی بالا-چپ یعنی ضریب بالا و درصد پایین: اول از همان‌جا شروع کن.','Each bubble is a lesson; the bigger, the more room to improve (coefficient × percent left). The shaded top-left area is high coefficient with a low percent: start there.')+'</p>'+prl+'<h4 class="an-h4">'+__('سهم پیشنهادی زمان مطالعه','Suggested share of study time')+'</h4>'+tm+'<p class="hint">'+__('این سهم‌ها یک پیشنهاد قاعده‌محور است: هرچه ضریب بالاتر و درصد پایین‌تر، زمان بیشتر.','These shares are a rule-based suggestion: the higher the coefficient and the lower the percent, the more time.')+'</p></section>';
+  /* 6 - answer quality (count mode only) */
+  var cnt='';
+  if(x.mode==='cnt'){
+    var qr=rows.filter(function(z){return z.cn&&(z.cn.c+z.cn.w+z.cn.n)>0}),all={c:0,w:0,n:0};
+    var cr=qr.map(function(z){
+      var t=z.cn.c+z.cn.w+z.cn.n,acc=(z.cn.c+z.cn.w)?z.cn.c/(z.cn.c+z.cn.w)*100:0;
+      all.c+=z.cn.c;all.w+=z.cn.w;all.n+=z.cn.n;
+      return '<div class="an-qi">'+anQCircle(z.cn.c,z.cn.w,z.cn.n)+'<b>'+esc(z.n)+'</b><small>'+__('دقت ','accuracy ')+rkPctTxt(acc)+'٪ · '+__('زده‌شده ','answered ')+rkPctTxt((z.cn.c+z.cn.w)/t*100)+'٪</small><small>'+fa(z.cn.c)+' '+__('صحیح','right')+' · '+fa(z.cn.w)+' '+__('غلط','wrong')+' · '+fa(z.cn.n)+' '+__('نزده','blank')+'</small></div>';
+    }).join('');
+    if(cr){
+      var tot='';
+      if(qr.length>1){var ta=all.c+all.w?all.c/(all.c+all.w)*100:0;tot='<div class="an-qi an-qt">'+anQCircle(all.c,all.w,all.n,1)+'<b>'+__('کل آزمون','Whole exam')+'</b><small>'+__('دقت ','accuracy ')+rkPctTxt(ta)+'٪</small><small>'+fa(all.c)+' '+__('صحیح','right')+' · '+fa(all.w)+' '+__('غلط','wrong')+' · '+fa(all.n)+' '+__('نزده','blank')+'</small></div>'}
+      cnt='<section class="glass rk-card"><h3 class="rk-h">'+__('کیفیت پاسخ‌دهی','Answer quality')+'</h3>'+tot+'<div class="an-qg">'+cr+'</div><div class="an-key"><span><i class="g"></i>'+__('صحیح','Right')+'</span><span><i class="b"></i>'+__('غلط','Wrong')+'</span><span><i class="n"></i>'+__('نزده','Blank')+'</span></div></section>';
+    }
+  }
+  /* 7 - trend over the saved exams of the same group */
+  var tl=S.list.filter(function(z){return z.g===x.g&&rkComp(z)}).sort(function(a,z){return a.ts-z.ts}).slice(-8),tr='';
+  if(tl.length>=2){
+    var dl=rkComp(tl[tl.length-1]).p-rkComp(tl[0]).p;
+    tr='<section class="glass chart"><div class="chart-h"><h3>'+__('روند پیشرفت','Progress trend')+'</h3></div>'+anTrend(tl)+'<p class="hint">'+__('از اولین تا آخرین آزمون: ','From the first to the last exam: ')+(dl>=0?'+':'−')+rkPctTxt(Math.abs(dl))+' '+__('درصد وزنی','weighted points')+'</p></section>';
+  }else tr='<section class="glass rk-card rk-empty"><b>'+__('روند پیشرفت','Progress trend')+'</b><p>'+__('با ذخیره‌ی دست‌کم دو آزمون از این گروه، نمودار روند و مقایسه‌ی دروس اینجا ساخته می‌شود.','Save at least two exams of this group and the trend chart and lesson comparison appear here.')+'</p></section>';
+  /* 8 - books of every lesson + exam shape */
+  var bk=AN_BK[x.g]||[],ex=AN_EX[x.g];
+  var bl=G.L.map(function(l,i){
+    var z=rows.filter(function(r){return r.i===i})[0],tag=z?'<span class="rk-tag '+(z.p>=P+8?'g':z.p<=P-8?'b':'m')+'">'+rkPctTxt(z.p)+'٪</span>':'<span class="rk-tag m">—</span>';
+    return '<details class="an-bk" open><summary><u style="background:'+AN_COL[i%AN_COL.length]+'"></u><b>'+esc(l[0])+'</b><small>'+__('ضریب ','coef ')+fa(l[1])+'</small>'+tag+'</summary><div class="rk-uc">'+(bk[i]||[]).map(function(n){return '<em>'+esc(n)+'</em>'}).join('')+'</div></details>';
+  }).join('');
+  var shape=ex?'<div class="an-ex"><b>'+fa(ex.q)+' '+__('سؤال','questions')+' · '+fa(ex.m)+' '+__('دقیقه','minutes')+'</b>'+(EN?ex.e:ex.t).map(function(s){return '<small>'+esc(s)+'</small>'}).join('')+'</div>':'';
+  var books='<section class="glass rk-card"><h3 class="rk-h">'+__('دروس اختصاصی و کتاب‌های منبع','Specialised lessons and source books')+'</h3>'+shape+bl+'<p class="hint">'+__('سؤال‌های کنکور فقط از کتاب‌های درسی رسمی طرح می‌شود. ساختار دفترچه‌ی تجربی، ریاضی، انسانی و هنر از اعلام سازمان سنجش برای کنکور ۱۴۰۵ است'+(ex&&ex.g?'؛ ولی تعداد سؤال و زمان زبان از روی یک اینفوگرافیک برآورد شده و قطعی نیست':'')+'. فقط فهرست کتاب‌های تجربی با منبع رسمی تطبیق داده شده؛ فهرست بقیه‌ی گروه‌ها از ساختار کتاب‌های درسی وزارت آموزش‌وپرورش است، پس قبل از اتکا با اطلاعیه‌ی منابع همان سال چک کن. ضریب هر درس در تجربی و ریاضی رسمی است؛ ضریب‌های انسانی، هنر و زبان تقریبی‌اند.','Konkur questions come only from the official school books. The booklet shape of the experimental, maths, humanities and art groups is from the Sanjesh announcement for the 1405 exam'+(ex&&ex.g?', but the question count and time of the language exam are estimated from an infographic and are not final':'')+'. Only the experimental book list was checked against an official source; the other groups follow the structure of the Ministry of Education textbooks, so check the yearly Sanjesh notice before relying on them. Lesson coefficients are official for experimental and maths; the humanities, art and language coefficients are approximate.')+'</p></section>';
+  return sw+head+insC+radar+dn+bub+cnt+tr+books+'<p class="rk-disc">'+__('این تحلیل با همان منحنی تقریبی درصد به رتبه‌ی بخش تخمین ساخته می‌شود و جای رتبه و کارنامه‌ی رسمی سازمان سنجش را نمی‌گیرد.','This analysis uses the same approximate percent-to-rank curve as the estimate and does not replace the official Sanjesh rank and report.')+'</p>';
+}
+
 /* ---------- textbooks = PDF library: list, add, rename, delete ---------- */
 /* ---------- PDF engine for the browser (no Android plugin): same calls as the native PdfViewer plugin ----------
    pdf.js is downloaded once from a CDN; the PDF files are kept in IndexedDB ('pw_<id>'). In the APK the native plugin is used instead. */
@@ -15799,7 +17270,7 @@ var pdfv={sdOn:false,sdTok:0,sdBusy:0,sdQ:[],thC:{},sdIO:null,sdDirty:0,sdT:{},k
 var PV_Z=[1,1.5,2,3,4,6,8],PV_ZMAX=8;
 /* page templates (paper patterns). Drawn as a full-page SVG in page units (1000 wide) so they stay sharp at any zoom and export identically. */
 var INK_TPL=[['blank','ساده','Blank'],['lined','خط‌دار','Lined'],['lined2','خط‌دار ریز','Narrow lined'],['grid','شطرنجی','Grid'],['grid2','شطرنجی ریز','Small grid'],['dots','نقطه‌ای','Dotted'],['dots2','نقطه‌ای ریز','Fine dots'],['graph','میلی‌متری','Graph'],['cornell','کرنل','Cornell']];
-var INK_PAPER=['#ffffff','#fff6dd','#eef1f6','#1c2030'];
+var INK_PAPER=['#ffffff','#fff6dd','#eef1f6','#000000']; /* the dark paper is pure black (older notes that used the bluish #1c2030 are turned black when opened) */
 var INK_COLS=['#111827','#0a7aff','#a259f2','#22b45b','#facc15','#f08c00','#e5322a'];
 var INK_PORT=1.4142,INK_LAND=0.7071;
 function inkDark(h){var m=/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h||'');if(!m)return false;return (0.299*parseInt(m[1],16)+0.587*parseInt(m[2],16)+0.114*parseInt(m[3],16))<128}
@@ -15848,7 +17319,7 @@ function pvBarHTML(){
     '<div class="ink-bar ink-top">'+tb('close','chev',__("بستن","Close"))+'<span class="ink-ti"><img src="img/app-icon.webp" alt=""><span><b data-pv="ren"></b><small id="pvPg"></small></span></span>'+
       tb('t-hand','read',__("حالت خواندن (بدون نوشتن)","Reading mode"),pdfv.tool==='hand')+(note?'':tb('bm','bm',__("نشانک","Bookmark"),pvBmOn()))+tb('pgside','pages',__("پنل صفحه‌ها","Page panel"),pdfv.sdOn)+tb('menu','dots',__("بیشتر","More"))+'</div>'+
     '<div class="ink-bar ink-tl">'+
-      tb('t-text','text',__("متن","Text"),false)+tb('t-pen','pen',__("قلم","Pen"),false)+tb('t-hl','hl',__("ماژیک","Highlighter"),false)+tb('t-er','eraser',__("پاک‌کن","Eraser"),false)+tb('t-lasso','lasso',__("انتخاب (لاسو)","Lasso"),false)+'<button type="button" class="ink-ib ink-ar'+(shOn()?'':' off')+'" data-pv="ario" aria-label="'+__("هایلایت هوشمند آریو","Ario smart highlight")+'"><img src="img/ario-ghost.webp" alt="" draggable="false"></button>'+tb('ruler','ruler',__("خط‌کش","Ruler"),false)+
+      tb('t-text','text',__("متن","Text"),false)+tb('t-pen','pen',__("قلم","Pen"),false)+tb('t-hl','hl',__("ماژیک","Highlighter"),false)+tb('t-er','eraser',__("پاک‌کن","Eraser"),false)+tb('t-lasso','lasso',__("انتخاب (لاسو)","Lasso"),false)+tb('t-axis','axis',__("محور (خط پیکان‌دار)","Axis (arrow line)"),false)+tb('t-line','line',__("خط راست","Straight line"),false)+'<button type="button" class="ink-ib ink-ar'+(shOn()?'':' off')+'" data-pv="ario" aria-label="'+__("هایلایت هوشمند آریو","Ario smart highlight")+'"><img src="img/ario-ghost.webp" alt="" draggable="false"></button>'+tb('ruler','ruler',__("خط‌کش","Ruler"),false)+
       '<i class="ink-sp"></i>'+
       '<button type="button" class="ink-dot cur" data-pv="colorpop" id="pvDot1" aria-label="'+__("رنگ","Color")+'"></button><button type="button" class="ink-dot" data-pv="swapcol" id="pvDot2" aria-label="'+__("رنگ قبلی","Previous color")+'"></button>'+
       '<button type="button" class="ink-wb" data-pv="tools" aria-label="'+__("ضخامت","Thickness")+'"><i id="pvWb"></i></button>'+
@@ -16504,6 +17975,14 @@ function inkSegD(p,a,b){
 function inkHit(it,pt,r,i){
   if(it.t==='p'||it.t==='h'){
     var p=dPts(it),j,rr=r+(+it.w||4)/2;
+    if(String(it.d).indexOf('M',1)>0){
+      return String(it.d).split('M').some(function(sp){
+        var m=sp.match(/-?\d+(?:\.\d+)?/g)||[],q=[],z;
+        for(z=0;z+1<m.length;z+=2)q.push([+m[z],+m[z+1]]);
+        for(z=0;z<q.length-1;z++)if(inkSegD(pt,q[z],q[z+1])<=rr)return true;
+        return false;
+      });
+    }
     if(p.length===1)return Math.hypot(pt[0]-p[0][0],pt[1]-p[0][1])<=rr;
     for(j=0;j<p.length-1;j++)if(inkSegD(pt,p[j],p[j+1])<=rr)return true;
     return false;
@@ -16857,6 +18336,12 @@ function anDown(e){
     p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('class','ls');sv.appendChild(p);
     pdfv.drw={mode:'ls',sv:sv,i:i,p:p,pts:[pt],id:e.pointerId};
     p.setAttribute('d',anPath(pdfv.drw.pts));
+  }else if(t==='axis'||t==='line'){
+    inkSelClear();
+    p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('class','pn');p.setAttribute('stroke',pdfv.col);p.style.strokeWidth=pdfv.pw.p;
+    sv.appendChild(p);
+    pdfv.drw={mode:'ax',sv:sv,i:i,p:p,p0:pt,p1:pt,id:e.pointerId,c:pdfv.col,w:pdfv.pw.p,m:t};
   }else if(t==='text'){
     pdfv.drw={mode:'tx',sv:sv,i:i,id:e.pointerId,pt:pt,cx:e.clientX,cy:e.clientY,moved:false};
   }
@@ -16880,7 +18365,8 @@ function anMove(e){
       if(Math.abs(pt[0]-l[0])+Math.abs(pt[1]-l[1])<2)continue;
       d.pts.push(pt);
       if(d.mode==='dr'){clearTimeout(d.ht);if(inkSnapOn())d.ht=setTimeout(function(){inkSnapNow(d)},480)}
-    }else if(d.mode==='er')anEraseAt(d,pt);
+    }else if(d.mode==='ax'){d.p1=pt;d.p.setAttribute('d',inkAxisD(d.p0,d.p1,d.m,d.i,d.w))}
+    else if(d.mode==='er')anEraseAt(d,pt);
     else if(d.mode==='mv'){d.dx=inkR(pt[0]-d.p0[0]);d.dy=inkR(pt[1]-d.p0[1]);inkSelPreview(d)}
     else if(d.mode==='rot'){
       var an=Math.atan2(pt[1]-d.c[1],pt[0]-d.c[0])*180/Math.PI,tot=d.a0+an-d.a1,sn=Math.round(tot/15)*15;
@@ -16893,7 +18379,7 @@ function anMove(e){
       d.k=den>1?Math.max(0.1,Math.min(10,((pt[0]-b[0])+(pt[1]-b[1]))/den)):1;inkSelPreview(d);
     }
   }
-  if(d.p)d.p.setAttribute('d',d.mode==='dr'&&inkVK(d.k)&&d.pts.length>1?inkVarPoly(d.pts,d.k,d.w):anPath(d.pts));
+  if(d.p&&d.mode!=='ax')d.p.setAttribute('d',d.mode==='dr'&&inkVK(d.k)&&d.pts.length>1?inkVarPoly(d.pts,d.k,d.w):anPath(d.pts));
 }
 function anUp(e){
   if(pdfv.tsP)tsPUp(e);
@@ -16911,6 +18397,9 @@ function anUp(e){
       if(inkTidyOn())inkTidyQueue(d.i,nit);
       else{pdfv.wn=(pdfv.wn||0)+1;if(pdfv.wn===6)inkTidyHint()}
     }else if(pdfv.tq)inkTidyQueue(d.i,null);
+  }else if(d.mode==='ax'){
+    d.p.remove();
+    inkAdd(d.i,{t:'p',c:d.c,w:d.w,d:inkAxisD(d.p0,d.p1,d.m,d.i,d.w)});
   }else if(d.mode==='er'){
     if(d.hit.length)inkDel(d.i,d.hit);
     if(d.ch)anAreaEnd(d);
@@ -16958,6 +18447,19 @@ function anUp(e){
     for(k2=l2.length-1;k2>=0;k2--)if(l2[k2].t==='x'&&inkHit(l2[k2],d.pt,4,d.i)){hit=l2[k2];break}
     if(hit)inkTextEdit(d.i,hit);else inkTextNew(d.i,d.pt[0],d.pt[1]);
   }
+}
+/* axis tool: a straight line with an arrow head at the end, exactly as long as the drag (a tap makes a short one); tool 'line' is the same without the arrow head.
+   A line that is almost horizontal or vertical snaps straight. Saved as a normal stroke, so colour, thickness, move, resize (lasso), eraser and undo work. */
+function inkAxisD(a,b,m,i,w){
+  var R=inkR,x0=a[0],y0=a[1],x1=b[0],y1=b[1],dx=x1-x0,dy=y1-y0,L=Math.hypot(dx,dy),ang,hl,sp;
+  if(L<14){x1=x0+220;y1=y0;dx=220;dy=0;L=220}
+  ang=Math.atan2(dy,dx);
+  var deg=ang*180/Math.PI,sn=Math.round(deg/90)*90;
+  if(Math.abs(deg-sn)<5){ang=sn*Math.PI/180;x1=x0+Math.cos(ang)*L;y1=y0+Math.sin(ang)*L}
+  hl=Math.max(10,Math.min(L*0.4,Math.max(14,(+w||4)*3.2)));sp=0.45;
+  if(m==='line')return 'M'+R(x0)+' '+R(y0)+' L'+R(x1)+' '+R(y1);
+  return 'M'+R(x0)+' '+R(y0)+' L'+R(x1)+' '+R(y1)+
+    ' M'+R(x1-Math.cos(ang-sp)*hl)+' '+R(y1-Math.sin(ang-sp)*hl)+' L'+R(x1)+' '+R(y1)+' L'+R(x1-Math.cos(ang+sp)*hl)+' '+R(y1-Math.sin(ang+sp)*hl);
 }
 function pvMvStart(){
   if(!pdfv.el||!pdfv.sel)return;
@@ -17011,6 +18513,7 @@ function anAreaCut(d,c,r){
   for(k=0;k<l.length;k++){
     it=l[k];
     if((it.t!=='p'&&it.t!=='h')||it.lk||(pdfv.eh&&it.t!=='h'))continue;
+    if(String(it.d).indexOf('M',1)>0){if(inkHit(it,c,r,d.i)&&d.hit&&d.hit.indexOf(it)<0){d.hit.push(it);var g0=inkG(d.i,k);if(g0)g0.style.display='none'}continue}
     if(!inkHit(it,c,r,d.i))continue;
     rr=r+(+it.w||4)/2;
     P=dPts(it);P=P.length>3?inkVarPts(P):P;
@@ -17334,7 +18837,7 @@ async function inkInsertFromLib(id,off){
   }catch(e){toast('افزودن عکس ممکن نشد',null,null,'warn')}
 }
 /* ---------- toolbar actions, panels ---------- */
-var PV_TOOLS=['hand','pen','hl','er','lasso','text'];
+var PV_TOOLS=['hand','pen','hl','er','lasso','text','axis','line'];
 /* quick switch for the two erasers: two round buttons float at the left while the eraser tool is active
    (checkerboard = area eraser: only the part you drag over disappears, as if painted with the page colour; eraser = whole-stroke eraser) */
 function pvEqs(on){
@@ -17376,9 +18879,22 @@ function pvPopRender(){
   if(!n){box.innerHTML='';return}
   var side={tools:'s',color:'s',menu:'e',insert:'e',tpl:'e',set:'e',save:'e',lib:'e',pgmenu:'b',zoommenu:'b',sdmenu:'l',penbox:'s',erbox:'s',ario:'s',hls:'e',night:'e',voice:'e',tabs:'e'}[n]||'e';
   box.innerHTML='<div class="ink-pbg"></div><div class="ink-pop '+side+'" role="menu">'+pvPopHTML(n)+'</div>';
+  if(n==='sdmenu')pvPopAnchor(box);
   if(n==='color')pvSVDraw();
   if(n==='lib')pvLibFill();
   pvWPaint();
+}
+/* the page-thumbnail ⋮ menu opens right under its own button (above it when there is no room below) and grows out of it with a soft animation */
+function pvPopAnchor(box){
+  var b=pdfv.sdBtn,pp=box.querySelector('.ink-pop');
+  if(!b||!b.isConnected||!pp)return;
+  var op=pp.offsetParent||box,or=op.getBoundingClientRect(),br=b.getBoundingClientRect(),W=pp.offsetWidth,H=pp.offsetHeight,
+    left=Math.max(8,Math.min(br.left-or.left-8,or.width-W-8)),top=br.bottom-or.top+6,up=top+H>or.height-70;
+  if(up)top=br.top-or.top-6-H;
+  top=Math.max(8,top);
+  pp.style.left=left+'px';pp.style.right='auto';pp.style.top=top+'px';pp.style.bottom='auto';
+  pp.style.transformOrigin=Math.round(br.left+br.width/2-or.left-left)+'px '+(up?'100%':'0');
+  pp.style.animation='inkPopA .28s cubic-bezier(.2,.8,.2,1) both';
 }
 function pvPopHTML(n){
   var note=pdfv.kind==='note',pg=note?pdfv.doc.pages[Math.max(0,Math.min(pdfv.n-1,pvCur()-1))]:null,h='',i;
@@ -17628,7 +19144,7 @@ function pvAct(a,el){
   else if(a==='pgcopy'){pvPopSet('');ntCopyPage(pvCur()-1)}
   else if(a==='pgside')pvSideToggle();
   else if(a==='sdgo'){pvGoTo(+el.dataset.p)}
-  else if(a==='sdmenu')pvPopSet('sdmenu');
+  else if(a==='sdmenu'){pdfv.sdBtn=el;pvPopSet('sdmenu')}
   else if(a==='pgaddend'){ntAddPage(pdfv.n-1)}
   else if(a==='pgup'){pvPopSet('');ntMovePage(pvCur()-1,pvCur()-2)}
   else if(a==='pgdn'){pvPopSet('');ntMovePage(pvCur()-1,pvCur())}
@@ -17738,7 +19254,7 @@ function ntClean(d){
   var ok=INK_TPL.map(function(t){return t[0]});
   var pages=d.pages.slice(0,300).map(function(p){
     p=p&&typeof p==='object'?p:{};
-    var o={t:ok.indexOf(p.t)>=0?p.t:'grid',r:(+p.r>=0.5&&+p.r<=2)?+p.r:INK_PORT,p:/^#[0-9a-fA-F]{6}$/.test(p.p||'')?p.p:'#ffffff',s:Array.isArray(p.s)?p.s.slice(0,6000):[]};
+    var o={t:ok.indexOf(p.t)>=0?p.t:'grid',r:(+p.r>=0.5&&+p.r<=2)?+p.r:INK_PORT,p:/^#[0-9a-fA-F]{6}$/.test(p.p||'')?(p.p.toLowerCase()==='#1c2030'?'#000000':p.p):'#ffffff',s:Array.isArray(p.s)?p.s.slice(0,6000):[]};
     if(typeof p.ox==='string'&&p.ox){o.ox=p.ox.slice(0,3000);o.oh=String(p.oh||'').slice(0,24)}
     return o;
   });
@@ -18625,6 +20141,7 @@ actions.lsOpen=function(){ui.tab='lists';ui.cat=null;ui.filter='all';ui.lsec='ca
 actions.rkBack=subBack;
 actions.rkOpen=function(){subPush();ui.tab='rk';ui.rksec='est';render('enter');window.scrollTo(0,0)};
 actions.rksec=function(d){ui.rksec=d.v;render('swap');window.scrollTo(0,0)};
+actions.rkan=function(d){ui.rkan=d.v;render('swap')};
 actions.rkg=function(d){rkD().cur.g=d.v;persist();render('swap')};
 actions.rkrg=function(d){rkD().cur.rg=d.v;persist();render('swap')};
 actions.rkdf=function(d){rkD().cur.df=d.v;persist();render('swap')};
@@ -18668,6 +20185,7 @@ $('#view').addEventListener('input',function(e){
     var n=rkNum(t.value,true),c=x.cn[l]||(x.cn[l]={c:0,w:0,n:0});c[t.dataset.f]=n===null?0:Math.max(0,Math.min(300,n));
     var pv=$('#view').querySelector('[data-pv="'+(window.CSS&&CSS.escape?CSS.escape(l):l)+'"]'),p=rkPct(x,l);if(pv)pv.textContent=p===null?'':rkPctTxt(p)+'٪';
   }
+  else if(k==='gpa'){var gv=rkNum(t.value),gD=rkD();if(!gD.gpa)gD.gpa={a:null,b:null};gD.gpa[t.dataset.f==='a'?'a':'b']=gv===null?null:Math.max(0,Math.min(20,gv))}
   else if(k==='nm')x.nm=t.value.replace(/[<>&"']/g,'').slice(0,30);
   else if(k==='yr'){x.yr=+t.value;if(x.ty==='real'){rkNmFix(x);persist();render('swap');return}}
   else if(k==='sy')x.sy=t.value==='old'?'old':'new';
@@ -18710,9 +20228,12 @@ actions.rkSet=function(){
   var D=rkD();
   var gs=Object.keys(RK_G).map(function(g){return '<label class="rk-sf"><span>'+RK_G[g].n+'</span><input class="field" type="text" inputmode="numeric" data-sn="'+g+'" value="'+fa(rkCfgN(g))+'" aria-label="تعداد داوطلبان '+RK_G[g].n+'"></label>'}).join('');
   var qs=Object.keys(RK_QS).map(function(r){return '<label class="rk-sf"><span>'+RK_QS[r].n+'</span><input class="field" type="text" inputmode="decimal" data-sq="'+r+'" value="'+fa(String(Math.round(rkCfgQ(r)*1000)/10).replace('.','٫'))+'" aria-label="سهم '+RK_QS[r].n+'"></label>'}).join('');
-  rkSheet('تنظیمات داده‌ها','<p class="hint">تخمین رتبه به این دو داده بستگی دارد. اعداد پیش‌فرض تقریبی‌اند؛ آمار رسمی همان سال را وارد کنی، نتیجه به واقعیت نزدیک‌تر می‌شود.</p><div class="sec"><div class="sec-h"><b>تعداد داوطلبان هر گروه</b></div>'+gs+'</div><div class="sec"><div class="sec-h"><b>سهم هر منطقه از داوطلبان (درصد)</b></div>'+qs+'</div><button type="button" class="chip" data-k="reset" style="margin-top:16px">بازگشت به مقدارهای پیش‌فرض</button>',function(w,close){
+  var gmv=fa(String(rkCfgGm()).replace('.','٫')),gsv=fa(String(rkCfgGs()).replace('.','٫'));
+  rkSheet('تنظیمات داده‌ها','<p class="hint">تخمین رتبه به این دو داده بستگی دارد. اعداد پیش‌فرض تقریبی‌اند؛ آمار رسمی همان سال را وارد کنی، نتیجه به واقعیت نزدیک‌تر می‌شود.</p><div class="sec"><div class="sec-h"><b>تعداد داوطلبان هر گروه</b></div>'+gs+'</div><div class="sec"><div class="sec-h"><b>سهم هر منطقه از داوطلبان (درصد)</b></div>'+qs+'</div><div class="sec"><div class="sec-h"><b>'+__('معدل داوطلبان (برای تبدیل معدل به تراز)','Candidates\' GPA (to standardise your GPA)')+'</b></div><label class="rk-sf"><span>'+__('میانگین معدل','Mean GPA')+'</span><input class="field" type="text" inputmode="decimal" data-gm="1" value="'+gmv+'" aria-label="'+__('میانگین معدل داوطلبان','Mean GPA of candidates')+'"></label><label class="rk-sf"><span>'+__('انحراف معیار','Standard deviation')+'</span><input class="field" type="text" inputmode="decimal" data-gs="1" value="'+gsv+'" aria-label="'+__('انحراف معیار معدل','GPA standard deviation')+'"></label></div><button type="button" class="chip" data-k="reset" style="margin-top:16px">بازگشت به مقدارهای پیش‌فرض</button>',function(w,close){
     w.addEventListener('input',function(ev){
       var t=ev.target,g=t.dataset&&t.dataset.sn,r=t.dataset&&t.dataset.sq;
+      if(t.dataset&&t.dataset.gm){var m=rkNum(t.value);if(m!==null&&m>=8&&m<=19)D.cfg.gm=m;else delete D.cfg.gm}
+      if(t.dataset&&t.dataset.gs){var d2=rkNum(t.value);if(d2!==null&&d2>=1&&d2<=5)D.cfg.gs=d2;else delete D.cfg.gs}
       if(g){var v=rkNum(t.value,true);if(v!==null&&v>=1000&&v<=3000000)D.cfg.N[g]=v;else delete D.cfg.N[g]}
       if(r){var q=rkNum(t.value);if(q!==null&&q>=1&&q<=90)D.cfg.qs[r]=q/100;else delete D.cfg.qs[r]}
       persist();
@@ -18738,7 +20259,9 @@ async function rkMakeImage(){
   T(rkRange(e.q.o,e.q.p),W-92,370,76,'800','#0a7aff');
   T('رتبه‌ی کشوری: '+rkRange(e.nat.o,e.nat.p),W-92,440,38,'600');
   T('خوش‌بینانه '+rkFmt(rkRound(e.q.o))+'  ·  واقع‌بینانه '+rkFmt(rkRound(e.q.m))+'  ·  بدبینانه '+rkFmt(rkRound(e.q.p)),W-92,500,30,'500','#5b6275');
+  var gq=rkGpa();
   T('درصد وزنی '+rkPctTxt(e.cp.p)+'٪  ·  اطمینان '+rkConfLbl(e.conf)+' ('+fa(e.conf)+'٪)',W-92,552,30,'500','#5b6275');
+  if(e.gp)T('با معدل نهایی: دوازدهم '+(gq.b!==null?fa(String(gq.b).replace('.','٫')):'—')+' · یازدهم '+(gq.a!==null?fa(String(gq.a).replace('.','٫')):'—'),W-92,596,26,'500','#5b6275');
   var y=620;card(y,rows.length*74+150);
   T('درصد دروس و فرصت بهبود',W-92,y+70,36,'700');
   rows.forEach(function(r,i){var yy=y+130+i*74;T(r.n,W-92,yy,32,'600');T(rkPctTxt(r.p)+'٪',160,yy,32,'700',r.p>=e.cp.p?'#22b45b':'#e5322a','left');
@@ -21040,10 +22563,10 @@ var AO_LES=[
   ['زبان تخصصی',['زبان تخصصی']],['زبان عمومی',['زبان عمومی']],
   ['دروس اختصاصی(?: هنر)?|اختصاصی هنر',['دروس اختصاصی هنر']],['هنر عمومی',['هنر عمومی']],
   ['زیست(?: ?شناسی)?',['زیست‌شناسی']],['زمین ?شناسی|زمین',['زمین‌شناسی']],
-  ['علوم و فنون',['علوم و فنون']],['علوم اجتماعی',['علوم اجتماعی']],
+  ['علوم و فنون',['ادبیات فارسی']],['علوم اجتماعی',['علوم اجتماعی']],['روان ?شناسی',['روان‌شناسی']],
   ['تاریخ(?: و جغرافیا)?|جغرافیا',['تاریخ و جغرافیا']],['فلسفه(?: و منطق)?|منطق',['فلسفه و منطق']],['اقتصاد',['اقتصاد']],
   ['ریاضی(?: و آمار)?',['ریاضی','ریاضی و آمار']],['فیزیک',['فیزیک']],['شیمی',['شیمی']],
-  ['ادبیات(?: فارسی)?',['ادبیات']],['عربی',['عربی']],['دین(?:ی)?(?: و زندگی)?',['دین و زندگی']],
+  ['ادبیات(?: فارسی)?',['ادبیات فارسی','ادبیات']],['عربی',['عربی']],['دین(?:ی)?(?: و زندگی)?',['دین و زندگی']],
   ['زبان(?: انگلیسی)?|انگلیسی',['زبان انگلیسی','زبان عمومی']]
 ];
 var AO_LES_S='(?<![آ-ی])('+AO_LES.map(function(z){return '(?:'+z[0]+')'}).join('|')+')(?![آ-ی])';

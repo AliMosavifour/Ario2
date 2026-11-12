@@ -1378,3 +1378,232 @@ begin
   return json_build_object('ok', true);
 end $$;
 notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v367: voice chat — messages inside the voice chat, and a host.
+--   * messages: everybody in the voice chat can write; they live only as long as the voice chat (deleted when it ends / the last person leaves)
+--   * host: the person who STARTED the voice chat. Only the host can remove someone, close someone's microphone, and end the voice chat for everybody.
+--   voice_hosts = who started the voice chat (kept while it is running)
+--   voice_kicks = people the host removed (they cannot come back while it is running)
+--   voice_msgs  = the messages of the voice chat
+-- Older apps keep working (they ignore the new fields). Run this block once (it is safe to run again; it needs the v343 and v344 blocks first).
+-- =====================================================================
+alter table public.voice_rooms add column if not exists forced boolean not null default false;   -- the host closed this person's microphone
+create table if not exists public.voice_hosts (
+  link_id    uuid primary key,
+  host_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.voice_kicks (
+  link_id   uuid not null,
+  user_id   uuid not null references auth.users(id) on delete cascade,
+  kicked_at timestamptz not null default now(),
+  primary key (link_id, user_id)
+);
+create table if not exists public.voice_msgs (
+  id         bigint generated always as identity primary key,
+  link_id    uuid not null,
+  from_user  uuid not null references auth.users(id) on delete cascade,
+  body       text not null check (char_length(body) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+create index if not exists voice_msgs_idx on public.voice_msgs (link_id, id);
+alter table public.voice_hosts enable row level security;
+alter table public.voice_kicks enable row level security;
+alter table public.voice_msgs  enable row level security;
+revoke all on public.voice_hosts, public.voice_kicks, public.voice_msgs from anon, authenticated;
+
+-- nobody is in the voice chat any more: everything that belonged to it goes (title, host, removed people, messages)
+create or replace function public.voice_clean(p_link uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.voice_rooms   where link_id = p_link and beat < now() - interval '15 seconds';
+  delete from public.voice_signals where created_at < now() - interval '90 seconds';
+  if not exists (select 1 from public.voice_rooms where link_id = p_link) then
+    delete from public.voice_titles where link_id = p_link;
+    delete from public.voice_hosts  where link_id = p_link;
+    delete from public.voice_kicks  where link_id = p_link;
+    delete from public.voice_msgs   where link_id = p_link;
+  end if;
+end $$;
+
+drop function if exists public.voice_sync(uuid, boolean, boolean, jsonb);
+create or replace function public.voice_sync(p_link uuid, p_join boolean default false, p_muted boolean default false, p_out jsonb default '[]'::jsonb, p_msg text default null, p_since bigint default 0)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); o jsonb; tgt uuid; k text; n int; pe json; sg json; ti text; en boolean; ho uuid; ms json; m text := left(btrim(coalesce(p_msg, '')), 500); kk boolean;
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  perform public.voice_clean(p_link);
+  if p_join then
+    select count(*) into n from public.voice_rooms where link_id = p_link and user_id <> me;
+    if n >= 7 then return json_build_object('ok', false, 'err', 'full'); end if;
+    if n > 0 and exists (select 1 from public.voice_kicks x where x.link_id = p_link and x.user_id = me) then return json_build_object('ok', false, 'err', 'kicked'); end if;
+    if n = 0 then
+      delete from public.voice_ends  where link_id = p_link;   -- a fresh voice chat starts, and I am its host
+      delete from public.voice_kicks where link_id = p_link;
+      delete from public.voice_msgs  where link_id = p_link;
+      insert into public.voice_hosts (link_id, host_id) values (p_link, me) on conflict (link_id) do update set host_id = excluded.host_id, created_at = now();
+    end if;
+    insert into public.voice_rooms (link_id, user_id, joined_at, beat, muted) values (p_link, me, now(), now(), coalesce(p_muted, false))
+      on conflict (link_id, user_id) do update set beat = now(), muted = coalesce(p_muted, false) or public.voice_rooms.forced;
+  else
+    update public.voice_rooms set beat = now(), muted = (coalesce(p_muted, false) or forced) where link_id = p_link and user_id = me;
+    if not found then
+      select exists (select 1 from public.voice_ends e where e.link_id = p_link and e.ended_at > now() - interval '60 seconds') into en;
+      select exists (select 1 from public.voice_kicks x where x.link_id = p_link and x.user_id = me) into kk;
+      return json_build_object('ok', true, 'dropped', true, 'ended', coalesce(en, false), 'kicked', coalesce(kk, false));
+    end if;
+  end if;
+  if m <> '' then
+    insert into public.voice_msgs (link_id, from_user, body) values (p_link, me, m);
+    delete from public.voice_msgs where link_id = p_link and id <= coalesce((select id from public.voice_msgs where link_id = p_link order by id desc offset 300 limit 1), 0);
+  end if;
+  if jsonb_typeof(p_out) = 'array' then
+    for o in select * from jsonb_array_elements(p_out) limit 60 loop
+      begin tgt := (o->>'to')::uuid; exception when others then tgt := null; end;
+      k := o->>'kind';
+      if tgt is not null and tgt <> me and k in ('offer','answer','ice') and char_length(coalesce(o->>'payload','')) between 1 and 16000
+         and exists (select 1 from public.voice_rooms r where r.link_id = p_link and r.user_id = tgt) then
+        insert into public.voice_signals (link_id, from_user, to_user, kind, payload) values (p_link, me, tgt, k, o->>'payload');
+      end if;
+    end loop;
+  end if;
+  select coalesce(json_agg(json_build_object('user_id', r.user_id, 'muted', r.muted, 'forced', r.forced) order by r.joined_at), '[]'::json) into pe
+    from public.voice_rooms r where r.link_id = p_link;
+  with d as (delete from public.voice_signals s where s.to_user = me and s.link_id = p_link returning s.id, s.from_user, s.kind, s.payload)
+    select coalesce(json_agg(json_build_object('from', d.from_user, 'kind', d.kind, 'payload', d.payload) order by d.id), '[]'::json) into sg from d;
+  select t.title into ti from public.voice_titles t where t.link_id = p_link;
+  select h.host_id into ho from public.voice_hosts h where h.link_id = p_link;
+  select coalesce(json_agg(json_build_object('id', x.id, 'from', x.from_user, 'body', x.body, 'at', x.created_at) order by x.id), '[]'::json) into ms
+    from (select * from public.voice_msgs v where v.link_id = p_link and v.id > coalesce(p_since, 0) order by v.id limit 100) x;
+  return json_build_object('ok', true, 'peers', pe, 'signals', sg, 'title', ti, 'host', ho, 'msgs', ms);
+end $$;
+
+-- leaving: when I was the last one, the messages (and the rest) go with the voice chat
+create or replace function public.voice_leave(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  delete from public.voice_rooms   where link_id = p_link and user_id = me;
+  delete from public.voice_signals where link_id = p_link and (from_user = me or to_user = me);
+  perform public.voice_clean(p_link);
+  return json_build_object('ok', true);
+end $$;
+
+-- the host removes someone from the voice chat (they cannot join again until it ends)
+create or replace function public.voice_kick(p_link uuid, p_user uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  if not exists (select 1 from public.voice_hosts h where h.link_id = p_link and h.host_id = me) then return json_build_object('ok', false, 'err', 'host'); end if;
+  if p_user is null or p_user = me then return json_build_object('ok', false, 'err', 'self'); end if;
+  insert into public.voice_kicks (link_id, user_id) values (p_link, p_user) on conflict (link_id, user_id) do update set kicked_at = now();
+  delete from public.voice_rooms   where link_id = p_link and user_id = p_user;
+  delete from public.voice_signals where link_id = p_link and (from_user = p_user or to_user = p_user);
+  return json_build_object('ok', true);
+end $$;
+
+-- the host closes (or opens again) someone's microphone; the person can open it again themselves only after the host allows it
+create or replace function public.voice_force_mute(p_link uuid, p_user uuid, p_on boolean)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  if not exists (select 1 from public.voice_hosts h where h.link_id = p_link and h.host_id = me) then return json_build_object('ok', false, 'err', 'host'); end if;
+  if p_user is null or p_user = me then return json_build_object('ok', false, 'err', 'self'); end if;
+  update public.voice_rooms set forced = coalesce(p_on, true), muted = (muted or coalesce(p_on, true)) where link_id = p_link and user_id = p_user;
+  return json_build_object('ok', true);
+end $$;
+
+-- end the voice chat for everybody: only the host (the person who started it). A voice chat started before v367 keeps the old rule.
+create or replace function public.voice_end(p_link uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); ho uuid;
+begin
+  if me is null then return json_build_object('ok', false, 'err', 'auth'); end if;
+  if p_link is null or not public.chat_member(p_link::text) then return json_build_object('ok', false, 'err', 'member'); end if;
+  select h.host_id into ho from public.voice_hosts h where h.link_id = p_link;
+  if ho is not null then
+    if ho <> me then return json_build_object('ok', false, 'err', 'owner'); end if;
+  elsif exists (select 1 from public.chat_groups g where g.id = p_link and g.owner_id <> me) then return json_build_object('ok', false, 'err', 'owner'); end if;
+  insert into public.voice_ends (link_id, by_user) values (p_link, me)
+    on conflict (link_id) do update set by_user = excluded.by_user, ended_at = now();
+  delete from public.voice_rooms   where link_id = p_link;
+  delete from public.voice_signals where link_id = p_link;
+  delete from public.voice_titles  where link_id = p_link;
+  delete from public.voice_hosts   where link_id = p_link;
+  delete from public.voice_msgs    where link_id = p_link;
+  return json_build_object('ok', true);
+end $$;
+
+revoke all on function public.voice_clean(uuid), public.voice_sync(uuid, boolean, boolean, jsonb, text, bigint), public.voice_leave(uuid), public.voice_kick(uuid, uuid), public.voice_force_mute(uuid, uuid, boolean), public.voice_end(uuid) from public, anon;
+grant execute on function public.voice_sync(uuid, boolean, boolean, jsonb, text, bigint), public.voice_leave(uuid), public.voice_kick(uuid, uuid), public.voice_force_mute(uuid, uuid, boolean), public.voice_end(uuid) to authenticated;
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- v368: liking a story no longer sends a heart message. The like is kept on the viewer's row and the owner
+-- sees a heart in front of the name in the viewers list. Run this block once (it is safe to run again).
+-- =====================================================================
+alter table public.friend_story_views add column if not exists liked boolean not null default false;
+
+create or replace function public.story_like(p_story uuid, p_on boolean default true)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.friend_story_views (story_id, viewer_id, liked)
+  select s.id, auth.uid(), coalesce(p_on, true) from public.friend_stories s
+   where s.id = p_story and s.user_id <> auth.uid() and s.expires_at > now() and public.friend_of(s.user_id)
+  on conflict (story_id, viewer_id) do update set liked = excluded.liked;
+end $$;
+revoke all on function public.story_like(uuid, boolean) from public, anon;
+grant execute on function public.story_like(uuid, boolean) to authenticated;
+notify pgrst, 'reload schema';
+
+
+-- =====================================================================
+-- v381: votes of the Ario Channel polls are shared, so every option can show its percent.
+-- One row per person and post. Run this block once (it is safe to run again).
+-- =====================================================================
+create table if not exists public.channel_poll_votes (
+  post_id  text not null check (char_length(post_id) between 3 and 60),
+  user_id  uuid not null default auth.uid(),
+  opt      int  not null check (opt between 0 and 9),
+  voted_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+alter table public.channel_poll_votes enable row level security;
+revoke all on public.channel_poll_votes from anon, authenticated;
+
+create or replace function public.chan_poll_vote(p_post text, p_opt int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or p_opt is null or p_opt < 0 or p_opt > 9 or p_post is null or char_length(p_post) < 3 then
+    return jsonb_build_object('ok', false);
+  end if;
+  insert into public.channel_poll_votes (post_id, user_id, opt) values (p_post, auth.uid(), p_opt)
+  on conflict (post_id, user_id) do update set opt = excluded.opt, voted_at = now();
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- {counts: {post: [votes of option 0, 1, ...]}, mine: {post: my option}}
+create or replace function public.chan_poll_counts()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'counts', coalesce((select jsonb_object_agg(post_id, arr) from (
+        select post_id, jsonb_agg(n order by o) arr from (
+          select p.post_id, g.o, count(v.user_id)::int n
+            from (select distinct post_id from public.channel_poll_votes) p
+            cross join generate_series(0, 9) g(o)
+            left join public.channel_poll_votes v on v.post_id = p.post_id and v.opt = g.o
+           group by p.post_id, g.o) c
+         group by post_id) t), '{}'::jsonb),
+    'mine', coalesce((select jsonb_object_agg(post_id, opt) from public.channel_poll_votes where user_id = auth.uid()), '{}'::jsonb));
+$$;
+revoke all on function public.chan_poll_vote(text, int), public.chan_poll_counts() from public, anon;
+grant execute on function public.chan_poll_vote(text, int), public.chan_poll_counts() to authenticated;
+notify pgrst, 'reload schema';

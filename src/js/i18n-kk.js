@@ -334,6 +334,7 @@ var __EK={
 "رنگ خانه":"Cell color",
 "رنگ را برای ساعت همه‌ی خانه‌های این پارت هم بگذار":"Apply the color to the time of every cell in this part too",
 "رنگ ساعت":"Time color",
+"ادبیات فارسی":"Persian Literature",
 "روان‌شناسی":"Psychology",
 "روز":"Day",
 "روز بعد":"Next day",

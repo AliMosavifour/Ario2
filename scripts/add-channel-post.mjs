@@ -10,6 +10,8 @@
 // EVERY post must have a picture of the feature (--img) AND a poll (--poll-q + --poll with 2 to 6 options split by |).
 // The poll must be about THE TOPIC OF THAT POST's feature (not a generic question).
 // The picture is copied to www/img/chn-<id>.<ext>. Use \n in --text for a line break.
+// STICKERS IN THE TEXT: write [[st:ch-<name>]] inside --text (and --en-text) to put a moving sticker inside the sentence. They only work in channel post text
+// (never alone, never in chats): ch-dancecat ch-pinkgirl ch-cool ch-kittens ch-beard ch-rat ch-shock ch-stare ch-blackcat.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
